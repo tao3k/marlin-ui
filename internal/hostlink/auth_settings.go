@@ -27,6 +27,7 @@ type AuthSettingsConfig struct {
 	Config          appconfig.Config
 	Prefs           appconfig.UserPrefs
 	UseMemoryVault  bool // set true in headless unit tests to avoid touching host OS Keychain
+	CopyText        func(text string)
 	OnApplyFeatures func(spec string)
 	OnSavePrefs     func(vals map[string]any)
 	Invalidate      func()
@@ -85,6 +86,30 @@ func AttachAuthAndSettings(
 	authCtrl.VaultInfo = vaultInfo
 	if osVault, ok := vault.(*auth.OSProtectedVault); ok {
 		authCtrl.Vault = osVault
+	}
+	authCtrl.OnCopyText = cfg.CopyText
+	authCtrl.OnStartOAuth = func(providerID auth.ProviderID) error {
+		go func() {
+			octx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			if prof, err := mgr.RunLoopbackOAuth(octx, providerID); err == nil && adaptive.Desktop != nil && adaptive.Desktop.Notifications != nil {
+				_, _ = adaptive.Desktop.Notifications.Center.Publish(notify.NotificationSpec{
+					Severity: notify.SeverityInfo,
+					Source:   notify.SourceHost,
+					Title:    "Signed In",
+					Message:  fmt.Sprintf("Authenticated as %s (%s)", prof.DisplayName, prof.Email),
+				})
+			}
+			invalidate()
+		}()
+		return nil
+	}
+	authCtrl.OnRefresh = func(accountID auth.AccountID) error {
+		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		_, err := mgr.ValidAccessToken(rctx, accountID)
+		invalidate()
+		return err
 	}
 	authCtrl.OnConfigureOIDC = func(issuerURL, clientID string) error {
 		dctx, cancel := context.WithTimeout(ctx, 10*time.Second)

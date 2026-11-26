@@ -105,6 +105,9 @@ func main() {
 		FormFactor:     mygoshell.FormFactorDesktop,
 	})
 	adaptive.Desktop.SidebarCollapsed = prefs.SidebarCollapsed
+	if prefs.Perspective != "" && adaptive.Desktop.OnSelectPerspective != nil {
+		adaptive.Desktop.OnSelectPerspective(prefs.Perspective)
+	}
 	adaptive.Desktop.ActiveSessionID = cfg.SessionID
 	adaptive.Desktop.Sessions = []mygoshell.SessionSummaryView{
 		{SessionID: cfg.SessionID, Title: "Primary Workspace", TurnCount: 0},
@@ -188,8 +191,9 @@ func main() {
 		// accounts supply fresh OAuth Bearer headers automatically.
 		var applyFeatures func(string)
 		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
-			Config: cfg,
-			Prefs:  prefs,
+			Config:   cfg,
+			Prefs:    prefs,
+			CopyText: mygo.Clipboard.WriteText,
 			OnApplyFeatures: func(spec string) {
 				if applyFeatures != nil {
 					applyFeatures(spec)
@@ -212,6 +216,7 @@ func main() {
 			desktopTargetKind(),
 			invalidate,
 			hostlink.WithDesktopMyGoAdapters(),
+			hostlink.WithClipboardWriter(mygo.Clipboard.WriteText),
 			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
 			hostlink.WithSavedRemotes(prefs.SavedRemotes),
 			hostlink.WithOnSessionChanged(func(_ string) { savePrefs() }),
@@ -224,6 +229,16 @@ func main() {
 		)
 		if connErr != nil {
 			log.Fatalf("marlin-desktop host connection failed: %v", connErr)
+		}
+		if prevPersp := adaptive.Desktop.OnSelectPerspective; prevPersp != nil {
+			adaptive.Desktop.OnSelectPerspective = func(name string) {
+				prevPersp(name)
+				prefsMu.Lock()
+				prefs.Perspective = name
+				prefsMu.Unlock()
+				savePrefs()
+				invalidate()
+			}
 		}
 		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
 		applyFeatures = func(spec string) {

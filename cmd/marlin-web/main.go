@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"strings"
 
@@ -59,19 +60,49 @@ func main() {
 		BackendName: "Web Session Memory Vault",
 		CipherSuite: "AES-256-GCM",
 	}
+	webAuth.OnCopyText = continuity.copyText
 	webAuth.OnChanged = invalidate
 	adaptive.SetAuth(webAuth)
+	adaptive.Desktop.Transcript.OnCopyCode = continuity.copyText
+	if adaptive.Desktop.Projection != nil {
+		adaptive.Desktop.Projection.OnCopyText = continuity.copyText
+	}
+
+	var webPrefs appconfig.UserPrefs
+	if raw := continuity.loadPrefsJSON(); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &webPrefs)
+	}
+	if webPrefs.ThemeID != "" {
+		adaptive.ApplyThemePreset(webPrefs.ThemeID)
+	}
+	adaptive.Desktop.SidebarCollapsed = webPrefs.SidebarCollapsed
+	if webPrefs.FeaturesSpec != "" {
+		reg.Activate(features.ParseFeatureSpec(webPrefs.FeaturesSpec), ledger, host)
+		adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+	}
 
 	spec := appconfig.SettingsSchema()
+	initTheme := webPrefs.ThemeID
+	if initTheme == "" {
+		initTheme = "midnight"
+	}
+	initFeat := webPrefs.FeaturesSpec
+	if initFeat == "" {
+		initFeat = "all"
+	}
 	formState := mygoshell.NewSchemaFormState(spec, map[string]any{
-		"theme_id":          "midnight",
-		"features_spec":     "all",
+		"theme_id":          initTheme,
+		"features_spec":     initFeat,
 		"default_session":   "marlin-web-main",
-		"remote_host":       "",
+		"remote_host":       webPrefs.DefaultRemoteHost,
 		"real_session":      true,
-		"sidebar_collapsed": false,
+		"sidebar_collapsed": webPrefs.SidebarCollapsed,
 	})
 	adaptive.SetSettings(&spec, formState, func(vals map[string]any) {
+		appconfig.ApplySettingsValues(&webPrefs, vals)
+		if data, err := json.Marshal(webPrefs); err == nil {
+			continuity.savePrefsJSON(string(data))
+		}
 		if themeID, ok := vals["theme_id"].(string); ok && strings.TrimSpace(themeID) != "" {
 			adaptive.ApplyThemePreset(strings.TrimSpace(themeID))
 		}

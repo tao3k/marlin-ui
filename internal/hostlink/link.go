@@ -86,8 +86,17 @@ type connectOptions struct {
 	enableDesktopMyGoAdapters bool
 	authTokenSource           func(context.Context) (string, error)
 	savedRemotes              []appconfig.SavedRemote
+	clipboardWriter           func(string)
 	onRemoteAdded             func(appconfig.SavedRemote)
 	onSessionChanged          func(sessionID string)
+}
+
+// WithClipboardWriter registers the platform clipboard copy handler used by
+// code blocks, Projection Inspector excerpts, and Auth sign-in URLs.
+func WithClipboardWriter(fn func(string)) ConnectOption {
+	return func(o *connectOptions) {
+		o.clipboardWriter = fn
+	}
 }
 
 // WithDesktopMyGoAdapters registers MyGo's native OS clipboard and desktop
@@ -601,6 +610,7 @@ func Connect(
 		}
 	}
 	wireSessionAndHelm(linkCtx, cfg, adaptive, targets, federation, switcher, sr, markDirty)
+	wireInteractiveActions(linkCtx, adaptive, targets, federation, copts.clipboardWriter, markDirty)
 
 	// 5. Start ContinuityCoordinator for exponential-backoff reconnect & idempotent outbox draining.
 	if transcript != nil && transcript.Resilience != nil {

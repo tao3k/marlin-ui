@@ -19,12 +19,16 @@ import (
 
 const (
 	webStorageKey = "marlin.ui.recovery.v1"
+	webPrefsKey   = "marlin.ui.prefs.v1"
 	webChatScope  = "chat:marlin-web-main"
 )
 
 type webContinuity struct {
 	saveNow        func()
 	onDraftChanged func(scopeID, text string)
+	copyText       func(text string)
+	loadPrefsJSON  func() string
+	savePrefsJSON  func(raw string)
 	attachWindow   func(win *mygo.Window)
 }
 
@@ -85,6 +89,26 @@ func initWebContinuity(adaptive *mygoshell.AdaptiveShell) *webContinuity {
 	return &webContinuity{
 		saveNow:        saveNow,
 		onDraftChanged: onDraftChanged,
+		copyText: func(text string) {
+			if nav := js.Global().Get("navigator"); nav.Truthy() {
+				if clip := nav.Get("clipboard"); clip.Truthy() && clip.Get("writeText").Truthy() {
+					clip.Call("writeText", text)
+				}
+			}
+		},
+		loadPrefsJSON: func() string {
+			if ls := js.Global().Get("localStorage"); ls.Truthy() {
+				if raw := ls.Call("getItem", webPrefsKey); raw.Type() == js.TypeString {
+					return raw.String()
+				}
+			}
+			return ""
+		},
+		savePrefsJSON: func(raw string) {
+			if ls := js.Global().Get("localStorage"); ls.Truthy() {
+				ls.Call("setItem", webPrefsKey, raw)
+			}
+		},
 		attachWindow: func(w *mygo.Window) {
 			winRef = w
 			winJS := js.Global().Get("window")
@@ -116,6 +140,14 @@ func initWebContinuity(adaptive *mygoshell.AdaptiveShell) *webContinuity {
 					return nil
 				}
 				switch strings.ToLower(ev.Get("key").String()) {
+				case ",":
+					ev.Call("preventDefault")
+					adaptive.Desktop.OpenSettings()
+					invalidate()
+				case "b":
+					ev.Call("preventDefault")
+					adaptive.Desktop.ToggleSidebar()
+					invalidate()
 				case "k":
 					ev.Call("preventDefault")
 					adaptive.Desktop.OpenCommandPalette()

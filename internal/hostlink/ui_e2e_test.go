@@ -16,7 +16,9 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/control/auth"
+	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/engine/features"
+	"github.com/tao3k/marlin-mygo/engine/search"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
@@ -254,5 +256,110 @@ func TestFullStackMobileIOSAndAndroidUIE2E(t *testing.T) {
 				t.Fatalf("expected mobile Settings modal open on %s, got %q", tc.name, strings.Join(tt.Texts(), " | "))
 			}
 		})
+	}
+}
+
+func TestInteractiveActions_HelmDispatchSlashMentionsProjectionAndRetryFork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cfg := appconfig.Config{
+		SessionID:    "session-alpha",
+		ThemeID:      "midnight",
+		FeaturesSpec: "all",
+		RecoveryFile: filepath.Join(t.TempDir(), "actions-recovery.json"),
+		Standalone:   true,
+	}
+	as := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle:     "Marlin",
+		InitialThemeID: cfg.ThemeID,
+		FormFactor:     mygoshell.FormFactorDesktop,
+	})
+	var copied []string
+	hostlink.AttachAuthAndSettings(ctx, as, hostlink.AuthSettingsConfig{
+		Config:         cfg,
+		UseMemoryVault: true,
+		CopyText:       func(s string) { copied = append(copied, s) },
+	})
+	link, err := hostlink.Connect(
+		ctx,
+		cfg,
+		as,
+		schema.TargetDesktopMacOS,
+		nil,
+		hostlink.WithClipboardWriter(func(s string) { copied = append(copied, s) }),
+		hostlink.WithSavedRemotes([]appconfig.SavedRemote{
+			{ID: "edge-gpu", DisplayName: "Edge GPU", Endpoint: "127.0.0.1:59992"},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer link.Close()
+
+	// 1. Slash commands (/new, /settings, /federation).
+	as.Desktop.Transcript.OnSlashCommand(composer.SlashCommand{Name: "/new"})
+	secondSess := as.Desktop.ActiveSessionID
+	if secondSess == "" || secondSess == "session-alpha" {
+		t.Fatalf("expected /new to create and select a fresh session, got %q", secondSess)
+	}
+	as.Desktop.Transcript.OnSlashCommand(composer.SlashCommand{Name: "/settings"})
+	if !as.Desktop.IsSettingsOpen() {
+		t.Fatalf("expected /settings to open unified Settings modal")
+	}
+
+	// 2. Helm action dispatch switches active session and active federation target.
+	as.Desktop.HelmSearch.OnExecuteAction(search.ActionExecuteCommand, []search.Candidate{
+		{ID: "session:session-alpha", PayloadKind: "command", PayloadTarget: "session:session-alpha"},
+	})
+	if as.Desktop.ActiveSessionID != "session-alpha" {
+		t.Fatalf("expected Helm session action to switch back to session-alpha, got %q", as.Desktop.ActiveSessionID)
+	}
+	as.Desktop.HelmSearch.OnExecuteAction(search.ActionExecuteCommand, []search.Candidate{
+		{ID: "target:edge-gpu", PayloadKind: "command", PayloadTarget: "target:edge-gpu"},
+	})
+	if link.Switcher.ActiveID() != "edge-gpu" {
+		t.Fatalf("expected Helm target action to switch active target to edge-gpu, got %q", link.Switcher.ActiveID())
+	}
+
+	// 3. @ Mentions & Projection Inspector -> Composer bridge + Clipboard copy.
+	mentions := as.Desktop.Transcript.OnQueryMentions("session-alpha")
+	if len(mentions) == 0 {
+		t.Fatalf("expected @ mention candidates for active session")
+	}
+	as.Desktop.Projection.OnMentionFile("internal/hostlink/link.go")
+	if !strings.Contains(as.Desktop.Transcript.ComposerText(), "@file:internal/hostlink/link.go") {
+		t.Fatalf("expected MentionFile to append @file mention, got %q", as.Desktop.Transcript.ComposerText())
+	}
+	as.Desktop.Projection.OnAttachDiff(mygoshell.WorkspaceDiffFileView{
+		Path: "README.org", Status: "modified", Additions: 5, Deletions: 1, HunkLines: []string{"+Release docs"},
+	})
+	as.Desktop.Projection.OnAttachProcessLogs(mygoshell.ManagedProcessView{
+		ProcessID: "proc-1", Command: "marlin-app-server", State: "running", TailLines: []string{"ready"},
+	})
+	as.Desktop.Transcript.OnCopyCode("fmt.Println(\"marlin\")")
+	if len(copied) == 0 || copied[len(copied)-1] != "fmt.Println(\"marlin\")" {
+		t.Fatalf("expected clipboard copy recorded, got %v", copied)
+	}
+
+	// 4. Transcript search (Cmd+F), Retry, Fork, and Mobile QuickCapture.
+	as.Desktop.OnSendPrompt("Benchmark Marlin Helm 120Hz throughput")
+	hits := as.Desktop.Transcript.OnSearchSession("120Hz")
+	if len(hits) == 0 {
+		t.Fatalf("expected OnSearchSession to find matching transcript row")
+	}
+	beforeRetry := as.Desktop.Transcript.Len()
+	as.Desktop.Transcript.OnRetryTurn(1)
+	if as.Desktop.Transcript.Len() <= beforeRetry {
+		t.Fatalf("expected OnRetryTurn to re-submit prompt")
+	}
+	as.Desktop.Transcript.OnForkTurn(1)
+	if as.Desktop.ActiveSessionID == "session-alpha" {
+		t.Fatalf("expected OnForkTurn to open a forked session")
+	}
+	beforeCap := as.Desktop.Transcript.Len()
+	as.Mobile.OnQuickCapture("ios.share-extension", "Capture from phone")
+	if as.Desktop.Transcript.Len() <= beforeCap {
+		t.Fatalf("expected Mobile OnQuickCapture to append turn into active session")
 	}
 }

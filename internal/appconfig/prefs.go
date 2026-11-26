@@ -25,6 +25,7 @@ type UserPrefs struct {
 	ThemeID           string        `json:"theme_id,omitempty"`
 	FeaturesSpec      string        `json:"features_spec,omitempty"`
 	SidebarCollapsed  bool          `json:"sidebar_collapsed,omitempty"`
+	Perspective       string        `json:"perspective,omitempty"`
 	LastSessionID     string        `json:"last_session_id,omitempty"`
 	DefaultRemoteHost string        `json:"default_remote_host,omitempty"`
 	RealSession       *bool         `json:"real_session,omitempty"`
