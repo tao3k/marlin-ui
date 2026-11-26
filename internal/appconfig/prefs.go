@@ -19,17 +19,32 @@ type SavedRemote struct {
 	Endpoint    string `json:"endpoint"`
 }
 
+// SavedWorkspace persists one isolated Doom persp-mode workspace layout
+// (buffers, project root, active split mode and ratio) across launches.
+type SavedWorkspace struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	ProjectRoot     string   `json:"project_root,omitempty"`
+	ActiveBuffer    string   `json:"active_buffer,omitempty"`
+	SplitMode       string   `json:"split_mode,omitempty"`
+	SecondaryBuffer string   `json:"secondary_buffer,omitempty"`
+	SplitRatio      float32  `json:"split_ratio,omitempty"`
+	Buffers         []string `json:"buffers,omitempty"`
+}
+
 // UserPrefs stores non-secret local UI preferences persisted atomically across
 // Desktop and Mobile launches.
 type UserPrefs struct {
-	ThemeID           string        `json:"theme_id,omitempty"`
-	FeaturesSpec      string        `json:"features_spec,omitempty"`
-	SidebarCollapsed  bool          `json:"sidebar_collapsed,omitempty"`
-	Perspective       string        `json:"perspective,omitempty"`
-	LastSessionID     string        `json:"last_session_id,omitempty"`
-	DefaultRemoteHost string        `json:"default_remote_host,omitempty"`
-	RealSession       *bool         `json:"real_session,omitempty"`
-	SavedRemotes      []SavedRemote `json:"saved_remotes,omitempty"`
+	ThemeID           string           `json:"theme_id,omitempty"`
+	FeaturesSpec      string           `json:"features_spec,omitempty"`
+	SidebarCollapsed  bool             `json:"sidebar_collapsed,omitempty"`
+	Perspective       string           `json:"perspective,omitempty"`
+	LastSessionID     string           `json:"last_session_id,omitempty"`
+	DefaultRemoteHost string           `json:"default_remote_host,omitempty"`
+	RealSession       *bool            `json:"real_session,omitempty"`
+	SavedRemotes      []SavedRemote    `json:"saved_remotes,omitempty"`
+	ActiveWorkspaceID string           `json:"active_workspace_id,omitempty"`
+	Workspaces        []SavedWorkspace `json:"workspaces,omitempty"`
 }
 
 // LoadPrefs reads persisted UI preferences if present. Missing files return a
@@ -116,4 +131,22 @@ func (p *UserPrefs) UpsertRemote(r SavedRemote) {
 		}
 	}
 	p.SavedRemotes = append(p.SavedRemotes, r)
+}
+
+// ReadPreviewSnippet reads up to 16KB of a local file for the pure-UI *Preview*
+// buffer while keeping internal/emacs/* 100% free of direct OS/filesystem I/O.
+func ReadPreviewSnippet(path string) (string, bool) {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		return "", false
+	}
+	const maxPreviewBytes = 16 * 1024
+	if len(data) > maxPreviewBytes {
+		data = data[:maxPreviewBytes]
+	}
+	return string(data), true
 }

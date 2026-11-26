@@ -37,6 +37,7 @@ const (
 	Help         ID = "*Help*"
 	Settings     ID = "*Settings*"
 	Packages     ID = "*Packages*"
+	Preview      ID = "*Preview*"
 )
 
 // Descriptor describes a registered built-in Emacs buffer for switch-buffer completion.
@@ -57,6 +58,7 @@ func Catalog() []Descriptor {
 		{ID: Packages, Description: "Official Marketplace package manager (themes, plugins, layouts)"},
 		{ID: Messages, Description: "UI diagnostics log"},
 		{ID: Help, Description: "Meow & Doom keyboard shortcuts"},
+		{ID: Preview, Description: "Read-only source file preview popup"},
 		{ID: Settings, Description: "Customize appearance, remotes, account, features"},
 	}
 }
@@ -92,6 +94,7 @@ type Context struct {
 	ModelCfg       appconfig.ModelConfig
 	ActiveModel    string
 	ActiveArtifact *ArtifactSelection
+	FilePreview    *FilePreviewState
 	ComposerDraft  *string
 	TableCursor    int
 	MessagesLog     []string
@@ -133,6 +136,9 @@ type Context struct {
 	OnCloseArtifact    func()
 	OnSubmitPrompt     func(text string)
 	OnSelectModel      func(alias, displayLabel string)
+	OnToggleDeepThink  func()
+	OnCiteInComposer   func(ref string)
+	OnOpenFilePreview  func(title, path, snippet string, line int)
 }
 
 // Render dispatches rendering to the active buffer's major mode.
@@ -154,6 +160,8 @@ func Render(c *ui.Context, id ID, th theme.Theme, bc *Context) {
 		renderMessages(c, th, bc)
 	case Help:
 		renderHelp(c, th)
+	case Preview:
+		renderFilePreview(c, th, bc)
 	case Settings:
 		renderCustomize(c, th, bc)
 	default:

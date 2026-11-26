@@ -377,6 +377,38 @@ action = "cmd:win-other"
 
 [[heads]]
 prefix = "SPC w"
+key = "x"
+label = "Swap split panes"
+column = "Splits"
+exit = "false"
+action = "cmd:win-swap"
+
+[[heads]]
+prefix = "SPC w"
+key = "l"
+label = "Widen primary pane"
+column = "Splits"
+exit = "false"
+action = "cmd:win-widen"
+
+[[heads]]
+prefix = "SPC w"
+key = "h"
+label = "Narrow primary pane"
+column = "Splits"
+exit = "false"
+action = "cmd:win-narrow"
+
+[[heads]]
+prefix = "SPC w"
+key = "e"
+label = "Balance panes (50/50)"
+column = "Splits"
+exit = "true"
+action = "cmd:win-balance"
+
+[[heads]]
+prefix = "SPC w"
 key = "d"
 label = "Close focused split pane"
 column = "Splits"
@@ -423,10 +455,10 @@ title = "+workspaces (persp-mode)"
 [[heads]]
 prefix = "SPC l"
 key = "c"
-label = "Create isolated workspace"
+label = "Create named workspace (Minibuffer)"
 column = "Manage"
 exit = "true"
-action = "cmd:ws-new"
+action = "cmd:ws-create-prompt"
 
 [[heads]]
 prefix = "SPC l"

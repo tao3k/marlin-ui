@@ -25,7 +25,9 @@ type SplitProps struct {
 	Mode            workspace.SplitMode
 	SecondaryBuffer buffer.ID
 	FocusedPane     int
+	Ratio           float32 // primary pane ratio in [0.25, 0.75], default 0.50
 	OnFocusPane     func(pane int)
+	OnSwapPanes     func()
 	OnCloseSplit    func()
 }
 
@@ -100,10 +102,17 @@ func RenderBody(
 }
 
 func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *buffer.Context, split SplitProps) {
-	renderPane := func(paneIdx int, buf buffer.ID, showDivider bool) {
+	ratio := split.Ratio
+	if ratio < 0.25 || ratio > 0.75 {
+		ratio = 0.50
+	}
+	primaryGrow := float32(int(ratio*100 + 0.5))
+	secondaryGrow := float32(100) - primaryGrow
+
+	renderPane := func(paneIdx int, buf buffer.ID, growWeight float32, showDivider bool) {
 		focused := split.FocusedPane == paneIdx
 		pane := ui.Column(c.Key(fmt.Sprintf("doom-split-pane-%d", paneIdx))).
-			Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
+			Grow(growWeight).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
 		if showDivider {
 			divCol := theme.GlassTone(c, th.BorderSubtle, th, 0.55, 0.72)
 			if split.Mode == workspace.SplitVertical {
@@ -146,6 +155,11 @@ func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *b
 					})
 				}
 				ui.Spacer(c)
+				if paneIdx == 1 && split.OnSwapPanes != nil {
+					if theme.ActionLink(c, "doom-split-swap", "⇄", th.InkMuted, th).Clicked() {
+						split.OnSwapPanes()
+					}
+				}
 				if paneIdx == 1 && split.OnCloseSplit != nil {
 					if theme.ActionLink(c, "doom-split-close", "×", th.InkMuted, th).Clicked() {
 						split.OnCloseSplit()
@@ -161,14 +175,14 @@ func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *b
 
 	if split.Mode == workspace.SplitVertical {
 		ui.Row(c.Key("doom-window-vsplit")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-			renderPane(0, primaryBuf, false)
-			renderPane(1, split.SecondaryBuffer, true)
+			renderPane(0, primaryBuf, primaryGrow, false)
+			renderPane(1, split.SecondaryBuffer, secondaryGrow, true)
 		})
 		return
 	}
 	ui.Column(c.Key("doom-window-hsplit")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-		renderPane(0, primaryBuf, false)
-		renderPane(1, split.SecondaryBuffer, true)
+		renderPane(0, primaryBuf, primaryGrow, false)
+		renderPane(1, split.SecondaryBuffer, secondaryGrow, true)
 	})
 }
 

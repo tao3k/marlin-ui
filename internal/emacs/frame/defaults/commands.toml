@@ -147,6 +147,16 @@ desc = "Cycle focus between active split panes (SPC w w)"
 action = "cmd:win-other"
 
 [[commands]]
+name = "swap-window-panes"
+desc = "Swap primary and secondary split pane buffers (SPC w x)"
+action = "cmd:win-swap"
+
+[[commands]]
+name = "balance-windows"
+desc = "Reset split panes to an equal 50/50 ratio (SPC w e)"
+action = "cmd:win-balance"
+
+[[commands]]
 name = "popup-toggle"
 desc = "Toggle active workspace's Doom popup drawer (SPC w p)"
 action = "cmd:popup-toggle"
@@ -158,8 +168,8 @@ action = "cmd:popup-raise"
 
 [[commands]]
 name = "workspace-new"
-desc = "Create a new isolated persp-mode workspace (SPC l c)"
-action = "cmd:ws-new"
+desc = "Create a new named isolated persp-mode workspace (SPC l c)"
+action = "cmd:ws-create-prompt"
 
 [[commands]]
 name = "workspace-kill"

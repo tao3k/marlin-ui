@@ -123,6 +123,7 @@ type Frame struct {
 	thinkingMu     sync.RWMutex
 	thinkingOpened map[string]bool
 	activeArtifact *buffer.ArtifactSelection
+	filePreview    *buffer.FilePreviewState
 
 	// Deterministic RCU render snapshot + coalesced off-lock reload lane + 120Hz frame pacer.
 	snapStore      *async.SnapshotStore[frameSnapshot]
@@ -207,6 +208,7 @@ func New(cfg Config) *Frame {
 	if cfg.Link != nil {
 		f.logMessage(fmt.Sprintf("hostlink mode=%s endpoint=%s", cfg.Link.Mode, cfg.Link.Endpoint))
 	}
+	f.restoreSavedWorkspaces()
 	f.initPackageStore(cfg.PackageStore)
 	f.initAsyncRuntime()
 	return f
@@ -737,11 +739,15 @@ func (f *Frame) View(c *ui.Context) {
 			f.thinkingMu.Unlock()
 			f.invalidate()
 		},
-		OnOpenArtifact:  f.openArtifactStage,
-		OnCloseArtifact: f.closeArtifactStage,
-		ComposerDraft:   &f.convComposerDraft,
-		OnSubmitPrompt:  f.submitPrompt,
-		OnSelectModel:   f.SelectModel,
+		OnOpenArtifact:    f.openArtifactStage,
+		OnCloseArtifact:   f.closeArtifactStage,
+		FilePreview:       f.currentFilePreview(),
+		ComposerDraft:     &f.convComposerDraft,
+		OnSubmitPrompt:    f.submitPrompt,
+		OnSelectModel:     f.SelectModel,
+		OnToggleDeepThink: f.ToggleDeepThink,
+		OnCiteInComposer:  f.CiteInComposer,
+		OnOpenFilePreview: f.OpenFilePreview,
 	}
 
 	mapCtx := mapper.Context{
@@ -881,6 +887,9 @@ func (f *Frame) View(c *ui.Context) {
 				BufferCandidates:  f.bufferCandidates,
 				ThemeCandidates:   f.themeCandidates,
 				OnSubmitPrompt:    f.submitPrompt,
+				OnCreateWorkspace: f.CreateWorkspaceFromSpec,
+				OnHelmPreview:     f.OpenFilePreview,
+				OnHelmCite:        f.CiteInComposer,
 				OnEnterInsert:     f.EnterInsert,
 				OnExitHydra:       func() { f.meowState.ClearKeypad(); f.requestRefocusFrame(); f.invalidate() },
 				OnResolveGate: func(approve bool) {

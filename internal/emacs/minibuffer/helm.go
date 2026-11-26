@@ -24,7 +24,17 @@ import (
 //            DSL S-exp, @lang:, @doc:, @prefix:, @ext:, @sym:, @graph:, #local, !negate)
 //   - Body:  Left 60% virtualized candidate stream (TAB multi-mark, gold match highlights)
 //            Right 40% Follow-Mode live preview + Embark Action Transformer bar
-func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *mygoshell.HelmMinibufferController, rustConnected bool, onEcho func(string)) {
+func renderHelm(
+	c *ui.Context,
+	s *State,
+	th theme.Theme,
+	query string,
+	helm *mygoshell.HelmMinibufferController,
+	rustConnected bool,
+	onEcho func(string),
+	onPreview func(title, path, snippet string, line int),
+	onCite func(ref string),
+) {
 	if helm == nil || helm.Engine == nil {
 		return
 	}
@@ -189,6 +199,9 @@ func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *myg
 						sub = cand.Location
 					}
 					if theme.VerticoRow(c, "hrow-"+cand.ID, title, sub, highlightQuery, 260, r.Selected, th).Clicked() {
+						if onPreview != nil && (strings.TrimSpace(cand.Location) != "" || strings.TrimSpace(cand.Snippet) != "") {
+							onPreview(cand.Title, cand.Location, cand.Snippet, 0)
+						}
 						dispatchHelmTargets(s, eng, helm, search.ActionOpenInFocused, cand, markedCount, "Opened "+cand.Title, onEcho)
 					}
 				}
@@ -222,9 +235,21 @@ func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *myg
 					// Embark Action Transformer Bar (all backend actions dispatch via Rust gRPC).
 					ui.Row(c.Key("helm-embark-actions")).Gap(6).AlignItems(ui.Center).Children(func() {
 						if theme.ActionButton(c, "embark-open", "Open", th.Info, true, th).Clicked() {
+							if onPreview != nil && (strings.TrimSpace(selCand.Location) != "" || strings.TrimSpace(selCand.Snippet) != "") {
+								onPreview(selCand.Title, selCand.Location, selCand.Snippet, 0)
+							}
 							dispatchHelmTargets(s, eng, helm, search.ActionOpenInFocused, selCand, markedCount, "Opened "+selCand.Title, onEcho)
 						}
 						if theme.ActionButton(c, "embark-attach", "Attach @cite", th.Success, false, th).Clicked() {
+							if onCite != nil {
+								ref := strings.TrimSpace(selCand.Location)
+								if ref == "" {
+									ref = strings.TrimSpace(selCand.Title)
+								}
+								if ref != "" {
+									onCite(ref)
+								}
+							}
 							dispatchHelmTargets(s, eng, helm, search.ActionMentionInComposer, selCand, markedCount, "Attached citation(s)", onEcho)
 						}
 						if theme.ActionButton(c, "embark-dispatch", "Dispatch Agent", th.Accent, false, th).Clicked() {

@@ -28,6 +28,7 @@ const (
 	ModeBufferSwitch
 	ModeThemeSwitch
 	ModeGateReview
+	ModeWorkspaceCreate
 )
 
 // Candidate represents one Vertico completion candidate.

@@ -601,6 +601,24 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.56, 0.84)).
 			BorderWidth(1).BorderColor(theme.GlassTone(c, th.Border, th, 0.50, 0.72)).
 			AlignItems(ui.Stretch).Children(func() {
+			if tr.Composer != nil {
+				if atts := tr.Composer.Snapshot().Attachments; len(atts) > 0 {
+					ui.Row(c.Key("conv-composer-atts")).Gap(6).AlignItems(ui.Center).Children(func() {
+						for _, a := range atts {
+							att := a
+							ui.Row(c.Key("att-chip-"+att.ID)).Padding(2, 8).Gap(6).Radius(theme.RadiusPill).
+								Background(kit.WithAlpha(th.Info, 0.14)).
+								BorderWidth(1).BorderColor(kit.WithAlpha(th.Info, 0.32)).
+								AlignItems(ui.Center).Children(func() {
+								ui.Text(c, att.Name).Font(theme.FontMono).FontSize(11).FontWeight(600).TextColor(th.Info).NoWrap()
+								if theme.ActionLink(c, "att-rm-"+att.ID, "×", th.InkMuted, th).Clicked() {
+									tr.Composer.RemoveAttachment(att.ID)
+								}
+							})
+						}
+					})
+				}
+			}
 			if bc != nil && bc.ComposerDraft != nil {
 				inp := ui.TextInputBase(c.Key("conv-composer-input"), bc.ComposerDraft).
 					Placeholder("Ask Marlin anything… (@cite file, Enter to send, ESC for Normal)").
@@ -615,7 +633,16 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 					dtTone = th.Accent
 				}
 				if theme.ActionButton(c, "conv-deep-think", "Deep Think", dtTone, deepThink, th).Clicked() {
-					tr.SetDeepThink(!deepThink)
+					if bc != nil && bc.OnToggleDeepThink != nil {
+						bc.OnToggleDeepThink()
+					} else {
+						tr.SetDeepThink(!deepThink)
+					}
+				}
+				if bc != nil && bc.OnOpenHelm != nil {
+					if theme.ActionButton(c, "conv-cite-helm", "@ Cite", th.Info, false, th).Clicked() {
+						bc.OnOpenHelm()
+					}
 				}
 				if tr.OnPickAttachment != nil {
 					if theme.ActionButton(c, "conv-attach-btn", "+ Attach", th.Info, false, th).Clicked() {

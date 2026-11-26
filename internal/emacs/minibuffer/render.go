@@ -37,6 +37,9 @@ type RenderProps struct {
 	BufferCandidates  func(query string) []Candidate
 	ThemeCandidates   func(query string) []Candidate
 	OnSubmitPrompt    func(prompt string)
+	OnCreateWorkspace func(spec string)
+	OnHelmPreview     func(title, path, snippet string, line int)
+	OnHelmCite        func(ref string)
 	OnEnterInsert     func()
 	OnExitHydra       func()
 	OnResolveGate     func(approve bool)
@@ -70,7 +73,7 @@ func Render(c *ui.Context, p RenderProps) {
 		var items []Candidate
 		switch mode {
 		case ModeHelm:
-			renderHelm(c, s, th, val, p.Helm, p.RustConnected, p.OnEcho)
+			renderHelm(c, s, th, val, p.Helm, p.RustConnected, p.OnEcho, p.OnHelmPreview, p.OnHelmCite)
 		case ModeCommand:
 			if p.CommandCandidates != nil {
 				items = p.CommandCandidates(val)
@@ -144,6 +147,9 @@ func Render(c *ui.Context, p RenderProps) {
 				total, _, _, _ = p.Helm.Engine.Stats()
 			}
 			prompt = fmt.Sprintf("%d Helm: ", total)
+		case ModeWorkspaceCreate:
+			prompt = "New workspace: "
+			placeholder = "name or name @/path/to/project (Enter to create)"
 		default:
 			if p.KeyMode == meow.ModeInsert {
 				placeholder = "Type message and press Enter..."
@@ -213,6 +219,9 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 	case ModeHelm:
 		if p.Helm != nil && p.Helm.Engine != nil {
 			if cand, ok := p.Helm.Engine.Selected(); ok {
+				if p.OnHelmPreview != nil && (strings.TrimSpace(cand.Location) != "" || strings.TrimSpace(cand.Snippet) != "") {
+					p.OnHelmPreview(cand.Title, cand.Location, cand.Snippet, 0)
+				}
 				if p.Helm.OnExecuteAction != nil {
 					p.Helm.OnExecuteAction(search.ActionOpenInFocused, []search.Candidate{cand})
 				}
@@ -222,6 +231,11 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 			}
 		}
 		s.Close()
+	case ModeWorkspaceCreate:
+		s.Close()
+		if p.OnCreateWorkspace != nil {
+			p.OnCreateWorkspace(trimmed)
+		}
 	default:
 		s.mu.Lock()
 		sel := s.selected

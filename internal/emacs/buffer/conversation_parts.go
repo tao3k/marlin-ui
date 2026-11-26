@@ -213,7 +213,9 @@ func renderCitationPillStrip(c *ui.Context, key string, cites []string, bc *Cont
 				lbl = lbl[:35] + "..."
 			}
 			if theme.ActionButton(c, fmt.Sprintf("%s-cite-%d", key, i), lbl, th.Info, false, th).Clicked() {
-				if bc != nil && bc.OnEcho != nil {
+				if bc != nil && bc.OnOpenFilePreview != nil {
+					bc.OnOpenFilePreview(ref, ref, "", 0)
+				} else if bc != nil && bc.OnEcho != nil {
 					bc.OnEcho("Source: " + ref)
 				}
 			}

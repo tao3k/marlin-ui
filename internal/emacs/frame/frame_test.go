@@ -410,14 +410,18 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		BrandTitle: "Marlin",
 		FormFactor: mygoshell.FormFactorDesktop,
 	})
-	var invokedCmd string
+	var invokedCmds []string
 	sh.Desktop.OnCommandInvoke = func(name string) {
-		invokedCmd = name
+		invokedCmds = append(invokedCmds, name)
 	}
+	var savedPrefs appconfig.UserPrefs
 
 	fr := frame.New(frame.Config{
 		Adaptive:  sh,
 		AppConfig: appconfig.Config{SessionID: "sess-splits"},
+		OnPrefsChanged: func(p appconfig.UserPrefs) {
+			savedPrefs = p
+		},
 	})
 	tt := ui.NewTester(fr.View, 1280, 900)
 	tt.Frame()
@@ -439,15 +443,32 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		t.Fatalf("expected vertical split panes rendered, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
-	// 2. SPC l c creates a fresh isolated workspace (single-pane), SPC l 1 restores split.
+	// 1b. Resize & swap panes via SPC w l and SPC w x.
+	fr.ResizeSplit(0.10)
+	fr.SwapSplitPanes()
+	tt.Frame()
+	if !tt.HasText("[1] *conversation*") || !tt.HasText("[2] *Dashboard*") {
+		t.Fatalf("expected swapped split panes rendered, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 2. SPC l c opens named workspace Minibuffer; creating "research @/repo/lab"
+	// isolates layout and persists workspaces into UserPrefs.
 	tt.Key(0, ui.KeySpace)
 	tt.Frame()
 	tt.Key(0, ui.KeyL)
 	tt.Frame()
 	tt.Key(0, ui.KeyC)
 	tt.Frame()
+	if fr.MiniMode() != minibuffer.ModeWorkspaceCreate {
+		t.Fatalf("expected ModeWorkspaceCreate, got %v", fr.MiniMode())
+	}
+	fr.CreateWorkspaceFromSpec("research @/repo/lab")
+	tt.Frame()
 	if got := fr.WorkspaceSnapshot().Active.SplitMode; got != "single" {
 		t.Fatalf("expected new workspace to start single-pane, got %q", got)
+	}
+	if len(savedPrefs.Workspaces) < 2 || savedPrefs.ActiveWorkspaceID != "research" {
+		t.Fatalf("expected persisted workspaces in UserPrefs, got %+v", savedPrefs)
 	}
 	tt.Key(0, ui.KeySpace)
 	tt.Frame()
@@ -459,11 +480,11 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		t.Fatalf("expected switching back to workspace #1 to restore vertical split, got %q", got)
 	}
 
-	// 3. Open *Help* popup drawer; ESC in Normal mode dismisses popup without disturbing main split.
-	fr.SelectBuffer(buffer.Help)
+	// 3. Open *Preview* file popup drawer; verify source preview renders and ESC dismisses it cleanly.
+	fr.OpenFilePreview("main.rs", "src/main.rs:2", "fn main() {\n    println!(\"marlin\");\n}", 0)
 	tt.Frame()
-	if !fr.WorkspaceSnapshot().Active.PopupVisible {
-		t.Fatalf("expected *Help* popup visible")
+	if !fr.WorkspaceSnapshot().Active.PopupVisible || !tt.HasText("src/main.rs:2") || !tt.HasText("+ @cite") {
+		t.Fatalf("expected *Preview* popup drawer with source content, got %q", strings.Join(tt.Texts(), " | "))
 	}
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
@@ -474,11 +495,13 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		t.Fatalf("expected main split untouched after ESC popup dismiss, got %q", got)
 	}
 
-	// 4. Live SelectModel updates active model label and dispatches model.select to Rust host.
+	// 4. Live SelectModel & ToggleDeepThink dispatch model.select + thinking.set to Rust host.
 	fr.SelectModel("deepseek-v4-pro", "deepseek-v4-pro · deepseek-reasoner (deepseek)")
+	fr.ToggleDeepThink()
 	tt.Frame()
-	if invokedCmd != "model.select deepseek-v4-pro" {
-		t.Fatalf("expected OnCommandInvoke('model.select deepseek-v4-pro'), got %q", invokedCmd)
+	joined := strings.Join(invokedCmds, " | ")
+	if !strings.Contains(joined, "model.select deepseek-v4-pro") || !strings.Contains(joined, "thinking.set on") {
+		t.Fatalf("expected model.select + thinking.set commands, got %q", joined)
 	}
 	if !tt.HasText("deepseek-v4-pro · deepseek-reasoner (deepseek)") {
 		t.Fatalf("expected live model label in modeline/frame, got %q", strings.Join(tt.Texts(), " | "))

@@ -6,9 +6,12 @@ package frame
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/tabs"
 	"github.com/tao3k/marlin-ui/internal/emacs/window"
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
@@ -60,8 +63,28 @@ func (f *Frame) CreateWorkspace(name, projectRoot string) workspace.Perspective 
 	}
 	ws := f.wsMgr.CreateWorkspace(name, projectRoot)
 	f.syncFromWorkspaceLocked(ws)
+	f.persistWorkspaces()
 	f.Echo(fmt.Sprintf("Workspace created: %s", ws.Name))
 	return ws
+}
+
+// OpenWorkspaceCreate prompts in the Minibuffer for a workspace name and
+// optional `@/project/root` path (Doom SPC l c).
+func (f *Frame) OpenWorkspaceCreate() {
+	f.OpenMinibuffer(minibuffer.ModeWorkspaceCreate)
+}
+
+// CreateWorkspaceFromSpec parses `"name"` or `"name @/path/to/project"` from
+// the Minibuffer and activates the new isolated workspace.
+func (f *Frame) CreateWorkspaceFromSpec(spec string) {
+	raw := strings.TrimSpace(spec)
+	name := raw
+	root := ""
+	if idx := strings.Index(raw, "@"); idx >= 0 {
+		name = strings.TrimSpace(raw[:idx])
+		root = strings.TrimSpace(raw[idx+1:])
+	}
+	f.CreateWorkspace(name, root)
 }
 
 // SwitchWorkspace switches to an isolated perspective workspace and restores
@@ -75,6 +98,7 @@ func (f *Frame) SwitchWorkspace(id string) bool {
 		return false
 	}
 	f.syncFromWorkspaceLocked(ws)
+	f.persistWorkspaces()
 	f.Echo("Workspace: " + ws.Name)
 	return true
 }
@@ -185,6 +209,7 @@ func (f *Frame) KillActiveWorkspace() bool {
 		return false
 	}
 	f.syncFromWorkspaceLocked(snap.Active)
+	f.persistWorkspaces()
 	f.Echo("Killed workspace -> " + snap.Active.Name)
 	return true
 }
@@ -196,6 +221,7 @@ func (f *Frame) SplitVertical(secondary buffer.ID) {
 	}
 	snap := f.wsMgr.SplitVertical(secondary)
 	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
 	f.Echo("Split right: " + string(snap.Active.SecondaryBuffer))
 }
 
@@ -206,6 +232,7 @@ func (f *Frame) SplitHorizontal(secondary buffer.ID) {
 	}
 	snap := f.wsMgr.SplitHorizontal(secondary)
 	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
 	f.Echo("Split below: " + string(snap.Active.SecondaryBuffer))
 }
 
@@ -216,6 +243,7 @@ func (f *Frame) DeleteOtherWindows() {
 	}
 	snap := f.wsMgr.DeleteOtherWindows()
 	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
 	f.Echo("Single window: " + string(snap.Active.ActiveBuffer))
 }
 
@@ -230,7 +258,45 @@ func (f *Frame) CloseFocusedPane() {
 		return
 	}
 	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
 	f.Echo("Closed split pane -> " + string(snap.Active.ActiveBuffer))
+}
+
+// ResizeSplit widens (+delta) or narrows (-delta) the primary split pane.
+func (f *Frame) ResizeSplit(delta float32) {
+	if f.wsMgr == nil {
+		return
+	}
+	ratio, snap := f.wsMgr.ResizeSplit(delta)
+	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
+	f.Echo(fmt.Sprintf("Split ratio: %d%% / %d%%", int(ratio*100+0.5), 100-int(ratio*100+0.5)))
+}
+
+// BalanceSplit resets split panes to an equal 50/50 split (Doom SPC w e).
+func (f *Frame) BalanceSplit() {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.BalanceSplit()
+	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
+	f.Echo("Balanced panes (50% / 50%)")
+}
+
+// SwapSplitPanes swaps the primary and secondary split pane buffers (Doom SPC w x).
+func (f *Frame) SwapSplitPanes() {
+	if f.wsMgr == nil {
+		return
+	}
+	swapped, snap := f.wsMgr.SwapSplitPanes()
+	if !swapped {
+		f.Echo("No split active to swap")
+		return
+	}
+	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
+	f.Echo(fmt.Sprintf("Swapped panes: %s <-> %s", snap.Active.ActiveBuffer, snap.Active.SecondaryBuffer))
 }
 
 // CycleFocusPane alternates focus between split panes (Doom SPC w w).
@@ -302,8 +368,153 @@ func (f *Frame) buildSplitProps(wsSnap workspace.Snapshot) window.SplitProps {
 		Mode:            act.SplitMode,
 		SecondaryBuffer: act.SecondaryBuffer,
 		FocusedPane:     act.FocusedPane,
+		Ratio:           act.SplitRatio,
 		OnFocusPane:     f.FocusPane,
+		OnSwapPanes:     f.SwapSplitPanes,
 		OnCloseSplit:    f.CloseFocusedPane,
+	}
+}
+
+// ToggleDeepThink flips Deep Think reasoning locally and forwards
+// `thinking.set <on|off>` over marlin.ui.v1 gRPC to the Rust authority host.
+func (f *Frame) ToggleDeepThink() {
+	if f.Adaptive == nil || f.Adaptive.Desktop == nil || f.Adaptive.Desktop.Transcript == nil {
+		return
+	}
+	tr := f.Adaptive.Desktop.Transcript
+	next := !tr.DeepThinkEnabled()
+	tr.SetDeepThink(next)
+	state := "off"
+	if next {
+		state = "on"
+	}
+	if f.Adaptive.Desktop.OnCommandInvoke != nil {
+		f.Adaptive.Desktop.OnCommandInvoke("thinking.set " + state)
+	}
+	f.Echo("Deep Think: " + state)
+	f.requestFrame()
+}
+
+// CiteInComposer inserts an `@cite:<ref>` token directly into the inline
+// *conversation* frosted-glass Composer draft and transcript composer state.
+func (f *Frame) CiteInComposer(ref string) {
+	clean := strings.TrimSpace(ref)
+	if clean == "" {
+		return
+	}
+	token := "@cite:" + clean
+	f.mu.Lock()
+	cur := strings.TrimSpace(f.convComposerDraft)
+	if cur != "" {
+		f.convComposerDraft = cur + " " + token + " "
+	} else {
+		f.convComposerDraft = token + " "
+	}
+	draft := f.convComposerDraft
+	f.mu.Unlock()
+	if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.Transcript != nil {
+		f.Adaptive.Desktop.Transcript.SetComposerText(draft)
+	}
+	f.Echo("Cited " + clean)
+	f.requestFrame()
+}
+
+// OpenFilePreview loads a local file (bounded to 16KB) or Helm snippet into the
+// governed *Preview* right-hand Doom Popup Drawer without disrupting the main layout.
+func (f *Frame) OpenFilePreview(title, rawPath, snippet string, line int) {
+	path := strings.TrimSpace(rawPath)
+	if line <= 0 && path != "" {
+		if base, linePart, ok := strings.Cut(path, ":"); ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(linePart)); err == nil && n > 0 {
+				path = strings.TrimSpace(base)
+				line = n
+			}
+		}
+	}
+	content := strings.TrimSpace(snippet)
+	if path != "" {
+		if body, ok := appconfig.ReadPreviewSnippet(path); ok {
+			content = body
+		}
+	}
+	if content == "" {
+		content = fmt.Sprintf("// Preview unavailable locally for %s\n// Open via connected Rust workspace host or Helm Follow Preview.", path)
+	}
+	f.thinkingMu.Lock()
+	f.filePreview = &buffer.FilePreviewState{
+		Title:   strings.TrimSpace(title),
+		Path:    path,
+		Line:    line,
+		Content: content,
+	}
+	f.thinkingMu.Unlock()
+	f.SelectBuffer(buffer.Preview)
+}
+
+func (f *Frame) currentFilePreview() *buffer.FilePreviewState {
+	f.thinkingMu.RLock()
+	fp := f.filePreview
+	f.thinkingMu.RUnlock()
+	return fp
+}
+
+func (f *Frame) restoreSavedWorkspaces() {
+	if f.wsMgr == nil || len(f.Prefs.Workspaces) == 0 {
+		return
+	}
+	persps := make([]workspace.Perspective, 0, len(f.Prefs.Workspaces))
+	for _, sw := range f.Prefs.Workspaces {
+		bufs := make([]buffer.ID, 0, len(sw.Buffers))
+		for _, b := range sw.Buffers {
+			if strings.TrimSpace(b) != "" {
+				bufs = append(bufs, buffer.ID(b))
+			}
+		}
+		persps = append(persps, workspace.Perspective{
+			ID:              sw.ID,
+			Name:            sw.Name,
+			ProjectRoot:     sw.ProjectRoot,
+			ActiveBuffer:    buffer.ID(sw.ActiveBuffer),
+			SplitMode:       workspace.SplitMode(sw.SplitMode),
+			SecondaryBuffer: buffer.ID(sw.SecondaryBuffer),
+			SplitRatio:      sw.SplitRatio,
+			Buffers:         bufs,
+		})
+	}
+	snap := f.wsMgr.RestorePerspectives(f.Prefs.ActiveWorkspaceID, persps)
+	f.activeBuffer = snap.Active.ActiveBuffer
+	f.openTabs = append([]buffer.ID(nil), snap.Active.Buffers...)
+}
+
+func (f *Frame) persistWorkspaces() {
+	if f.wsMgr == nil {
+		return
+	}
+	wsSnap := f.wsMgr.Snapshot()
+	saved := make([]appconfig.SavedWorkspace, 0, len(wsSnap.Workspaces))
+	for _, w := range wsSnap.Workspaces {
+		bufs := make([]string, 0, len(w.Buffers))
+		for _, b := range w.Buffers {
+			bufs = append(bufs, string(b))
+		}
+		saved = append(saved, appconfig.SavedWorkspace{
+			ID:              w.ID,
+			Name:            w.Name,
+			ProjectRoot:     w.ProjectRoot,
+			ActiveBuffer:    string(w.ActiveBuffer),
+			SplitMode:       string(w.SplitMode),
+			SecondaryBuffer: string(w.SecondaryBuffer),
+			SplitRatio:      w.SplitRatio,
+			Buffers:         bufs,
+		})
+	}
+	f.mu.Lock()
+	f.Prefs.ActiveWorkspaceID = wsSnap.ActiveID
+	f.Prefs.Workspaces = saved
+	prefs := f.Prefs
+	f.mu.Unlock()
+	if f.onPrefsChanged != nil {
+		f.onPrefsChanged(prefs)
 	}
 }
 

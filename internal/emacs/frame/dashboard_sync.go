@@ -464,12 +464,22 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.DeleteOtherWindows()
 	case "cmd:win-other":
 		f.CycleFocusPane()
+	case "cmd:win-swap":
+		f.SwapSplitPanes()
+	case "cmd:win-widen":
+		f.ResizeSplit(0.08)
+	case "cmd:win-narrow":
+		f.ResizeSplit(-0.08)
+	case "cmd:win-balance":
+		f.BalanceSplit()
 	case "cmd:popup-toggle":
 		f.TogglePopup()
 	case "cmd:popup-raise":
 		f.RaisePopup()
 	case "cmd:popup-dismiss":
 		f.DismissPopup()
+	case "cmd:ws-create-prompt":
+		f.OpenWorkspaceCreate()
 	case "cmd:ws-new":
 		f.CreateWorkspace("", "")
 	case "cmd:ws-kill":

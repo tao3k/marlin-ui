@@ -53,6 +53,7 @@ func DefaultPopupRules() []PopupRule {
 		{Matcher: buffer.Messages, Side: SideBottom, Size: 0.30, Select: false, Quit: QuitCurrent},
 		{Matcher: buffer.Processes, Side: SideBottom, Size: 0.34, Select: true, Quit: QuitCurrent},
 		{Matcher: buffer.Models, Side: SideRight, Size: 0.38, Select: true, Quit: QuitCurrent},
+		{Matcher: buffer.Preview, Side: SideRight, Size: 0.44, Select: true, Quit: QuitCurrent},
 	}
 }
 
@@ -74,7 +75,8 @@ type Perspective struct {
 	ActiveBuffer    buffer.ID
 	SplitMode       SplitMode
 	SecondaryBuffer buffer.ID
-	FocusedPane     int // 0 = primary pane, 1 = secondary pane
+	SplitRatio      float32 // primary pane ratio in [0.25, 0.75], default 0.50
+	FocusedPane     int     // 0 = primary pane, 1 = secondary pane
 	Buffers         []buffer.ID
 	PopupBuffer     buffer.ID
 	PopupRule       *PopupRule
@@ -115,6 +117,7 @@ func NewManager(initialTabs []buffer.ID) *Manager {
 				Name:         "main",
 				ActiveBuffer: tabs[0],
 				SplitMode:    SplitSingle,
+				SplitRatio:   0.50,
 				Buffers:      tabs,
 			},
 		},
@@ -201,6 +204,7 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 		ProjectRoot:  strings.TrimSpace(projectRoot),
 		ActiveBuffer: buffer.Conversation,
 		SplitMode:    SplitSingle,
+		SplitRatio:   0.50,
 		Buffers:      []buffer.ID{buffer.Dashboard, buffer.Conversation},
 	}
 	m.workspaces = append(m.workspaces, ws)
@@ -306,9 +310,126 @@ func (m *Manager) applySplit(mode SplitMode, secondary buffer.ID) Snapshot {
 	}
 	ws.SplitMode = mode
 	ws.SecondaryBuffer = secondary
+	if ws.SplitRatio < 0.25 || ws.SplitRatio > 0.75 {
+		ws.SplitRatio = 0.50
+	}
 	ws.FocusedPane = 1
 	if !containsBuf(ws.Buffers, secondary) {
 		ws.Buffers = append(ws.Buffers, secondary)
+	}
+	return m.snapshotLocked()
+}
+
+// ResizeSplit adjusts the active workspace's primary/secondary split ratio by
+// delta, clamped to [0.25, 0.75] (Doom SPC w l / SPC w h).
+func (m *Manager) ResizeSplit(delta float32) (ratio float32, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return 0.50, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitRatio < 0.25 || ws.SplitRatio > 0.75 {
+		ws.SplitRatio = 0.50
+	}
+	next := ws.SplitRatio + delta
+	if next < 0.25 {
+		next = 0.25
+	} else if next > 0.75 {
+		next = 0.75
+	}
+	ws.SplitRatio = next
+	return ws.SplitRatio, m.snapshotLocked()
+}
+
+// BalanceSplit resets the active workspace's split panes to an equal 50/50
+// ratio (Doom SPC w e / C-x +).
+func (m *Manager) BalanceSplit() Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	m.workspaces[idx].SplitRatio = 0.50
+	return m.snapshotLocked()
+}
+
+// SwapSplitPanes swaps the primary and secondary buffers in an active split
+// (Doom SPC w x).
+func (m *Manager) SwapSplitPanes() (swapped bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" {
+		return false, m.snapshotLocked()
+	}
+	ws.ActiveBuffer, ws.SecondaryBuffer = ws.SecondaryBuffer, ws.ActiveBuffer
+	return true, m.snapshotLocked()
+}
+
+// RestorePerspectives hydrates saved workspaces from persisted UserPrefs while
+// validating split ratios and guaranteeing at least one valid active workspace.
+func (m *Manager) RestorePerspectives(activeID string, saved []Perspective) Snapshot {
+	if len(saved) == 0 {
+		return m.Snapshot()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	restored := make([]Perspective, 0, len(saved))
+	for _, w := range saved {
+		id := strings.TrimSpace(w.ID)
+		name := strings.TrimSpace(w.Name)
+		if id == "" {
+			continue
+		}
+		if name == "" {
+			name = id
+		}
+		bufs := append([]buffer.ID(nil), w.Buffers...)
+		if len(bufs) == 0 {
+			bufs = []buffer.ID{buffer.Dashboard, buffer.Conversation}
+		}
+		act := w.ActiveBuffer
+		if act == "" {
+			act = bufs[0]
+		}
+		mode := w.SplitMode
+		if mode != SplitVertical && mode != SplitHorizontal {
+			mode = SplitSingle
+			w.SecondaryBuffer = ""
+		}
+		ratio := w.SplitRatio
+		if ratio < 0.25 || ratio > 0.75 {
+			ratio = 0.50
+		}
+		restored = append(restored, Perspective{
+			ID:              id,
+			Name:            name,
+			ProjectRoot:     strings.TrimSpace(w.ProjectRoot),
+			ActiveBuffer:    act,
+			SplitMode:       mode,
+			SecondaryBuffer: w.SecondaryBuffer,
+			SplitRatio:      ratio,
+			Buffers:         bufs,
+		})
+	}
+	if len(restored) == 0 {
+		return m.snapshotLocked()
+	}
+	m.workspaces = restored
+	m.nextSeq = len(restored)
+	m.activeID = restored[0].ID
+	for _, w := range restored {
+		if w.ID == activeID {
+			m.activeID = w.ID
+			break
+		}
 	}
 	return m.snapshotLocked()
 }

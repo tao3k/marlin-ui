@@ -94,4 +94,41 @@ func TestWorkspaceIsolationAndDoomPopupLifecycle(t *testing.T) {
 	if killedLast {
 		t.Fatalf("expected KillWorkspace on last remaining workspace to fail closed")
 	}
+
+	// 6. Split resize clamping, balance, swap, and persisted workspace restoration.
+	_ = mgr.SplitVertical(buffer.Conversation)
+	r1, _ := mgr.ResizeSplit(0.15)
+	if r1 < 0.64 || r1 > 0.66 {
+		t.Fatalf("expected ResizeSplit(+0.15) ~0.65, got %v", r1)
+	}
+	rMax, _ := mgr.ResizeSplit(0.50)
+	if rMax != 0.75 {
+		t.Fatalf("expected ResizeSplit clamped to 0.75, got %v", rMax)
+	}
+	balSnap := mgr.BalanceSplit()
+	if balSnap.Active.SplitRatio != 0.50 {
+		t.Fatalf("expected BalanceSplit -> 0.50, got %v", balSnap.Active.SplitRatio)
+	}
+	beforePrimary := balSnap.Active.ActiveBuffer
+	beforeSecondary := balSnap.Active.SecondaryBuffer
+	swapped, swapSnap := mgr.SwapSplitPanes()
+	if !swapped || swapSnap.Active.ActiveBuffer != beforeSecondary || swapSnap.Active.SecondaryBuffer != beforePrimary {
+		t.Fatalf("expected SwapSplitPanes to swap %s <-> %s, got %+v", beforePrimary, beforeSecondary, swapSnap.Active)
+	}
+
+	// *Preview* routes into right-hand Doom Popup Drawer by default.
+	asPrevPopup, prevSnap := mgr.OpenBuffer(buffer.Preview)
+	if !asPrevPopup || prevSnap.Active.PopupBuffer != buffer.Preview || prevSnap.Active.PopupRule == nil || prevSnap.Active.PopupRule.Side != SideRight {
+		t.Fatalf("expected *Preview* to open in right popup drawer, got %+v", prevSnap.Active)
+	}
+
+	// RestorePerspectives hydrates saved workspaces across launches.
+	mgr2 := NewManager(nil)
+	restored := mgr2.RestorePerspectives("lab", []Perspective{
+		{ID: "main", Name: "main", ActiveBuffer: buffer.Dashboard, SplitMode: SplitSingle, Buffers: []buffer.ID{buffer.Dashboard}},
+		{ID: "lab", Name: "Lab", ProjectRoot: "/repo/lab", ActiveBuffer: buffer.Conversation, SplitMode: SplitVertical, SecondaryBuffer: buffer.Sessions, SplitRatio: 0.62, Buffers: []buffer.ID{buffer.Conversation, buffer.Sessions}},
+	})
+	if restored.ActiveID != "lab" || restored.Active.ProjectRoot != "/repo/lab" || restored.Active.SplitRatio != 0.62 {
+		t.Fatalf("expected RestorePerspectives to hydrate lab workspace, got %+v", restored)
+	}
 }
