@@ -168,6 +168,19 @@ func (f *Frame) WorkspaceSnapshot() workspace.Snapshot {
 	return f.wsMgr.Snapshot()
 }
 
+// helmInitialQuery seeds workspace-scoped `@prefix:<root> ` when the active
+// Doom workspace is bound to a relative project directory (projectile parity).
+func (f *Frame) helmInitialQuery() string {
+	if f.wsMgr == nil {
+		return ""
+	}
+	root := strings.TrimSpace(f.wsMgr.Snapshot().Active.ProjectRoot)
+	if root == "" || strings.HasPrefix(root, "/") {
+		return ""
+	}
+	return "@prefix:" + root + " "
+}
+
 // SwitchWorkspaceIndex activates the 0-based perspective workspace (SPC l 1..4).
 func (f *Frame) SwitchWorkspaceIndex(idx int) bool {
 	if f.wsMgr == nil {

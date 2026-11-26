@@ -506,4 +506,12 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 	if !tt.HasText("deepseek-v4-pro · deepseek-reasoner (deepseek)") {
 		t.Fatalf("expected live model label in modeline/frame, got %q", strings.Join(tt.Texts(), " | "))
 	}
+
+	// 5. Empty *conversation* renders the flagship Hero Stage + docked Composer directly.
+	fr.DeleteOtherWindows()
+	fr.SelectBuffer(buffer.Conversation)
+	tt.Frame()
+	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Deep Think") || !tt.HasText("@ Cite") {
+		t.Fatalf("expected empty *conversation* Hero Stage + docked Composer, got %q", strings.Join(tt.Texts(), " | "))
+	}
 }

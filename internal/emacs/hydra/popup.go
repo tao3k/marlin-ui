@@ -7,6 +7,7 @@ package hydra
 import (
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/style"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
@@ -25,12 +26,14 @@ func RenderPopup(c *ui.Context, body Body, th theme.Theme, onExit func()) {
 	ui.Column(c.Key("hydra-popup-"+body.ID)).Background(bg).
 		BorderWidth(1, 0, 0, 0).BorderColor(theme.GlassTone(c, th.Border, th, 0.45, 0.55)).
 		Padding(10, 16).Gap(10).AlignItems(ui.Stretch).Children(func() {
-		// Hydra header bar: prefix + title + quit hint.
+		// Hydra header bar: prefix keycap + proportional title + quit hint.
 		ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Row(c).Padding(2, 8).Radius(theme.RadiusSmall).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.64)).Children(func() {
+			ui.Row(c).Padding(2, 8).Radius(theme.RadiusSmall).
+				Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.50, 0.74)).
+				BorderWidth(1).BorderColor(kit.WithAlpha(th.Accent, 0.34)).Children(func() {
 				ui.Text(c, body.Prefix+"-").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(700).TextColor(th.Accent).NoWrap()
 			})
-			ui.Text(c, body.Title).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+			ui.Text(c, body.Title).Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(th.Ink).NoWrap()
 			ui.Spacer(c)
 			if theme.ActionLink(c, "hydra-cancel", "C-g / ESC quit", th.InkMuted, th).Clicked() && onExit != nil {
 				onExit()
@@ -42,7 +45,7 @@ func RenderPopup(c *ui.Context, body Body, th theme.Theme, onExit func()) {
 			for _, grp := range cols {
 				g := grp
 				ui.Column(c.Key("hydra-col-"+g.Name)).Grow(1).Gap(3).AlignItems(ui.Stretch).Children(func() {
-					ui.Text(c, g.Name).Font(theme.FontMono).FontSize(11.5).FontWeight(700).TextColor(th.InkMuted).Padding(0, 6, 3, 6).NoWrap()
+					ui.Text(c, g.Name).Font(kit.FontDisplay).FontSize(11.5).FontWeight(700).TextColor(th.InkMuted).Padding(0, 6, 3, 6).NoWrap()
 					for _, hd := range g.Heads {
 						h := hd
 						if renderHeadRow(c, body.ID+"-"+h.Key, h, th).Clicked() {
@@ -95,14 +98,16 @@ func renderHeadRow(c *ui.Context, key string, h Head, th theme.Theme) ui.Element
 	}
 
 	row.Children(func() {
-		badge := ui.Row(c).Width(42).Padding(2, 6).Radius(theme.RadiusSmall).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.64)).
+		badge := ui.Row(c).Width(42).Padding(2, 6).Radius(theme.RadiusSmall).
+			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.48, 0.72)).
+			BorderWidth(1).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.75)).
 			Justify(ui.Center).AlignItems(ui.Center)
 		kcs.ApplyToElement(badge)
 		badge.Children(func() {
 			ui.Text(c, h.Key).Font(theme.FontMono).FontSize(12).FontWeight(kWeight).TextColor(keyCol).NoWrap()
 		})
-		ui.Text(c, "→").Font(theme.FontMono).FontSize(12).TextColor(th.TabSeparator).NoWrap()
-		ui.Text(c, h.Label).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(labelCol).Grow(1).NoWrap().MaxLines(1)
+		ui.Text(c, "→").Font(theme.FontMono).FontSize(11.5).TextColor(th.TabSeparator).NoWrap()
+		ui.Text(c, h.Label).Font(kit.FontDisplay).FontSize(theme.FontSizeUI).FontWeight(500).TextColor(labelCol).Grow(1).NoWrap().MaxLines(1)
 	})
 	return row
 }

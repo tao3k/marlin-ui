@@ -883,25 +883,31 @@ func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string
 	if preset == modeline.PresetDashboard {
 		ver = "MARLIN"
 	}
+	wsPath := "~/marlin/" + sessID + "/"
+	if pr := strings.TrimSpace(snap.Workspaces.Active.ProjectRoot); pr != "" {
+		wsPath = pr
+	}
 	return modeline.Status{
-		Preset:        preset,
-		KeyMode:       f.meowState.Mode(),
-		MiniMode:      f.miniState.Mode(),
-		Keypad:        f.meowState.Keypad(),
-		BufferName:    string(activeBuf),
-		MajorMode:     majorModeName(activeBuf),
-		WorkspacePath: "~/marlin/" + sessID + "/",
-		RemoteHost:    remoteHost,
-		ActivityLabel: actLabel,
-		ActivityColor: actCol,
-		ModelLabel:    modelLbl,
-		StatusItems:   snap.StatusItems,
-		SessionID:     sessID,
-		RowCount:      turns,
-		HelmTotal:     helmTotal,
-		ShowGateBadge: activeBuf != buffer.Dashboard,
-		VersionLabel:  ver,
-		Theme:         th,
+		Preset:           preset,
+		KeyMode:          f.meowState.Mode(),
+		MiniMode:         f.miniState.Mode(),
+		Keypad:           f.meowState.Keypad(),
+		BufferName:       string(activeBuf),
+		MajorMode:        majorModeName(activeBuf),
+		WorkspacePath:    wsPath,
+		RemoteHost:       remoteHost,
+		ActivityLabel:    actLabel,
+		ActivityColor:    actCol,
+		ModelLabel:       modelLbl,
+		StatusItems:      snap.StatusItems,
+		SessionID:        sessID,
+		RowCount:         turns,
+		HelmTotal:        helmTotal,
+		ShowGateBadge:    activeBuf != buffer.Dashboard,
+		OnOpenModels:     func() { f.SelectBuffer(buffer.Models) },
+		OnOpenWorkspaces: func() { f.OpenHydra("SPC l") },
+		VersionLabel:     ver,
+		Theme:            th,
 	}
 }
 
@@ -911,6 +917,8 @@ func majorModeName(id buffer.ID) string {
 		return "Bento-Dashboard"
 	case buffer.Sessions, buffer.Targets, buffer.Processes, buffer.Models:
 		return "Tabulated-List"
+	case buffer.Preview:
+		return "Preview-Mode"
 	case buffer.Help:
 		return "Help"
 	case buffer.Messages:

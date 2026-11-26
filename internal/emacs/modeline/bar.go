@@ -54,10 +54,12 @@ type Status struct {
 	SessionID     string
 	RowCount      int
 	HelmTotal     int
-	PendingGates  int
-	ShowGateBadge bool
-	OnReviewGate  func()
-	VersionLabel  string
+	PendingGates      int
+	ShowGateBadge     bool
+	OnReviewGate      func()
+	OnOpenModels      func()
+	OnOpenWorkspaces  func()
+	VersionLabel      string
 	Glass         bool
 	GlassOpacity  float32
 	Theme         theme.Theme
@@ -86,10 +88,27 @@ func Render(c *ui.Context, st Status) {
 			// Segment 2: circular modal state indicator + active perspective workspace pill.
 			renderModalBadge(c, modalLabel, barColor, th)
 			if st.WorkspaceName != "" {
-				ui.Row(c.Key("dm-ws-pill")).Padding(2, 7).Radius(theme.RadiusPill).
-					Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.58)).Children(func() {
-					ui.Text(c, "["+st.WorkspaceName+"]").Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).NoWrap()
-				})
+				wsLbl := "[" + st.WorkspaceName + "]"
+				if st.OnOpenWorkspaces != nil {
+					btn := kit.ActionControl(ui.ButtonBase(c.Key("dm-ws-pill")).Label(wsLbl).
+						Padding(2, 7).Radius(theme.RadiusPill).AlignItems(ui.Center))
+					if btn.Hovered() {
+						btn.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.48, 0.70))
+					} else {
+						btn.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.58))
+					}
+					btn.Children(func() {
+						ui.Text(c, wsLbl).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).NoWrap()
+					})
+					if btn.Clicked() {
+						st.OnOpenWorkspaces()
+					}
+				} else {
+					ui.Row(c.Key("dm-ws-pill")).Padding(2, 7).Radius(theme.RadiusPill).
+						Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.58)).Children(func() {
+						ui.Text(c, wsLbl).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).NoWrap()
+					})
+				}
 			}
 
 			switch st.Preset {
@@ -167,6 +186,8 @@ func renderHelmSegments(c *ui.Context, st Status, th theme.Theme) {
 		title = "Switch Buffer"
 	} else if st.MiniMode == minibuffer.ModeThemeSwitch {
 		title = "Switch Theme"
+	} else if st.MiniMode == minibuffer.ModeWorkspaceCreate {
+		title = "New Workspace"
 	}
 	ui.Text(c, title).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Accent).NoWrap()
 	if st.HelmTotal > 0 {
@@ -210,16 +231,39 @@ func renderRightDeclarative(c *ui.Context, st Status, th theme.Theme, showDashbo
 			}
 		}
 
-		// Concise Online dot + real active gRPC model label (zero fake fallback model names!).
+		// Concise Online dot + clickable active gRPC model label (1-click opens *Models* popup!).
 		modelLabel := strings.TrimSpace(st.ModelLabel)
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(actCol)
-			if modelLabel != "" {
-				ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(th.Ink).NoWrap()
-			} else if st.ActivityLabel != "" {
-				ui.Text(c, st.ActivityLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(actCol).NoWrap()
+		displayModel := modelLabel
+		if displayModel == "" {
+			displayModel = st.ActivityLabel
+		}
+		if st.OnOpenModels != nil && displayModel != "" {
+			mbtn := kit.ActionControl(ui.ButtonBase(c.Key("dm-model-pill")).Label(displayModel).
+				Padding(2, 8).Gap(6).Radius(theme.RadiusPill).AlignItems(ui.Center))
+			if mbtn.Hovered() {
+				mbtn.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.44, 0.66))
 			}
-		})
+			mbtn.Children(func() {
+				ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(actCol)
+				col := th.Ink
+				if modelLabel == "" {
+					col = actCol
+				}
+				ui.Text(c, displayModel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(col).NoWrap()
+			})
+			if mbtn.Clicked() {
+				st.OnOpenModels()
+			}
+		} else {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(actCol)
+				if modelLabel != "" {
+					ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(th.Ink).NoWrap()
+				} else if st.ActivityLabel != "" {
+					ui.Text(c, st.ActivityLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(actCol).NoWrap()
+				}
+			})
+		}
 
 		// Dynamic initial-workspace badge shown ONLY on Dashboard / initial empty Conversation.
 		if showDashboardMeta && strings.TrimSpace(st.VersionLabel) != "" {

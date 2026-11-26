@@ -19,17 +19,6 @@ import (
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
-// Classic Doom-style double-line ASCII banner matching the user's *doom* dashboard.
-var doomMarlinBanner = []string{
-	"======================================================================",
-	" ||\\    //||     //\\\\      ||=====\\    ||        ||||    ||\\     || ",
-	" ||\\\\  // ||    //  \\\\     ||     ||   ||         ||     ||\\\\    || ",
-	" || \\\\//  ||   //====\\\\    ||=====/    ||         ||     || \\\\   || ",
-	" ||       ||  //      \\\\   ||   \\\\     ||         ||     ||  \\\\  || ",
-	" ||       || //        \\\\  ||    \\\\    ||======  ||||    ||   \\\\ || ",
-	"======================================================================",
-}
-
 func buildConversationMarkdownTheme(th theme.Theme) *markdown.Theme {
 	codeBg := kit.WithAlpha(th.SurfaceElevated, 0.72)
 	blockBg := kit.WithAlpha(th.Bar, 0.88)
@@ -71,7 +60,7 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 	tr := bc.Adaptive.Desktop.Transcript
 	n := tr.Len()
 	if n == 0 {
-		renderDoomDashboard(c, th, bc)
+		renderEmptyConversationStage(c, tr, th, bc)
 		return
 	}
 
@@ -274,6 +263,16 @@ func renderAssistantMessageCard(
 				renderMetaPill(c, entry.OutcomeLabel, th.InkMuted, th)
 			}
 			ui.Spacer(c)
+			if !entry.Streaming && entry.TurnOrdinal > 0 && tr.OnRetryTurn != nil {
+				if theme.ActionLink(c, fmt.Sprintf("conv-retry-%d", idx), "Retry", th.InkMuted, th).Clicked() {
+					tr.OnRetryTurn(entry.TurnOrdinal)
+				}
+			}
+			if !entry.Streaming && entry.TurnOrdinal > 0 && tr.OnForkTurn != nil {
+				if theme.ActionLink(c, fmt.Sprintf("conv-fork-%d", idx), "Fork", th.InkMuted, th).Clicked() {
+					tr.OnForkTurn(entry.TurnOrdinal)
+				}
+			}
 			if strings.TrimSpace(bodyText) != "" && tr.OnCopyCode != nil {
 				if theme.ActionLink(c, fmt.Sprintf("conv-copy-%d", idx), "Copy", th.InkMuted, th).Clicked() {
 					tr.OnCopyCode(bodyText)
@@ -690,68 +689,102 @@ func renderDeterministicGatewayNotice(c *ui.Context, bc *Context, th theme.Theme
 	})
 }
 
-func renderDoomDashboard(c *ui.Context, th theme.Theme, bc *Context) {
-	ui.Column(c.Key("doom-dashboard")).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(22).Children(func() {
-		// Iconic ASCII Banner in calm base5 slate gray (#5b6268).
-		ui.Column(c.Key("doom-ascii-banner")).AlignItems(ui.Center).Gap(2).Children(func() {
-			for i, line := range doomMarlinBanner {
-				ui.Text(c.Key(fmt.Sprintf("banner-%d", i)), line).
-					Font(theme.FontMono).FontSize(13).TextColor(th.BannerInk).NoWrap()
-			}
-			ui.Box(c).Height(6)
-			ui.Text(c, "M A R L I N   A I").Font(theme.FontMono).FontSize(13.5).FontWeight(700).TextColor(th.InkMuted).NoWrap()
-		})
+func renderEmptyConversationStage(c *ui.Context, tr *mygoshell.TranscriptController, th theme.Theme, bc *Context) {
+	modelLabel := bc.ActiveModel
+	if modelLabel == "" && bc.ModelCfg.Loaded {
+		modelLabel = bc.ModelCfg.SummaryLabel()
+	}
+	if modelLabel == "" {
+		modelLabel = "marlin-core"
+	}
 
-		// Authentic Doom Dashboard menu: Doom blue labels on left, muted keybindings on right.
-		ui.Column(c.Key("doom-dash-menu")).Width(470).Gap(3).AlignItems(ui.Stretch).Children(func() {
-			entries := []struct {
-				icon, label, key string
-				action           func()
-			}{
-				{"▤", "Recently opened sessions", "SPC b b", func() {
-					if bc.OnSelectBuffer != nil {
-						bc.OnSelectBuffer(Sessions)
-					}
-				}},
-				{"⌕", "Helm live search", "SPC s", bc.OnOpenHelm},
-				{"⌘", "Execute command (M-x)", "SPC SPC", bc.OnOpenCommands},
-				{"◎", "Open federation targets", "SPC t g", func() {
-					if bc.OnSelectBuffer != nil {
-						bc.OnSelectBuffer(Targets)
-					}
-				}},
-				{"◐", "Switch Doom theme", "SPC t t", bc.OnOpenThemeSwitch},
-				{"⚙", "Open private configuration", "Cmd+,", bc.OnOpenSettings},
-				{"☰", "Open documentation (*Help*)", "SPC h", func() {
-					if bc.OnSelectBuffer != nil {
-						bc.OnSelectBuffer(Help)
-					}
-				}},
-			}
-			for _, e := range entries {
-				item := e
-				row := ui.ButtonBase(c.Key("dash-"+item.label)).Label(item.label).
-					Height(30).Padding(0, 12).Gap(10).Radius(theme.RadiusControl).
-					AlignItems(ui.Center).Justify(ui.Start)
-				if row.Hovered() {
-					row.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.52))
-				}
-				row.Children(func() {
-					ui.Text(c, item.icon).Font(theme.FontMono).FontSize(theme.FontSizeBody).TextColor(th.Info).Width(18).NoWrap()
-					ui.Text(c, item.label).Font(theme.FontMono).FontSize(theme.FontSizeBody).FontWeight(500).TextColor(th.Info).Grow(1).NoWrap()
-					ui.Text(c, item.key).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(th.InkMuted).NoWrap()
+	starters := []struct {
+		title  string
+		desc   string
+		prompt string
+	}{
+		{
+			title:  "Architecture Audit",
+			desc:   "Map crate, Scheme & UI boundaries",
+			prompt: "Summarize the current workspace architecture and highlight any open protocol or UI gaps.",
+		},
+		{
+			title:  "Deep Code Review",
+			desc:   "Inspect recent diffs & invariants",
+			prompt: "Review recent uncommitted changes across this repository and flag concurrency or contract risks.",
+		},
+		{
+			title:  "Live Helm Lookup",
+			desc:   "Search symbols via Rust index",
+			prompt: "",
+		},
+	}
+
+	ui.Column(c.Key("conv-empty-root")).Fill().AlignItems(ui.Stretch).Children(func() {
+		renderConversationHeaderBar(c, th, bc)
+
+		ui.Column(c.Key("conv-empty-hero")).Grow(1).MinHeight(0).Padding(24, 32).
+			Justify(ui.Center).AlignItems(ui.Center).Gap(20).Children(func() {
+			ui.Column(c).AlignItems(ui.Center).Gap(8).Children(func() {
+				ui.Row(c).Padding(3, 10).Radius(theme.RadiusPill).Gap(6).AlignItems(ui.Center).
+					Background(kit.WithAlpha(th.Accent, 0.14)).
+					BorderWidth(1).BorderColor(kit.WithAlpha(th.Accent, 0.30)).Children(func() {
+					ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(th.Success)
+					ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(11.5).FontWeight(700).TextColor(th.Accent).NoWrap()
 				})
-				if row.Clicked() && item.action != nil {
-					item.action()
+				ui.Text(c, "What would you like to build with Marlin?").
+					Font(kit.FontDisplay).FontSize(22).FontWeight(700).TextColor(th.Ink).NoWrap()
+				ui.Text(c, "Markdown streaming, folded reasoning traces, Rust Helm search, and Doom workspaces ready.").
+					Font(kit.FontDisplay).FontSize(13.5).TextColor(th.InkMuted).NoWrap()
+			})
+
+			ui.Row(c.Key("conv-starter-cards")).MaxWidth(820).Gap(12).AlignItems(ui.Stretch).Children(func() {
+				for idx, st := range starters {
+					item := st
+					card := kit.ActionControl(ui.ButtonBase(c.Key(fmt.Sprintf("conv-starter-%d", idx))).Label(item.title).
+						Grow(1).Padding(14, 16).Radius(12).AlignItems(ui.Start).Justify(ui.Start))
+					if card.Hovered() {
+						card.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.48, 0.72))
+					} else {
+						card.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.62))
+					}
+					card.BorderWidth(1).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.50, 0.68))
+					card.Children(func() {
+						ui.Column(c).Gap(4).AlignItems(ui.Start).Children(func() {
+							ui.Text(c, item.title).Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(th.Ink).NoWrap()
+							ui.Text(c, item.desc).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).NoWrap()
+						})
+					})
+					if card.Clicked() {
+						if item.prompt != "" && bc.OnSubmitPrompt != nil {
+							bc.OnSubmitPrompt(item.prompt)
+						} else if bc.OnOpenHelm != nil {
+							bc.OnOpenHelm()
+						}
+					}
 				}
-			}
+			})
+
+			ui.Row(c.Key("conv-empty-shortcuts")).Gap(16).AlignItems(ui.Center).Children(func() {
+				shortcuts := [][2]string{
+					{"SPC s", "Helm Search"},
+					{"SPC w v", "Split Pane"},
+					{"SPC l c", "New Workspace"},
+					{"SPC b m", "Switch Model"},
+				}
+				for _, sc := range shortcuts {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Row(c).Padding(2, 6).Radius(theme.RadiusSmall).
+							Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.40, 0.62)).
+							BorderWidth(1).BorderColor(th.BorderSubtle).Children(func() {
+							ui.Text(c, sc[0]).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Info).NoWrap()
+						})
+						ui.Text(c, sc[1]).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).NoWrap()
+					})
+				}
+			})
 		})
 
-		// Quiet status summary footer + tiny green ready dot.
-		ui.Column(c.Key("doom-dash-footer")).AlignItems(ui.Center).Gap(10).Children(func() {
-			footer := fmt.Sprintf("Marlin AI · %d buffers ready · %s", len(Catalog()), th.Name)
-			ui.Text(c, footer).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.BannerInk).NoWrap()
-			ui.Box(c).Width(10).Height(10).Radius(theme.RadiusPill).Background(th.Success)
-		})
+		renderConversationComposerBar(c, tr, bc, th)
 	})
 }

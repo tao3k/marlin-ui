@@ -469,7 +469,11 @@ func (f *Frame) OpenMinibuffer(mode minibuffer.Mode) {
 	f.meowState.ClearKeypad()
 	f.miniState.Open(mode)
 	if mode == minibuffer.ModeHelm && f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.HelmSearch != nil {
-		f.Adaptive.Desktop.HelmSearch.SetQuery("")
+		seed := f.helmInitialQuery()
+		if seed != "" {
+			f.miniState.SetInput(seed)
+		}
+		f.Adaptive.Desktop.HelmSearch.SetQuery(seed)
 	}
 	f.invalidate()
 }
