@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go Vet (Desktop, Mobile, Web WASM)
+        run: |
+          CGO_ENABLED=0 go vet ./internal/... ./cmd/marlin-desktop ./cmd/marlin-mobile
+          GOOS=js GOARCH=wasm CGO_ENABLED=0 go vet ./cmd/marlin-web
+      - name: Go Tests & Race Detector
+        run: |
+          CGO_ENABLED=0 go test ./internal/... ./cmd/marlin-desktop ./cmd/marlin-mobile
+          go test -race ./internal/...
+      - name: Compile-Time Feature Pruning Gate (Desktop, Mobile, Web WASM)
+        run: |
+          if go list -tags marlin_minimal -deps ./cmd/marlin-desktop | grep -q "marlin-mygo/features/"; then exit 1; fi
+          if go list -tags marlin_minimal -deps ./cmd/marlin-mobile | grep -q "marlin-mygo/features/"; then exit 1; fi
+          if GOOS=js GOARCH=wasm go list -tags marlin_minimal -deps ./cmd/marlin-web | grep -q "marlin-mygo/features/"; then exit 1; fi
+          CGO_ENABLED=0 go build -tags marlin_minimal -o /dev/null ./cmd/marlin-desktop
+          CGO_ENABLED=0 go build -tags marlin_full -o /dev/null ./cmd/marlin-desktop
+          CGO_ENABLED=0 go build -tags marlin_minimal -o /dev/null ./cmd/marlin-mobile
+          CGO_ENABLED=0 go build -tags marlin_full -o /dev/null ./cmd/marlin-mobile
+          GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -tags marlin_minimal -o /dev/null ./cmd/marlin-web
+          GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -tags marlin_full -o /dev/null ./cmd/marlin-web
+      - name: REUSE 3.3 License Compliance
+        uses: fsfe/reuse-action@v5

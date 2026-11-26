@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+#+title: Marlin UI — Unified Desktop, Mobile, and Web Client for Marlin Agent Core
+#+filetags: :tao3k:marlin:ui:desktop:mobile:wasm:grpc:
+
+=marlin-ui= is the official three-platform release client for
+[[https://github.com/tao3k/marlin-agent-core][Marlin Agent Core]], built as a
+thin product shell over the
+[[https://github.com/tao3k/marlin-mygo][marlin-mygo]] pure-Go 120Hz GPU UI
+engine library (=CGO_ENABLED=0=).
+
+* Architecture Boundary
+
+- *[[https://github.com/tao3k/marlin-mygo][marlin-mygo]] (Library)*: Owns the
+  120Hz GPU scene/layout engine, Emacs composable =WindowTree=, 100k-hit
+  zero-alloc =Helm= live search engine, Tier-0 =PromptGate= & UI Governance
+  Console, =fsync=/=localStorage= power-loss continuity, gRPC transport
+  adapters, and opt-in build-tag features (=chatroom=, =compare=, =canvas=).
+- *=marlin-ui= (Release Application)*: Owns the unified three-target launch
+  entrypoints, gRPC startup connection to =marlin-agent-core= (remote TLS 1.3 /
+  mTLS host or bundled/installed =marlin-app-server= sidecar), feature profile
+  packaging, and cross-platform CI/Release artifacts.
+
+* Three Release Targets
+
+| Target  | Entrypoint            | Platforms                                 | Transport / Continuity                          |
+|---------+-----------------------+-------------------------------------------+-------------------------------------------------|
+| Desktop | =cmd/marlin-desktop=  | macOS (arm64/amd64), Linux, Windows       | HTTP/2 gRPC (local sidecar or TLS 1.3) + fsync  |
+| Mobile  | =cmd/marlin-mobile=   | iOS (Apple HIG 393x852), Android (M3)     | mTLS/TLS 1.3 gRPC + fsync + App Store 2.5.2 OTA |
+| Web     | =cmd/marlin-web=      | Browser WebAssembly (=GOOS=js GOARCH=wasm=) | Responsive Desktop/Phone + =localStorage= sync  |
+
+* Feature-Gated Builds (Zero Dead Code)
+
+#+begin_src shell
+# Minimal core client (zero optional features linked)
+just build-desktop marlin_minimal ./dist/marlin-desktop-core
+
+# Default client (core + Multi-Role Agent Chat Room)
+just build-desktop
+
+# Full client across Desktop, Mobile, and Web WASM (ChatRoom + Compare + Canvas)
+just build-all marlin_full
+
+# Verify compile-time feature pruning across all 3 targets
+just check-feature-pruning
+#+end_src
+
+* Connecting to Marlin Agent Core (gRPC)
+
+#+begin_src shell
+# Connect Desktop to a remote TLS 1.3 / mTLS Rust marlin-app-server
+./dist/marlin-desktop -host 127.0.0.1:50051 -token "$MARLIN_TOKEN" -ca ./ca.pem
+
+# Connect Desktop to an explicit installed marlin-app-server binary
+./dist/marlin-desktop -app-server /usr/local/bin/marlin-app-server
+
+# Connect Mobile Companion (iOS or Android viewport profile) to remote Rust host
+./dist/marlin-mobile -platform ios -host tailnet-host:50051 -token "$MARLIN_TOKEN" -ca ./ca.pem
+
+# Local DEV-ONLY helper (uses sibling marlin-agent-core target binary via Justfile)
+just dev-desktop
+just dev-test-rust
+#+end_src
+
+* License
+
+Licensed under =Apache-2.0 AND LGPL-2.1-or-later=. See [[file:LICENSE][LICENSE]] and [[file:LICENSES/][LICENSES/]].

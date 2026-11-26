@@ -1,0 +1,96 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+name: Release (Desktop, Mobile, Web WASM)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop-and-mobile:
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: linux
+            goarch: arm64
+            ext: ""
+          - goos: windows
+            goarch: amd64
+            ext: ".exe"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Desktop & Mobile Companion Binaries (CGO_ENABLED=0)
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -tags marlin_full \
+            -o "dist/marlin-desktop-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" ./cmd/marlin-desktop
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -tags marlin_full \
+            -o "dist/marlin-mobile-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" ./cmd/marlin-mobile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  build-web-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Static WebAssembly Bundle
+        run: |
+          mkdir -p dist/web
+          GOOS=js GOARCH=wasm CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -tags marlin_full \
+            -o dist/web/marlin-web.wasm ./cmd/marlin-web
+          cp cmd/marlin-web/index.html dist/web/index.html
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" dist/web/wasm_exec.js 2>/dev/null || cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" dist/web/wasm_exec.js
+          tar -czf dist/marlin-web-wasm.tar.gz -C dist web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-wasm
+          path: dist/marlin-web-wasm.tar.gz
+
+  publish-release:
+    needs: [build-desktop-and-mobile, build-web-wasm]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
