@@ -18,6 +18,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/modeline"
 	"github.com/tao3k/marlin-ui/internal/emacs/tabs"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
@@ -757,6 +758,81 @@ func (f *Frame) renderEdgeSidebar(
 		Palette:  pal,
 		Surface:  kit.SurfaceOptions{Glass: mods.Glass, GlassOpacity: effOp, Motion: mods.Motion},
 	})
+}
+
+func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {
+	th := snap.Theme
+	activeBuf := snap.ActiveBuffer
+	actLabel := "Ready"
+	actCol := th.Success
+	remoteHost := ""
+	if f.Link != nil {
+		switch f.Link.Mode {
+		case hostlink.ModeSidecar:
+			actLabel = "Online"
+			actCol = th.Success
+		case hostlink.ModeRemoteGRPC:
+			actLabel = "Remote"
+			actCol = th.Info
+			remoteHost = f.Link.Endpoint
+		default:
+			actLabel = "Local"
+			actCol = th.Warning
+		}
+	}
+	sessID := f.AppCfg.SessionID
+	if sessLbl != "" {
+		sessID = sessLbl
+	}
+	turns := 0
+	helmTotal := 0
+	if f.Adaptive != nil && f.Adaptive.Desktop != nil {
+		if f.Adaptive.Desktop.ActiveSessionID != "" {
+			sessID = f.Adaptive.Desktop.ActiveSessionID
+		}
+		if f.Adaptive.Desktop.Transcript != nil {
+			turns = f.Adaptive.Desktop.Transcript.Len()
+			if f.Adaptive.Desktop.Transcript.InFlight() {
+				actLabel = "Working"
+				actCol = th.Info
+			}
+		}
+		if f.Adaptive.Desktop.HelmSearch != nil && f.Adaptive.Desktop.HelmSearch.Engine != nil {
+			helmTotal, _, _, _ = f.Adaptive.Desktop.HelmSearch.Engine.Stats()
+		}
+	}
+
+	preset := modeline.PresetMain
+	if f.miniState.IsCompletionActive() {
+		preset = modeline.PresetHelm
+	} else if activeBuf == buffer.Dashboard || (activeBuf == buffer.Conversation && turns == 0) {
+		preset = modeline.PresetDashboard
+	}
+
+	ver := ""
+	if preset == modeline.PresetDashboard {
+		ver = "MARLIN"
+	}
+	return modeline.Status{
+		Preset:        preset,
+		KeyMode:       f.meowState.Mode(),
+		MiniMode:      f.miniState.Mode(),
+		Keypad:        f.meowState.Keypad(),
+		BufferName:    string(activeBuf),
+		MajorMode:     majorModeName(activeBuf),
+		WorkspacePath: "~/marlin/" + sessID + "/",
+		RemoteHost:    remoteHost,
+		ActivityLabel: actLabel,
+		ActivityColor: actCol,
+		ModelLabel:    modelLbl,
+		StatusItems:   snap.StatusItems,
+		SessionID:     sessID,
+		RowCount:      turns,
+		HelmTotal:     helmTotal,
+		ShowGateBadge: activeBuf != buffer.Dashboard,
+		VersionLabel:  ver,
+		Theme:         th,
+	}
 }
 
 func majorModeName(id buffer.ID) string {

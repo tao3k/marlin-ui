@@ -394,8 +394,9 @@ func FromUITheme(id, name string, mt schema.UITheme) Theme {
 	}
 }
 
-// ApplyToMyGo configures MyGo's *ui.Theme from th and its compiled Sheet.
-func ApplyToMyGo(c *ui.Context, th Theme) {
+// ToMyGoTheme converts th into a reusable *ui.Theme so Frame snapshots can
+// cache it once per theme change (zero per-frame heap allocations on 120Hz render).
+func (th Theme) ToMyGoTheme() *ui.Theme {
 	t := ui.DarkTheme()
 	if th.IsLight {
 		t = ui.LightTheme()
@@ -417,7 +418,12 @@ func ApplyToMyGo(c *ui.Context, th Theme) {
 	t.FontSize = FontSizeBody
 	t.Radius = th.Sheet.VarPx("--radius-control", RadiusControl)
 	t.Spacing = 4
-	c.SetTheme(t)
+	return t
+}
+
+// ApplyToMyGo configures MyGo's *ui.Theme from th and its compiled Sheet.
+func ApplyToMyGo(c *ui.Context, th Theme) {
+	c.SetTheme(th.ToMyGoTheme())
 }
 
 // ToKitPalette projects Marlin UI's Theme into marlin-mygo/runtime/kit.Palette

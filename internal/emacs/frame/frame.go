@@ -113,13 +113,16 @@ type Frame struct {
 	tableCursor     int
 	messagesLog     []string
 
-	meowState *meow.State
-	miniState *minibuffer.State
-	customize *buffer.CustomizeState
+	meowState      *meow.State
+	miniState      *minibuffer.State
+	customize      *buffer.CustomizeState
+	thinkingMu     sync.RWMutex
+	thinkingOpened map[string]bool
 
 	// Deterministic RCU render snapshot + coalesced off-lock reload lane + 120Hz frame pacer.
 	snapStore      *async.SnapshotStore[frameSnapshot]
 	reloadLane     *async.FencedLane[struct{}, appconfig.UIThemeBundle]
+	wbSyncLane     *async.FencedLane[schema.UIWorkbenchSnapshot, schema.UIWorkbenchSnapshot]
 	pacer          *async.FramePacer
 	pkgStore       *marketplace.PackageStore
 	pkgRefreshLane *async.FencedLane[struct{}, marketplace.PackageStoreSnapshot]
@@ -131,6 +134,7 @@ type Frame struct {
 	onGlassChanged      func(enabled bool)
 	onThemeChanged      func(isLight bool)
 	refocusFrame        atomic.Bool
+	inView              atomic.Bool
 	roomStatsFn         func() (done, total, onlineAgents, totalAgents int)
 	roomTasksFn         func() []widgets.TaskItem
 	onAddTaskFn         func(title string) error
@@ -167,6 +171,7 @@ func New(cfg Config) *Frame {
 		meowState:           meow.New(),
 		miniState:           minibuffer.New(),
 		customize:           buffer.NewCustomizeState(cfg.AppConfig, cfg.Prefs),
+		thinkingOpened:      make(map[string]bool),
 		onReloadThemeBundle: cfg.OnReloadThemeBundle,
 		onGlassChanged:      cfg.OnGlassChanged,
 		onThemeChanged:      cfg.OnThemeChanged,
@@ -218,6 +223,11 @@ func (f *Frame) Echo(msg string) {
 }
 
 func (f *Frame) requestFrame() {
+	// Skip redundant async win.Invalidate() while already inside Frame.View(c):
+	// MyGo is actively building & painting this exact frame right now.
+	if f.inView.Load() {
+		return
+	}
 	if f.pacer != nil {
 		f.pacer.RequestFrame()
 		return
@@ -230,9 +240,11 @@ func (f *Frame) requestFrame() {
 // SelectBuffer focuses an Emacs buffer (adding it to sort-tab if not open)
 // and closes any open Minibuffer completion list.
 func (f *Frame) SelectBuffer(id buffer.ID) {
+	wasMini := f.miniState.IsCompletionActive()
 	f.miniState.Close()
 	f.meowState.ClearKeypad()
 	f.mu.Lock()
+	wasWeb := f.activeFeatureID == "feature:webisland" || f.activePluginID != ""
 	f.activeBuffer = id
 	f.activeFeatureID = ""
 	f.activeExtID = ""
@@ -251,7 +263,9 @@ func (f *Frame) SelectBuffer(id buffer.ID) {
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
 	f.notifyWebIslandVisibility("")
-	f.refocusFrame.Store(true)
+	if wasWeb || wasMini {
+		f.refocusFrame.Store(true)
+	}
 	f.requestFrame()
 }
 
@@ -312,9 +326,11 @@ func (f *Frame) SelectFeature(fid string) {
 	if f.selectMountedPlugin(fid) {
 		return
 	}
+	wasMini := f.miniState.IsCompletionActive()
 	f.miniState.Close()
 	f.meowState.ClearKeypad()
 	f.mu.Lock()
+	wasWeb := f.activeFeatureID == "feature:webisland" || f.activePluginID != ""
 	f.activePluginID = ""
 	if strings.HasPrefix(fid, "scheme-ext:") {
 		f.activeExtID = strings.TrimPrefix(fid, "scheme-ext:")
@@ -329,8 +345,10 @@ func (f *Frame) SelectFeature(fid string) {
 		f.notifyWebIslandVisibility("workflow-graph")
 	} else {
 		f.notifyWebIslandVisibility("")
+		if wasWeb || wasMini {
+			f.refocusFrame.Store(true)
+		}
 	}
-	f.refocusFrame.Store(true)
 	f.requestFrame()
 }
 
@@ -523,52 +541,34 @@ func (f *Frame) SyncSavedRemote(r appconfig.SavedRemote) {
 	}
 }
 
-func (f *Frame) syncFromGRPCWorkbench() {
+func (f *Frame) syncFromGRPCWorkbench() (schema.UIWorkbenchSnapshot, bool) {
 	if f.Adaptive == nil || f.Adaptive.Desktop == nil || f.Adaptive.Desktop.Workbench == nil {
-		return
+		return schema.UIWorkbenchSnapshot{}, false
 	}
 	snap, ok := f.Adaptive.Desktop.Workbench.Snapshot()
-	if !ok || snap.Generation == f.syncedWBGen.Load() {
-		return
+	if !ok || snap == nil || snap.Generation == f.syncedWBGen.Load() {
+		return schema.UIWorkbenchSnapshot{}, false
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if snap.Generation == f.syncedWBGen.Load() {
-		return
+	val := *snap
+	if f.wbSyncLane != nil {
+		f.wbSyncLane.Submit(val)
 	}
-	f.syncedWBGen.Store(snap.Generation)
-	if strings.TrimSpace(snap.ModelLabel) != "" {
-		f.modelLabel = strings.TrimSpace(snap.ModelLabel)
-	}
-	if strings.TrimSpace(snap.SessionLabel) != "" {
-		f.sessionLabel = strings.TrimSpace(snap.SessionLabel)
-	}
-	if len(snap.StatusItems) > 0 {
-		f.statusItems = append([]schema.UIStatusItem(nil), snap.StatusItems...)
-	}
-	if len(snap.Extensions) > 0 {
-		f.schemeExts = append([]schema.UIExtensionRegion(nil), snap.Extensions...)
-	}
-	if len(snap.Commands) > 0 {
-		f.schemeCmds = append([]schema.UICommandSpec(nil), snap.Commands...)
-	}
-	if !f.themeUserSet && snap.Theme.Canvas != snap.Theme.Ink && snap.ProfileName != "" && !strings.HasPrefix(snap.ProfileName, "adaptive-") {
-		f.Theme = theme.FromUITheme(snap.ProfileName, snap.ProfileName, snap.Theme)
-		f.logMessage("synced marlin.ui.v1 workbench profile=" + snap.ProfileName)
-	}
-	f.publishSnapshotLocked()
+	return val, true
 }
 
 // View is the single ui.View callback passed to mygo.NewWindow for Desktop.
 // Reads Frame state via wait-free atomic.Pointer RCU snapshot (zero f.mu locks!).
 func (f *Frame) View(c *ui.Context) {
+	f.inView.Store(true)
+	defer f.inView.Store(false)
+
 	var frameStart time.Time
 	if f.pacer != nil {
 		frameStart = f.pacer.MarkFrameStart()
 		f.pacer.SetWindowFocused(c.WindowActive())
 		defer func() { f.pacer.RecordFrame(time.Since(frameStart)) }()
 	}
-	f.syncFromGRPCWorkbench()
+	wbOverlay, hasWBOverlay := f.syncFromGRPCWorkbench()
 
 	frameEl := ui.Column(c.Key("doom-frame")).Fill().TabStop(false).FocusRing(false).
 		AutoFocus(ui.FocusOptions{PreventScroll: true}).AlignItems(ui.Stretch)
@@ -579,7 +579,22 @@ func (f *Frame) View(c *ui.Context) {
 	}
 
 	// Single wait-free RCU snapshot load (zero mutex acquisitions, zero slice copies!).
+	snapVer := f.snapVersion()
 	snap := f.loadSnapshot()
+	if hasWBOverlay {
+		if strings.TrimSpace(wbOverlay.ModelLabel) != "" {
+			snap.ModelLabel = strings.TrimSpace(wbOverlay.ModelLabel)
+		}
+		if strings.TrimSpace(wbOverlay.SessionLabel) != "" {
+			snap.SessionLabel = strings.TrimSpace(wbOverlay.SessionLabel)
+		}
+		if len(wbOverlay.StatusItems) > 0 {
+			snap.StatusItems = wbOverlay.StatusItems
+		}
+		if len(wbOverlay.Extensions) > 0 {
+			snap.SchemeExts = wbOverlay.Extensions
+		}
+	}
 	th := snap.Theme
 	availThemes := snap.ThemeCatalog
 	dashNode := snap.DashboardNode
@@ -591,6 +606,9 @@ func (f *Frame) View(c *ui.Context) {
 	schemeExts := snap.SchemeExts
 	cursor := snap.TableCursor
 	modelLbl := snap.ModelLabel
+	if modelLbl == "" && f.AppCfg.ModelCfg.Loaded {
+		modelLbl = f.AppCfg.ModelCfg.SummaryLabel()
+	}
 	sessLbl := snap.SessionLabel
 	msgs := snap.MessagesLog
 	mods := snap.UIModules
@@ -606,7 +624,11 @@ func (f *Frame) View(c *ui.Context) {
 		}
 	}
 
-	theme.ApplyToMyGo(c, th)
+	if snap.MyGoTheme != nil {
+		c.SetTheme(snap.MyGoTheme)
+	} else {
+		theme.ApplyToMyGo(c, th)
+	}
 
 	var featBufs []tabs.FeatureTab
 	if f.FeatureHost != nil {
@@ -691,6 +713,7 @@ func (f *Frame) View(c *ui.Context) {
 		FeatureLedger:       f.FeatureLedger,
 		FeatureHost:         f.FeatureHost,
 		WebHost:             f.WebHost,
+		ModelCfg:            f.AppCfg.ModelCfg,
 		ActiveModel:         modelLbl,
 		TableCursor:         cursor,
 		MessagesLog:         msgs,
@@ -725,6 +748,18 @@ func (f *Frame) View(c *ui.Context) {
 		OnPackageApply:     f.ApplyPackage,
 		OnSavePrefs:        f.saveCustomizePrefs,
 		OnEcho:             f.Echo,
+		IsThinkingOpen: func(key string) bool {
+			f.thinkingMu.RLock()
+			v := f.thinkingOpened[key]
+			f.thinkingMu.RUnlock()
+			return v
+		},
+		ToggleThinking: func(key string) {
+			f.thinkingMu.Lock()
+			f.thinkingOpened[key] = !f.thinkingOpened[key]
+			f.thinkingMu.Unlock()
+			f.invalidate()
+		},
 	}
 
 	mapCtx := mapper.Context{
@@ -789,9 +824,37 @@ func (f *Frame) View(c *ui.Context) {
 				OnOpenSettings:  f.OpenSettings,
 			})
 		} else if tb := c.TitleBar(); tb.Height > 0 {
-			// In Zen Mode with hidden native titlebar, reserve a transparent draggable
-			// strip behind the macOS traffic lights so widgets never collide with them.
 			ui.Row(c.Key("zen-titlebar-drag")).Height(tb.Height).Background(ui.Transparent).DragWindow()
+		}
+
+		// Zero-stale-frame tab switch: if clicking a sort-tab updated the RCU
+		// snapshot during Pass 0, reload immediately (<5ns) before painting the
+		// viewport and modeline so Pass 0 paints the target tab with 0 wasted work.
+		if f.snapVersion() != snapVer {
+			snap = f.loadSnapshot()
+			activeBuf = snap.ActiveBuffer
+			activeFeat = snap.ActiveFeatureID
+			activeExtID = snap.ActiveExtID
+			activeExt = nil
+			for i := range snap.SchemeExts {
+				if snap.SchemeExts[i].ID == activeExtID {
+					cp := snap.SchemeExts[i]
+					activeExt = &cp
+					break
+				}
+			}
+			_, activePlugin = f.appendMountedPluginTabs(snap, nil)
+			isDashboard = activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
+			if f.pacer != nil {
+				f.pacer.SetLiveClockVisible(isDashboard && mods.Motion)
+			}
+			if isDashboard && sig == nil {
+				sig = f.buildLiveSignals(th, modelLbl, sessLbl, pendingGateCount)
+				wrt = f.buildWidgetRuntime(snap, mods, pendingGateCount, gateTitle, gateID, pg)
+				wrt.Modules.GlassOpacity = glassOp
+				bc.Signals = sig
+				bc.WidgetRuntime = wrt
+			}
 		}
 
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
@@ -818,6 +881,7 @@ func (f *Frame) View(c *ui.Context) {
 				Keypad:            kp,
 				ActiveHydra:       activeHydra,
 				Helm:              helm,
+				RustConnected:     f.Link != nil && f.Link.Mode != hostlink.ModeStandalone,
 				GateTitle:         gateTitle,
 				GatePrompt:        gatePrompt,
 				CommandCandidates: f.commandCandidates,
@@ -915,81 +979,4 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 			return true
 		},
 	})
-}
-
-func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {
-	th := snap.Theme
-	activeBuf := snap.ActiveBuffer
-	actLabel := "Ready"
-	actCol := th.Success
-	remoteHost := ""
-	if f.Link != nil {
-		switch f.Link.Mode {
-		case hostlink.ModeSidecar:
-			actLabel = "Online"
-			actCol = th.Success
-		case hostlink.ModeRemoteGRPC:
-			actLabel = "Remote"
-			actCol = th.Info
-			remoteHost = f.Link.Endpoint
-		default:
-			actLabel = "Local"
-			actCol = th.Warning
-		}
-	}
-	sessID := f.AppCfg.SessionID
-	if sessLbl != "" {
-		sessID = sessLbl
-	}
-	turns := 0
-	helmTotal := 0
-	if f.Adaptive != nil && f.Adaptive.Desktop != nil {
-		if f.Adaptive.Desktop.ActiveSessionID != "" {
-			sessID = f.Adaptive.Desktop.ActiveSessionID
-		}
-		if f.Adaptive.Desktop.Transcript != nil {
-			turns = f.Adaptive.Desktop.Transcript.Len()
-			if f.Adaptive.Desktop.Transcript.InFlight() {
-				actLabel = "Working"
-				actCol = th.Info
-			}
-		}
-		if f.Adaptive.Desktop.HelmSearch != nil && f.Adaptive.Desktop.HelmSearch.Engine != nil {
-			helmTotal, _, _, _ = f.Adaptive.Desktop.HelmSearch.Engine.Stats()
-		}
-	}
-
-	preset := modeline.PresetMain
-	if f.miniState.IsCompletionActive() {
-		preset = modeline.PresetHelm
-	} else if activeBuf == buffer.Dashboard || (activeBuf == buffer.Conversation && turns == 0) {
-		preset = modeline.PresetDashboard
-	}
-
-	statusItems := snap.StatusItems
-
-	ver := ""
-	if preset == modeline.PresetDashboard {
-		ver = "MARLIN"
-	}
-	return modeline.Status{
-		Preset:        preset,
-		KeyMode:       f.meowState.Mode(),
-		MiniMode:      f.miniState.Mode(),
-		Keypad:        f.meowState.Keypad(),
-		BufferName:    string(activeBuf),
-		MajorMode:     majorModeName(activeBuf),
-		WorkspacePath: "~/marlin/" + sessID + "/",
-		RemoteHost:    remoteHost,
-		ActivityLabel: actLabel,
-		ActivityColor: actCol,
-		ModelLabel:    modelLbl,
-		StatusItems:   statusItems,
-		SessionID:     sessID,
-		RowCount:      turns,
-		HelmTotal:     helmTotal,
-		ShowGateBadge: activeBuf != buffer.Dashboard,
-		VersionLabel:  ver,
-		Theme:         th,
-	}
 }

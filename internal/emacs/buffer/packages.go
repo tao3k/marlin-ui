@@ -155,8 +155,8 @@ func renderPackageRow(c *ui.Context, pkg marketplace.ManagedPackage, selected bo
 	row.Children(func() {
 		ui.Column(c).Width(210).Gap(1).Children(func() {
 			ui.Text(c, pkg.Name).Font(theme.FontMono).FontSize(theme.FontSizeUI).
-				FontWeight(600).TextColor(th.Ink).NoWrap().MaxLines(1)
-			ui.Text(c, pkg.ID).Font(theme.FontMono).FontSize(10).
+				FontWeight(700).TextColor(th.Ink).NoWrap().MaxLines(1)
+			ui.Text(c, pkg.ID).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
 				FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).NoWrap().MaxLines(1)
 		})
 		ui.Text(c, string(pkg.Kind)).Width(82).Font(theme.FontMono).FontSize(theme.FontSizeMeta).

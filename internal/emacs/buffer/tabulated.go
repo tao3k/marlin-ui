@@ -133,25 +133,66 @@ func renderProcesses(c *ui.Context, th theme.Theme, bc *Context) {
 
 func renderModels(c *ui.Context, th theme.Theme, bc *Context) {
 	ui.Column(c.Key("buf-models")).Fill().AlignItems(ui.Stretch).Children(func() {
+		if bc != nil && bc.ModelCfg.Loaded {
+			info := fmt.Sprintf("Config: %s (%s)", bc.ModelCfg.SourcePath, bc.ModelCfg.SourceOrigin)
+			if think := bc.ModelCfg.ThinkingSummary(); think != "" {
+				info += "  ·  thinking: " + think
+			}
+			ui.Row(c.Key("models-cfg-banner")).Padding(8, 16).Background(theme.GlassTone(c, th.Bar, th, 0.36, 0.60)).
+				BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
+				ui.Text(c, info).Font(theme.FontMono).FontSize(12).TextColor(th.Info).NoWrap()
+			})
+		}
 		theme.TabulatedHeader(c, []theme.TableColumn{
-			{Label: "ALIAS", Width: 220},
-			{Label: "PROVIDER", Width: 140},
-			{Label: "ROUTE"},
+			{Label: "ALIAS", Width: 190},
+			{Label: "PROVIDER", Width: 120},
+			{Label: "MODEL", Width: 200},
+			{Label: "PROTOCOL", Width: 150},
+			{Label: "CREDENTIAL"},
 		}, th)
+		if bc != nil && bc.ModelCfg.Loaded {
+			routes := bc.ModelCfg.Routes()
+			if len(routes) > 0 {
+				ui.Scroll(c.Key("models-scroll")).Grow(1).Children(func() {
+					ui.Column(c).AlignItems(ui.Stretch).Children(func() {
+						for _, rt := range routes {
+							cred := rt.CredentialEnv
+							credCol := th.InkMuted
+							if cred != "" {
+								if rt.CredentialConfigured(nil) {
+									cred += " (set)"
+									credCol = th.Success
+								} else {
+									cred += " (unset)"
+									credCol = th.Warning
+								}
+							} else {
+								cred = "host-managed"
+							}
+							theme.TabulatedRow(c, "mrow-"+rt.Alias, []theme.TableColumn{
+								{Label: rt.Alias, Width: 190, Color: th.Info, Bold: rt.IsDefault},
+								{Label: rt.Provider, Width: 120, Color: th.Accent},
+								{Label: rt.Model, Width: 200, Color: th.Ink},
+								{Label: rt.Protocol, Width: 150, Color: th.InkMuted},
+								{Label: cred, Color: credCol},
+							}, rt.IsDefault, th)
+						}
+					})
+				})
+				return
+			}
+		}
 		activeModel := "host-default"
 		if bc != nil && bc.ActiveModel != "" {
 			activeModel = bc.ActiveModel
 		}
-		rows := [][3]string{
-			{activeModel, "marlin-core", "active marlin.ui.v1 ConversationJournal route"},
-		}
-		for _, r := range rows {
-			theme.TabulatedRow(c, "mrow-"+r[0], []theme.TableColumn{
-				{Label: r[0], Width: 220, Color: th.Info, Bold: true},
-				{Label: r[1], Width: 140, Color: th.Accent},
-				{Label: r[2], Color: th.InkMuted},
-			}, true, th)
-		}
+		theme.TabulatedRow(c, "mrow-default", []theme.TableColumn{
+			{Label: activeModel, Width: 190, Color: th.Info, Bold: true},
+			{Label: "marlin-core", Width: 120, Color: th.Accent},
+			{Label: "no example.toml loaded", Width: 200, Color: th.InkMuted},
+			{Label: "grpc", Width: 150, Color: th.InkMuted},
+			{Label: "pass -config ./example.toml", Color: th.Warning},
+		}, true, th)
 	})
 }
 

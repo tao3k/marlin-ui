@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/async"
@@ -27,6 +29,7 @@ import (
 // a single wait-free atomic.Pointer Load (< 5ns, zero mutex acquisitions).
 type frameSnapshot struct {
 	Theme           theme.Theme
+	MyGoTheme       *ui.Theme
 	ThemeCatalog    []theme.Theme
 	SurfaceCfg      appconfig.SurfaceConfig
 	ThemeSurfaces   map[string]appconfig.SurfaceConfig
@@ -70,6 +73,17 @@ func (f *Frame) initAsyncRuntime() {
 			f.commitReloadedBundle(bundle)
 		},
 	)
+	f.wbSyncLane = async.NewFencedLane[schema.UIWorkbenchSnapshot, schema.UIWorkbenchSnapshot](
+		func(ctx context.Context, snap schema.UIWorkbenchSnapshot) (schema.UIWorkbenchSnapshot, error) {
+			if ctx.Err() != nil {
+				return schema.UIWorkbenchSnapshot{}, ctx.Err()
+			}
+			return snap, nil
+		},
+		func(_ uint64, snap schema.UIWorkbenchSnapshot) {
+			f.commitGRPCWorkbenchSnapshot(snap)
+		},
+	)
 }
 
 func (f *Frame) captureSnapshotLocked() frameSnapshot {
@@ -83,6 +97,7 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 	}
 	return frameSnapshot{
 		Theme:           f.Theme,
+		MyGoTheme:       f.Theme.ToMyGoTheme(),
 		ThemeCatalog:    append([]theme.Theme(nil), f.themeCatalog...),
 		SurfaceCfg:      f.surfaceCfg,
 		ThemeSurfaces:   surfs,
@@ -145,6 +160,16 @@ func (f *Frame) loadSnapshot() frameSnapshot {
 	return f.captureSnapshotLocked()
 }
 
+// snapVersion returns the monotonic RCU snapshot generation in < 5ns (wait-free).
+func (f *Frame) snapVersion() uint64 {
+	if f.snapStore != nil {
+		if s := f.snapStore.Load(); s != nil {
+			return s.Gen
+		}
+	}
+	return 0
+}
+
 // ReloadThemesAsync schedules an off-lock, coalesced, epoch-fenced reload of
 // ~/.config/marlin/ui/ (used by the live file watcher so disk I/O NEVER blocks
 // the 120Hz GPU render thread).
@@ -197,10 +222,45 @@ func (f *Frame) FrameTelemetry() (uint64, uint64, time.Duration) {
 	return f.pacer.Telemetry()
 }
 
+// commitGRPCWorkbenchSnapshot applies a new marlin.ui.v1 workbench snapshot
+// off the 120Hz render thread via wbSyncLane.
+func (f *Frame) commitGRPCWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if snap.Generation == f.syncedWBGen.Load() {
+		return
+	}
+	f.syncedWBGen.Store(snap.Generation)
+	if strings.TrimSpace(snap.ModelLabel) != "" {
+		f.modelLabel = strings.TrimSpace(snap.ModelLabel)
+	}
+	if strings.TrimSpace(snap.SessionLabel) != "" {
+		f.sessionLabel = strings.TrimSpace(snap.SessionLabel)
+	}
+	if len(snap.StatusItems) > 0 {
+		f.statusItems = append([]schema.UIStatusItem(nil), snap.StatusItems...)
+	}
+	if len(snap.Extensions) > 0 {
+		f.schemeExts = append([]schema.UIExtensionRegion(nil), snap.Extensions...)
+	}
+	if len(snap.Commands) > 0 {
+		f.schemeCmds = append([]schema.UICommandSpec(nil), snap.Commands...)
+	}
+	if !f.themeUserSet && snap.Theme.Canvas != snap.Theme.Ink && snap.ProfileName != "" && !strings.HasPrefix(snap.ProfileName, "adaptive-") {
+		f.Theme = theme.FromUITheme(snap.ProfileName, snap.ProfileName, snap.Theme)
+		f.logMessage("synced marlin.ui.v1 workbench profile=" + snap.ProfileName)
+	}
+	f.publishSnapshotLocked()
+	f.requestFrame()
+}
+
 // Close cancels and drains all background async lanes cleanly (quiescence barrier).
 func (f *Frame) Close() {
 	if f.reloadLane != nil {
 		f.reloadLane.Close()
+	}
+	if f.wbSyncLane != nil {
+		f.wbSyncLane.Close()
 	}
 	f.closePackageStore()
 }

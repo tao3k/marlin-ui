@@ -134,21 +134,49 @@ func RegisterUserIslands(islands map[string]string) {
 	}
 }
 
+// PrewarmWebIsland asynchronously pre-initializes islandID off the user's
+// first-click critical path (e.g. shortly after desktop window startup) so
+// switching to *Workflow Canvas* is instant with zero 300ms WKWebView boot stall.
+func PrewarmWebIsland(islandID string) {
+	if islandID == "" {
+		return
+	}
+	_ = WebIslandHost().Resolve(islandID)
+}
+
 // NotifyWebIslandVisibility enforces HybridWebViewFocusLifecycle.qnt focus
 // revocation: hidden islands invoke HideTab() (clearing shown & focused) while
-// the active island invokes ShowTab() when ready.
+// the active island invokes ShowTab() when ready. On visibility transitions,
+// dispatches a single lightweight marlin:visibility event to pause/resume
+// continuous SVG/CSS animations so hidden WebViews never contend with GPU tabs.
 func NotifyWebIslandVisibility(activeIslandID string) {
+	type visJob struct {
+		lane    *async.FencedLane[string, struct{}]
+		visible bool
+	}
+	var jobs []visJob
+
 	webIslandMu.Lock()
-	defer webIslandMu.Unlock()
 	for id, inst := range webViewCache {
 		if inst == nil || inst.lifecycle == nil {
 			continue
 		}
-		if id == activeIslandID {
+		_, wasShown, _, _ := inst.lifecycle.Snapshot()
+		wantShown := id == activeIslandID
+		if wantShown {
 			inst.lifecycle.ShowTab()
 		} else {
 			inst.lifecycle.HideTab()
 		}
+		_, nowShown, _, _ := inst.lifecycle.Snapshot()
+		if inst.evalLane != nil && nowShown != wasShown {
+			jobs = append(jobs, visJob{lane: inst.evalLane, visible: nowShown})
+		}
+	}
+	webIslandMu.Unlock()
+
+	for _, j := range jobs {
+		j.lane.Submit(kit.WebIslandVisibilityScript(j.visible))
 	}
 }
 
@@ -439,7 +467,6 @@ func (m *webIslandModule) Register(host *features.Host) error {
 			return
 		}
 		pal := paletteFromUITheme(t)
-		SyncWebIslandTheme(pal, webIslandOpacity)
 		stageBg := pal.Canvas
 		if c.Vibrancy() {
 			stageBg = ui.Transparent

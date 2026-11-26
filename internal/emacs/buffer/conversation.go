@@ -6,14 +6,17 @@ package buffer
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
+	"github.com/tao3k/marlin-mygo/engine/uistream"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
+	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
 // Classic Doom-style double-line ASCII banner matching the user's *doom* dashboard.
@@ -27,6 +30,40 @@ var doomMarlinBanner = []string{
 	"======================================================================",
 }
 
+func buildConversationMarkdownTheme(th theme.Theme) *markdown.Theme {
+	codeBg := kit.WithAlpha(th.SurfaceElevated, 0.72)
+	blockBg := kit.WithAlpha(th.Bar, 0.88)
+	return &markdown.Theme{
+		Font:                kit.FontDisplay,
+		CodeFont:            theme.FontMono,
+		FontSize:            14.5,
+		LineHeight:          1.58,
+		CodeLineHeight:      1.45,
+		Text:                th.Ink,
+		Muted:               th.InkMuted,
+		Link:                th.Info,
+		Strong:              th.Ink,
+		StrongWeight:        600,
+		Code:                th.Accent,
+		CodeBackground:      codeBg,
+		CodeSize:            0.88,
+		BlockSpacing:        0.72,
+		ItemSpacing:         0.28,
+		QuoteBar:            th.Accent,
+		QuoteText:           th.InkMuted,
+		QuoteBarWidth:       3,
+		Rule:                th.BorderSubtle,
+		CodeBlockBackground: blockBg,
+		CodeBlockBorder:     th.BorderSubtle,
+		CodeBlockRadius:     8,
+		CodeBlockPadding:    0.85,
+		TableBorder:         th.BorderSubtle,
+		TableHeader:         codeBg,
+		TableStripe:         kit.WithAlpha(th.SurfaceElevated, 0.25),
+		Checkbox:            th.Success,
+	}
+}
+
 func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 	if bc == nil || bc.Adaptive == nil || bc.Adaptive.Desktop == nil || bc.Adaptive.Desktop.Transcript == nil {
 		return
@@ -38,49 +75,419 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		return
 	}
 
-	// Clean full-bleed monospace conversation stream (zero chat bubble cards).
-	ui.Scroll(c.Key("conv-scroll")).Grow(1).Padding(18, 28).Children(func() {
-		ui.Column(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
-			for i := 0; i < n; i++ {
-				entry, ok := tr.Entry(i)
-				if !ok {
-					continue
-				}
-				roleText := "marlin ›"
-				roleTone := th.Accent
-				if entry.Role == mygoshell.RoleUser {
-					roleText = "you ›"
-					roleTone = th.Info
-				} else if entry.Role == mygoshell.RoleTool {
-					roleText = "tool ›"
-					roleTone = th.Warning
-				}
-				ui.Column(c.Key(fmt.Sprintf("conv-row-%d", i))).Padding(0, 0, 12, 0).Gap(6).
-					BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, roleText).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(roleTone).NoWrap()
-						if entry.Streaming {
-							kit.LoadingIndicator(c, 13, th.Info, false)
-							ui.Text(c, "working...").Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.Info).NoWrap()
-						}
-						if len(entry.Attachments) > 0 {
-							ui.Text(c, fmt.Sprintf("[%d attachment(s)]", len(entry.Attachments))).
-								Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
-						}
-					})
-					if entry.Role == mygoshell.RoleAssistant {
-						mdOpts := &markdown.Options{WrapCode: true}
-						if entry.Streaming {
-							markdown.Stream(c.Key(fmt.Sprintf("conv-md-%d", i)), entry.Text, mdOpts)
-						} else {
-							markdown.View(c.Key(fmt.Sprintf("conv-md-%d", i)), entry.Text, mdOpts)
-						}
-					} else {
-						ui.Text(c, entry.Text).Font(theme.FontMono).FontSize(theme.FontSizeBody).LineHeight(1.5).TextColor(th.Ink)
+	mdOpts := &markdown.Options{
+		Theme:          buildConversationMarkdownTheme(th),
+		WrapCode:       true,
+		ShareSelection: true,
+	}
+
+	ui.Column(c.Key("conv-root")).Fill().AlignItems(ui.Stretch).Children(func() {
+		renderConversationHeaderBar(c, th, bc)
+
+		ui.Scroll(c.Key("conv-scroll")).Grow(1).Padding(20, 28).Children(func() {
+			ui.Column(c).MaxWidth(900).Gap(18).AlignItems(ui.Stretch).Children(func() {
+				for i := 0; i < n; i++ {
+					entry, ok := tr.Entry(i)
+					if !ok {
+						continue
 					}
-				})
+					switch entry.Role {
+					case mygoshell.RoleUser:
+						renderUserMessageCard(c, i, entry, th)
+					case mygoshell.RoleThinking:
+						renderStandaloneThinkingDrawer(c, i, entry, tr, th)
+					case mygoshell.RoleTool:
+						renderToolCallCard(c, i, entry, tr, th)
+					case mygoshell.RoleGate:
+						renderHumanGateCard(c, i, entry, bc, th)
+					default:
+						renderAssistantMessageCard(c, i, entry, tr, bc, mdOpts, th)
+					}
+				}
+			})
+		})
+	})
+}
+
+func renderConversationHeaderBar(c *ui.Context, th theme.Theme, bc *Context) {
+	modelLabel := bc.ActiveModel
+	if modelLabel == "" && bc.ModelCfg.Loaded {
+		modelLabel = bc.ModelCfg.SummaryLabel()
+	}
+	if modelLabel == "" {
+		modelLabel = "marlin-core (default)"
+	}
+
+	connLabel := "Offline Preview"
+	connTone := th.Warning
+	if bc.Link != nil {
+		switch bc.Link.Mode {
+		case hostlink.ModeSidecar:
+			connLabel = "Rust gRPC · " + bc.Link.Endpoint
+			connTone = th.Success
+		case hostlink.ModeRemoteGRPC:
+			connLabel = "Remote gRPC · " + bc.Link.Endpoint
+			connTone = th.Info
+		}
+	}
+
+	ui.Row(c.Key("conv-header-bar")).Height(36).Padding(0, 24).Gap(10).AlignItems(ui.Center).
+		Background(theme.GlassTone(c, th.Bar, th, 0.32, 0.56)).
+		BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
+		ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(connTone)
+		ui.Text(c, modelLabel).Font(kit.FontDisplay).FontSize(13).FontWeight(600).TextColor(th.Ink).NoWrap()
+
+		if bc.ModelCfg.Loaded {
+			if proto := strings.TrimSpace(bc.ModelCfg.Default.Protocol); proto != "" {
+				renderMetaPill(c, proto, th.Accent, th)
+			}
+			if think := bc.ModelCfg.ThinkingSummary(); think != "" {
+				renderMetaPill(c, "thinking: "+think, th.Info, th)
+			}
+			if bc.ModelCfg.Default.CredentialEnv != "" {
+				if bc.ModelCfg.Default.CredentialConfigured(nil) {
+					renderMetaPill(c, bc.ModelCfg.Default.CredentialEnv+" ready", th.Success, th)
+				} else {
+					renderMetaPill(c, bc.ModelCfg.Default.CredentialEnv+" unset", th.Warning, th)
+				}
+			}
+		}
+
+		ui.Spacer(c)
+
+		ui.Text(c, connLabel).Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).NoWrap()
+		if bc.OnSelectBuffer != nil {
+			if theme.ActionLink(c, "conv-open-models", "Models", th.Info, th).Clicked() {
+				bc.OnSelectBuffer(Models)
+			}
+		}
+	})
+}
+
+func renderMetaPill(c *ui.Context, text string, tone ui.Color, th theme.Theme) {
+	ui.Row(c).Padding(2, 8).Radius(theme.RadiusPill).
+		Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.40, 0.62)).Children(func() {
+		ui.Text(c, text).Font(theme.FontMono).FontSize(11).FontWeight(600).TextColor(tone).NoWrap()
+	})
+}
+
+func renderUserMessageCard(c *ui.Context, idx int, entry mygoshell.TranscriptEntry, th theme.Theme) {
+	ui.Row(c.Key(fmt.Sprintf("conv-user-%d", idx))).Justify(ui.End).Children(func() {
+		ui.Column(c).MaxWidth(680).Padding(12, 16).Gap(6).Radius(14).
+			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.52, 0.78)).
+			BorderWidth(1).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.45, 0.65)).
+			AlignItems(ui.Stretch).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "You").Font(kit.FontDisplay).FontSize(12).FontWeight(700).TextColor(th.Info).NoWrap()
+				if len(entry.Attachments) > 0 {
+					renderMetaPill(c, fmt.Sprintf("%d attachment(s)", len(entry.Attachments)), th.InkMuted, th)
+				}
+			})
+			ui.Text(c, entry.Text).Font(kit.FontDisplay).FontSize(14.5).LineHeight(1.52).TextColor(th.Ink)
+		})
+	})
+}
+
+func renderAssistantMessageCard(
+	c *ui.Context,
+	idx int,
+	entry mygoshell.TranscriptEntry,
+	tr *mygoshell.TranscriptController,
+	bc *Context,
+	mdOpts *markdown.Options,
+	th theme.Theme,
+) {
+	thinkingText, bodyText, thinkingStreaming := uistream.SplitThinkTags(entry.Text)
+	isStubGateway := strings.Contains(bodyText, "[marlin-core] processed ") &&
+		strings.Contains(bodyText, "via durable ConversationJournal.")
+
+	ui.Column(c.Key(fmt.Sprintf("conv-asst-%d", idx))).Padding(6, 4, 14, 4).Gap(10).
+		BorderWidth(0, 0, 1, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.55)).
+		AlignItems(ui.Stretch).Children(func() {
+		// Role header bar with live streaming indicator + Copy button.
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Padding(2, 8).Radius(theme.RadiusPill).
+				Background(kit.WithAlpha(th.Accent, 0.16)).Children(func() {
+				ui.Text(c, "Marlin").Font(kit.FontDisplay).FontSize(12).FontWeight(700).TextColor(th.Accent).NoWrap()
+			})
+			if entry.Streaming {
+				kit.LoadingIndicator(c, 13, th.Info, false)
+				statusLbl := "Streaming..."
+				if thinkingStreaming {
+					statusLbl = "Reasoning..."
+				}
+				ui.Text(c, statusLbl).Font(kit.FontDisplay).FontSize(12).TextColor(th.Info).NoWrap()
+			} else if entry.OutcomeLabel != "" && entry.OutcomeLabel != "SESSION_TURN_OUTCOME_COMPLETED" {
+				renderMetaPill(c, entry.OutcomeLabel, th.InkMuted, th)
+			}
+			ui.Spacer(c)
+			if strings.TrimSpace(bodyText) != "" && tr.OnCopyCode != nil {
+				if theme.ActionLink(c, fmt.Sprintf("conv-copy-%d", idx), "Copy", th.InkMuted, th).Clicked() {
+					tr.OnCopyCode(bodyText)
+				}
 			}
 		})
+
+		// Collapsible Thinking / Reasoning block (folded by default like modern Agent platforms).
+		if strings.TrimSpace(thinkingText) != "" {
+			renderCollapsibleThinkingBox(c, fmt.Sprintf("think-inline-%d", idx), thinkingText, thinkingStreaming, bc, th)
+		}
+
+		// Rich proportional Markdown body.
+		if strings.TrimSpace(bodyText) != "" {
+			if entry.Streaming {
+				markdown.Stream(c.Key(fmt.Sprintf("conv-md-%d", idx)), bodyText, mdOpts)
+			} else {
+				markdown.View(c.Key(fmt.Sprintf("conv-md-%d", idx)), bodyText, mdOpts)
+			}
+		}
+
+		// Transparent notice when Rust host is running DeterministicLocalGateway.
+		if isStubGateway {
+			renderDeterministicGatewayNotice(c, bc, th)
+		}
+
+		// Structured cancellation receipt evidence if turn was cancelled mid-flight.
+		if entry.Cancellation != nil {
+			rc := entry.Cancellation
+			ui.Row(c.Key(fmt.Sprintf("conv-cancel-%d", idx))).Padding(8, 12).Radius(theme.RadiusControl).Gap(8).
+				Background(kit.WithAlpha(th.Warning, 0.10)).
+				BorderWidth(1).BorderColor(kit.WithAlpha(th.Warning, 0.35)).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "Turn Cancelled").Font(kit.FontDisplay).FontSize(12).FontWeight(700).TextColor(th.Warning).NoWrap()
+				ui.Text(c, fmt.Sprintf("status=%s · tracked=%d remaining=%d", rc.Status, rc.TrackedTasks, rc.RemainingTasks)).
+					Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).NoWrap()
+			})
+		}
+	})
+}
+
+// renderCollapsibleThinkingBox renders a folded-by-default reasoning drawer.
+func renderCollapsibleThinkingBox(c *ui.Context, key, reasoning string, streaming bool, bc *Context, th theme.Theme) {
+	isOpen := false
+	if bc != nil && bc.IsThinkingOpen != nil {
+		isOpen = bc.IsThinkingOpen(key)
+	}
+	arrow := "▸"
+	if isOpen {
+		arrow = "▾"
+	}
+	title := fmt.Sprintf("%s Thought Process", arrow)
+	meta := fmt.Sprintf("%d chars · click to expand", len(reasoning))
+	if streaming {
+		title = fmt.Sprintf("%s Thinking...", arrow)
+		meta = "streaming reasoning trace"
+	} else if isOpen {
+		meta = "click to collapse"
+	}
+
+	ui.Column(c.Key(key)).Radius(10).
+		Background(theme.GlassTone(c, th.Bar, th, 0.42, 0.68)).
+		BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+		hdr := ui.ButtonBase(c.Key(key+"-hdr")).Label(title).Height(32).Padding(0, 12).Gap(8).
+			Radius(10).AlignItems(ui.Center).Justify(ui.Start)
+		if hdr.Hovered() {
+			hdr.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.56))
+		}
+		hdr.Children(func() {
+			if streaming {
+				kit.LoadingIndicator(c, 12, th.Accent, false)
+			}
+			ui.Text(c, title).Font(kit.FontDisplay).FontSize(12.5).FontWeight(600).TextColor(th.InkMuted).NoWrap()
+			ui.Spacer(c)
+			ui.Text(c, meta).Font(theme.FontMono).FontSize(11).TextColor(th.BannerInk).NoWrap()
+		})
+		if hdr.Clicked() && bc != nil && bc.ToggleThinking != nil {
+			bc.ToggleThinking(key)
+		}
+
+		if isOpen {
+			ui.Column(c.Key(key+"-body")).Padding(8, 14, 12, 14).
+				BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+				ui.Column(c).Padding(0, 0, 0, 10).BorderWidth(0, 0, 0, 2).BorderColor(th.Accent).Children(func() {
+					ui.Text(c, strings.TrimSpace(reasoning)).
+						Font(kit.FontDisplay).FontSize(13).LineHeight(1.5).TextColor(th.InkMuted)
+				})
+			})
+		}
+	})
+}
+
+func renderStandaloneThinkingDrawer(c *ui.Context, idx int, entry mygoshell.TranscriptEntry, tr *mygoshell.TranscriptController, th theme.Theme) {
+	isOpen := !entry.Folded
+	arrow := "▸"
+	if isOpen {
+		arrow = "▾"
+	}
+	label := entry.Title
+	if label == "" {
+		label = "Thought Process"
+	}
+	headerText := fmt.Sprintf("%s %s", arrow, label)
+	ui.Column(c.Key(fmt.Sprintf("conv-think-row-%d", idx))).Radius(10).
+		Background(theme.GlassTone(c, th.Bar, th, 0.42, 0.68)).
+		BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+		hdr := ui.ButtonBase(c.Key(fmt.Sprintf("conv-think-btn-%d", idx))).Label(headerText).
+			Height(32).Padding(0, 12).Gap(8).Radius(10).AlignItems(ui.Center).Justify(ui.Start)
+		if hdr.Hovered() {
+			hdr.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.56))
+		}
+		hdr.Children(func() {
+			ui.Text(c, headerText).Font(kit.FontDisplay).FontSize(12.5).FontWeight(600).TextColor(th.InkMuted).NoWrap()
+			ui.Spacer(c)
+			ui.Text(c, fmt.Sprintf("%d chars", len(entry.Text))).Font(theme.FontMono).FontSize(11).TextColor(th.BannerInk).NoWrap()
+		})
+		if hdr.Clicked() {
+			tr.ToggleFold(idx)
+		}
+		if isOpen && strings.TrimSpace(entry.Text) != "" {
+			ui.Column(c).Padding(8, 14, 12, 14).BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).Children(func() {
+				ui.Text(c, strings.TrimSpace(entry.Text)).Font(kit.FontDisplay).FontSize(13).LineHeight(1.5).TextColor(th.InkMuted)
+			})
+		}
+	})
+}
+
+func renderToolCallCard(c *ui.Context, idx int, entry mygoshell.TranscriptEntry, tr *mygoshell.TranscriptController, th theme.Theme) {
+	card := entry.ToolCard
+	title := entry.Title
+	phase := entry.OutcomeLabel
+	summary := entry.Text
+	receipt := ""
+	denial := ""
+	if card != nil {
+		if card.Title != "" {
+			title = card.Title
+		} else if card.ToolName != "" {
+			title = card.ToolName
+		}
+		if card.Phase != "" {
+			phase = card.Phase
+		}
+		if card.Summary != "" {
+			summary = card.Summary
+		}
+		receipt = card.ReceiptID
+		denial = card.DenialMessage
+	}
+	if title == "" {
+		title = "Tool Call"
+	}
+	phaseTone := th.Info
+	if denial != "" || strings.Contains(strings.ToUpper(phase), "DENIED") || strings.Contains(strings.ToUpper(phase), "FAIL") {
+		phaseTone = th.Danger
+	} else if strings.Contains(strings.ToUpper(phase), "COMPLET") || strings.Contains(strings.ToUpper(phase), "OK") {
+		phaseTone = th.Success
+	} else if strings.Contains(strings.ToUpper(phase), "GATE") || strings.Contains(strings.ToUpper(phase), "WAIT") {
+		phaseTone = th.Warning
+	}
+
+	arrow := "▸"
+	if !entry.Folded {
+		arrow = "▾"
+	}
+
+	ui.Column(c.Key(fmt.Sprintf("conv-tool-%d", idx))).Radius(10).
+		Background(theme.GlassTone(c, th.Bar, th, 0.46, 0.72)).
+		BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+		hdr := ui.ButtonBase(c.Key(fmt.Sprintf("conv-tool-btn-%d", idx))).Label(title).
+			Height(34).Padding(0, 12).Gap(8).Radius(10).AlignItems(ui.Center).Justify(ui.Start)
+		if hdr.Hovered() {
+			hdr.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.56))
+		}
+		hdr.Children(func() {
+			ui.Text(c, arrow+" ⚙").Font(theme.FontMono).FontSize(12).TextColor(phaseTone).NoWrap()
+			ui.Text(c, title).Font(theme.FontMono).FontSize(12.5).FontWeight(700).TextColor(th.Ink).NoWrap()
+			if phase != "" {
+				renderMetaPill(c, phase, phaseTone, th)
+			}
+			ui.Spacer(c)
+			if receipt != "" {
+				renderMetaPill(c, "receipt:"+receipt, th.Success, th)
+			}
+		})
+		if hdr.Clicked() {
+			tr.ToggleFold(idx)
+		}
+
+		if !entry.Folded {
+			ui.Column(c).Padding(8, 14, 12, 14).Gap(6).
+				BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+				if strings.TrimSpace(summary) != "" {
+					ui.Text(c, strings.TrimSpace(summary)).Font(theme.FontMono).FontSize(12.5).LineHeight(1.45).TextColor(th.Ink)
+				}
+				if denial != "" {
+					ui.Text(c, "Denied: "+denial).Font(kit.FontDisplay).FontSize(12.5).FontWeight(600).TextColor(th.Danger)
+				}
+			})
+		}
+	})
+}
+
+func renderHumanGateCard(c *ui.Context, idx int, entry mygoshell.TranscriptEntry, bc *Context, th theme.Theme) {
+	gate := entry.HumanGate
+	prompt := entry.Text
+	gateID := entry.Title
+	resolved := false
+	receipt := ""
+	if gate != nil {
+		if gate.Prompt != "" {
+			prompt = gate.Prompt
+		}
+		if gate.GateID != "" {
+			gateID = gate.GateID
+		}
+		resolved = gate.Resolved
+		receipt = gate.ReceiptID
+	}
+	tone := th.Warning
+	badge := "APPROVAL REQUIRED"
+	if resolved {
+		tone = th.Success
+		badge = "RESOLVED"
+		if receipt != "" {
+			badge = "RESOLVED · " + receipt
+		}
+	}
+
+	ui.Column(c.Key(fmt.Sprintf("conv-gate-%d", idx))).Padding(12, 14).Gap(8).Radius(10).
+		Background(kit.WithAlpha(tone, 0.10)).
+		BorderWidth(1).BorderColor(kit.WithAlpha(tone, 0.42)).AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Approval Gate").Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(tone).NoWrap()
+			renderMetaPill(c, badge, tone, th)
+			ui.Spacer(c)
+			if gateID != "" {
+				ui.Text(c, gateID).Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted).NoWrap()
+			}
+		})
+		if strings.TrimSpace(prompt) != "" {
+			ui.Text(c, prompt).Font(kit.FontDisplay).FontSize(13.5).LineHeight(1.48).TextColor(th.Ink)
+		}
+		if !resolved && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnGateDecision != nil {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if theme.ActionButton(c, fmt.Sprintf("conv-gate-approve-%d", idx), "Approve", th.Success, true, th).Clicked() {
+					bc.Adaptive.Desktop.OnGateDecision(gateID, true)
+				}
+				if theme.ActionButton(c, fmt.Sprintf("conv-gate-reject-%d", idx), "Reject", th.Danger, false, th).Clicked() {
+					bc.Adaptive.Desktop.OnGateDecision(gateID, false)
+				}
+			})
+		}
+	})
+}
+
+func renderDeterministicGatewayNotice(c *ui.Context, bc *Context, th theme.Theme) {
+	routeInfo := "example.toml not loaded — pass -config ./example.toml"
+	if bc != nil && bc.ModelCfg.Loaded {
+		routeInfo = fmt.Sprintf("TOML route ready: %s (%s)", bc.ModelCfg.SummaryLabel(), bc.ModelCfg.SourcePath)
+	}
+	ui.Column(c).Padding(10, 12).Gap(4).Radius(8).
+		Background(kit.WithAlpha(th.Info, 0.08)).
+		BorderWidth(1).BorderColor(kit.WithAlpha(th.Info, 0.28)).AlignItems(ui.Stretch).Children(func() {
+		ui.Text(c, "Rust Host Info: DeterministicLocalGateway Active").
+			Font(kit.FontDisplay).FontSize(12).FontWeight(700).TextColor(th.Info)
+		ui.Text(c, "gRPC turn streaming is live, but the connected marlin-mygo-host binary currently uses DeterministicLocalGateway instead of a live DeepSeek/Anthropic/OpenAI provider. "+routeInfo).
+			Font(kit.FontDisplay).FontSize(12).LineHeight(1.45).TextColor(th.InkMuted)
 	})
 }
 

@@ -245,6 +245,23 @@ func Connect(
 				_ = os.MkdirAll(filepath.Dir(cfg.TursoPath), 0o700)
 				extraEnv = append(extraEnv, "MARLIN_BRIDGE_TURSO_PATH="+cfg.TursoPath)
 			}
+			if strings.TrimSpace(cfg.ConfigFile) != "" {
+				extraEnv = append(extraEnv,
+					"MARLIN_CONFIG="+cfg.ConfigFile,
+					"MARLIN_BRIDGE_CONFIG="+cfg.ConfigFile,
+				)
+			}
+			if cfg.ModelCfg.Loaded {
+				if p := strings.TrimSpace(cfg.ModelCfg.Default.Provider); p != "" {
+					extraEnv = append(extraEnv, "MARLIN_BRIDGE_PROVIDER="+p)
+				}
+				if m := strings.TrimSpace(cfg.ModelCfg.Default.Model); m != "" {
+					extraEnv = append(extraEnv, "MARLIN_BRIDGE_MODEL="+m)
+				}
+				if proto := strings.TrimSpace(cfg.ModelCfg.Default.Protocol); proto != "" {
+					extraEnv = append(extraEnv, "MARLIN_BRIDGE_PROTOCOL="+proto)
+				}
+			}
 			var notifyBridge *grpcwire.NotifyBridge
 			if notifyCenter != nil {
 				notifyBridge = grpcwire.NewNotifyBridge(notifyCenter)
@@ -538,6 +555,16 @@ func Connect(
 							}
 						}
 					}
+					if upd.ToolCall != nil {
+						card := mapToolCallEvent(upd.ToolCall)
+						folded := card.DenialMessage == "" && card.GateID == ""
+						transcript.UpsertToolCall(card, folded)
+						markDirty()
+					}
+					if upd.HumanGate != nil {
+						transcript.UpsertHumanGate(mapHumanGateEvent(upd.HumanGate))
+						markDirty()
+					}
 					if upd.TextDelta != "" {
 						transcript.ApplyCheckpoint(upd.TurnOrdinal, upd.EventID, upd.TextDelta)
 						recordTokens(upd.TextDelta)
@@ -609,8 +636,13 @@ func Connect(
 			}
 		}
 	}
+	if transcript != nil && cfg.ModelCfg.Loaded {
+		if lbl := cfg.ModelCfg.SummaryLabel(); lbl != "" {
+			transcript.SetModelLabel(lbl)
+		}
+	}
 	wireSessionAndHelm(linkCtx, cfg, adaptive, targets, federation, switcher, sr, markDirty)
-	wireInteractiveActions(linkCtx, adaptive, targets, federation, copts.clipboardWriter, markDirty)
+	wireInteractiveActions(linkCtx, adaptive, targets, federation, sr.rustSearch, copts.clipboardWriter, markDirty)
 
 	// 5. Start ContinuityCoordinator for exponential-backoff reconnect & idempotent outbox draining.
 	if transcript != nil && transcript.Resilience != nil {
@@ -664,4 +696,38 @@ func Connect(
 	}
 
 	return link, nil
+}
+
+func mapToolCallEvent(ev *appv1.ToolCallEvent) mygoshell.ToolCallCardView {
+	card := mygoshell.ToolCallCardView{
+		CallID:   ev.GetCallId(),
+		ToolName: ev.GetToolName(),
+		Phase:    strings.TrimPrefix(ev.GetPhase().String(), "TOOL_CALL_PHASE_"),
+		GateID:   ev.GetGateId(),
+	}
+	if tc := ev.GetCard(); tc != nil {
+		card.Kind = strings.TrimPrefix(tc.GetKind().String(), "TOOL_CARD_KIND_")
+		card.Title = tc.GetTitle()
+		card.Summary = tc.GetSummary()
+	}
+	if rc := ev.GetReceipt(); rc != nil {
+		card.ReceiptID = rc.GetReceiptId()
+	}
+	if dn := ev.GetDenial(); dn != nil {
+		card.DenialMessage = dn.GetMessage()
+	}
+	return card
+}
+
+func mapHumanGateEvent(ev *appv1.HumanGateEvent) mygoshell.HumanGateCardView {
+	gate := mygoshell.HumanGateCardView{
+		GateID:   ev.GetGateId(),
+		CallID:   ev.GetCallId(),
+		Prompt:   ev.GetPrompt(),
+		Resolved: ev.GetResolved(),
+	}
+	if rc := ev.GetReceipt(); rc != nil {
+		gate.ReceiptID = rc.GetReceiptId()
+	}
+	return gate
 }

@@ -81,6 +81,7 @@ type Context struct {
 	FeatureLedger *features.GovernanceLedger
 	FeatureHost   *features.Host
 	WebHost       kit.WebIslandHost
+	ModelCfg      appconfig.ModelConfig
 	ActiveModel   string
 	TableCursor   int
 	MessagesLog     []string
@@ -116,6 +117,8 @@ type Context struct {
 	OnPackageApply     func(id string)
 	OnSavePrefs        func(sessionID, remoteHost string, realSession bool)
 	OnEcho             func(msg string)
+	IsThinkingOpen     func(key string) bool
+	ToggleThinking     func(key string)
 }
 
 // Render dispatches rendering to the active buffer's major mode.

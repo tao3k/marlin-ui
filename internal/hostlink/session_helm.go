@@ -18,9 +18,6 @@ import (
 	"github.com/tao3k/marlin-mygo/control/transport"
 	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/engine/search"
-	commonv1 "github.com/tao3k/marlin-mygo/gen/marlin/common/v1"
-	projectionv1 "github.com/tao3k/marlin-mygo/gen/marlin/projection/v1"
-	uiv1 "github.com/tao3k/marlin-mygo/gen/marlin/ui/v1"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
@@ -36,6 +33,7 @@ type sessionRuntime struct {
 	sendPromptRaw    func(displayPrompt, wirePrompt string, refs []composer.AttachmentRef)
 	turnCtrl         *grpcwire.TurnStreamController
 	composerBridge   *grpcwire.ComposerBridge
+	rustSearch       *grpcwire.RustSearchBridge
 	saveNow          func()
 	scheduleSave     func()
 	onSessionChanged func(sessionID string)
@@ -93,112 +91,133 @@ func wireSessionAndHelm(
 	ensureSessionEntry(app, cfg.SessionID, "Primary Workspace")
 	app.ActiveSessionID = cfg.SessionID
 
-	// Wire live multi-source Helm search: instant in-memory projections +
-	// async, generation-fenced Rust backend RPCs (QueryProjectGraph + BrowseCommands).
-	var (
-		rustSearchMu     sync.Mutex
-		rustSearchCancel context.CancelFunc
-	)
-	sr.addCloser(func() {
-		rustSearchMu.Lock()
-		if rustSearchCancel != nil {
-			rustSearchCancel()
-			rustSearchCancel = nil
+	// Wire authoritative Rust-backed Helm search via grpcwire.RustSearchBridge:
+	// ZERO Go-side fabricated files/grep/backend search. All Workspace Search,
+	// Ascent/Dusa DSL queries, and admitted Scheme/Rust commands stream strictly
+	// from marlin-agent-core over gRPC, while pure UI buffers/sessions/targets
+	// stay lightweight client-side navigation projections.
+	projectID := "default"
+	if p := strings.TrimSpace(cfg.ModelCfg.Session.Project); p != "" {
+		projectID = p
+	}
+	if app.HelmSearch != nil && app.HelmSearch.Engine != nil {
+		rustBridge := &grpcwire.RustSearchBridge{
+			Provider:  switcher,
+			Engine:    app.HelmSearch.Engine,
+			ProjectID: projectID,
+			SessionFn: sr.currentSession,
+			OnUpdated: markDirty,
+			Timeout:   1800 * time.Millisecond,
+			PageLimit: 64,
 		}
-		rustSearchMu.Unlock()
-	})
-	mygoshell.BindDefaultHelmSources(app, func(gen uint64, query string) {
-		if app.HelmSearch == nil || app.HelmSearch.Engine == nil {
-			return
-		}
-		backendQ, localFilter := splitConsultStages(query)
-		q := strings.ToLower(strings.TrimSpace(localFilter))
+		sr.rustSearch = rustBridge
+		sr.addCloser(rustBridge.Close)
 
-		// Stream durable sessions into Helm.
-		sessHits := make([]search.Candidate, 0, len(app.Sessions))
-		for _, s := range app.Sessions {
-			hay := s.Title + " " + s.SessionID
-			if !matchesOrderless(hay, q) {
-				continue
-			}
-			score := int32(82)
-			if s.SessionID == app.ActiveSessionID {
-				score = 96
-			}
-			_, mask, _ := search.ScoreAndMask(q, s.Title)
-			sessHits = append(sessHits, search.Candidate{
-				ID:            "session:" + s.SessionID,
-				SourceID:      "sessions",
-				Title:         s.Title,
-				Subtitle:      fmt.Sprintf("%s · %d turns", s.SessionID, s.TurnCount),
-				Location:      s.SessionID,
-				Snippet:       fmt.Sprintf("Switch to session %s (%d turns)", s.SessionID, s.TurnCount),
-				Score:         score,
-				MatchMask:     mask,
-				PayloadKind:   "command",
-				PayloadTarget: "session:" + s.SessionID,
-			})
-		}
-		if len(sessHits) > 0 {
-			app.HelmSearch.Engine.IngestBatch(gen, search.SourceMeta{
-				ID:       "sessions",
-				Label:    "Sessions",
-				Priority: 12,
-			}, sessHits)
-		}
+		app.HelmSearch.OnQueryChanged = func(gen uint64, query string) {
+			eng := app.HelmSearch.Engine
+			cq := search.ParseConsultQuery(query)
 
-		// Stream Federation targets into Helm.
-		if targets != nil {
-			metas := targets.List()
-			targetHits := make([]search.Candidate, 0, len(metas))
-			for _, m := range metas {
-				hay := m.DisplayName + " " + m.ID + " " + m.Address
-				if !matchesOrderless(hay, q) {
-					continue
+			// 1. Authoritative Rust backend search (QueryProjectGraph + BrowseCommands).
+			rustBridge.QueryAsync(linkCtx, gen, query)
+
+			// 2. Pure UI-owned open Emacs buffers (never fabricated backend files).
+			if !cq.IsDSL && len(app.WindowBuffers) > 0 {
+				bufHits := make([]search.Candidate, 0, len(app.WindowBuffers))
+				for _, b := range app.WindowBuffers {
+					score, mask, ok := search.ScoreOrderlessAndMask(query, b.Title+" "+b.BufferID)
+					if !ok {
+						continue
+					}
+					bufHits = append(bufHits, search.Candidate{
+						ID:            "buffer:" + b.BufferID,
+						SourceID:      "buffers",
+						Title:         b.Title,
+						Subtitle:      "Open Emacs buffer",
+						Location:      b.BufferID,
+						Snippet:       "Focus buffer " + b.Title,
+						Score:         score + 5,
+						MatchMask:     mask,
+						PayloadKind:   "buffer",
+						PayloadTarget: "buffer:" + b.BufferID,
+					})
 				}
-				_, mask, _ := search.ScoreAndMask(q, m.DisplayName)
-				targetHits = append(targetHits, search.Candidate{
-					ID:            "target:" + m.ID,
-					SourceID:      "targets",
-					Title:         m.DisplayName,
-					Subtitle:      fmt.Sprintf("%s · %s", m.Mode, m.Address),
-					Location:      m.Address,
-					Snippet:       fmt.Sprintf("Switch active Marlin Core target to %s (%s)", m.DisplayName, m.Address),
-					Score:         80,
-					MatchMask:     mask,
-					PayloadKind:   "command",
-					PayloadTarget: "target:" + m.ID,
-				})
-			}
-			if len(targetHits) > 0 {
-				app.HelmSearch.Engine.IngestBatch(gen, search.SourceMeta{
-					ID:       "targets",
-					Label:    "Targets",
-					Priority: 15,
-				}, targetHits)
-			}
-		}
-
-		// Stream live Rust backend search hits asynchronously (preempted on every keystroke).
-		if switcher != nil {
-			if tgt := switcher.CurrentTarget(); tgt != nil {
-				rctx, rcancel := context.WithTimeout(linkCtx, 1500*time.Millisecond)
-				rustSearchMu.Lock()
-				if rustSearchCancel != nil {
-					rustSearchCancel()
+				if len(bufHits) > 0 {
+					eng.IngestBatch(gen, search.SourceMeta{
+						ID:       "buffers",
+						Label:    "Buffers",
+						Priority: 10,
+					}, bufHits)
 				}
-				rustSearchCancel = rcancel
-				rustSearchMu.Unlock()
-
-				sessID := sr.currentSession()
-				eng := app.HelmSearch.Engine
-				go dispatchRustBackendSearch(rctx, rcancel, tgt, eng, gen, sessID, backendQ, q, markDirty)
 			}
+
+			// 3. UI-known sessions & federation targets (for quick switching).
+			if !cq.IsDSL && len(app.Sessions) > 0 {
+				sessHits := make([]search.Candidate, 0, len(app.Sessions))
+				for _, s := range app.Sessions {
+					score, mask, ok := search.ScoreOrderlessAndMask(query, s.Title+" "+s.SessionID)
+					if !ok {
+						continue
+					}
+					if s.SessionID == app.ActiveSessionID {
+						score += 14
+					}
+					sessHits = append(sessHits, search.Candidate{
+						ID:            "session:" + s.SessionID,
+						SourceID:      "sessions",
+						Title:         s.Title,
+						Subtitle:      fmt.Sprintf("%s · %d turns", s.SessionID, s.TurnCount),
+						Location:      s.SessionID,
+						Snippet:       fmt.Sprintf("Switch to session %s (%d turns)", s.SessionID, s.TurnCount),
+						Score:         score,
+						MatchMask:     mask,
+						PayloadKind:   "session",
+						PayloadTarget: "session:" + s.SessionID,
+					})
+				}
+				if len(sessHits) > 0 {
+					eng.IngestBatch(gen, search.SourceMeta{
+						ID:       "sessions",
+						Label:    "Sessions",
+						Priority: 12,
+					}, sessHits)
+				}
+			}
+
+			if !cq.IsDSL && targets != nil {
+				metas := targets.List()
+				targetHits := make([]search.Candidate, 0, len(metas))
+				for _, m := range metas {
+					score, mask, ok := search.ScoreOrderlessAndMask(query, m.DisplayName+" "+m.ID+" "+m.Address)
+					if !ok {
+						continue
+					}
+					targetHits = append(targetHits, search.Candidate{
+						ID:            "target:" + m.ID,
+						SourceID:      "targets",
+						Title:         m.DisplayName,
+						Subtitle:      fmt.Sprintf("%s · %s", m.Mode, m.Address),
+						Location:      m.Address,
+						Snippet:       fmt.Sprintf("Switch active Marlin Core target to %s (%s)", m.DisplayName, m.Address),
+						Score:         score,
+						MatchMask:     mask,
+						PayloadKind:   "target",
+						PayloadTarget: "target:" + m.ID,
+					})
+				}
+				if len(targetHits) > 0 {
+					eng.IngestBatch(gen, search.SourceMeta{
+						ID:       "targets",
+						Label:    "Targets",
+						Priority: 15,
+					}, targetHits)
+				}
+			}
+
+			markDirty()
 		}
-		markDirty()
-	})
-	if app.HelmSearch != nil && app.HelmSearch.Engine != nil && !app.HelmSearch.Engine.PreviewOpen() {
-		app.HelmSearch.Engine.TogglePreview() // Follow-Mode split preview ON by default for Desktop UX.
+		if !app.HelmSearch.Engine.PreviewOpen() {
+			app.HelmSearch.Engine.TogglePreview() // Follow-Mode split preview ON by default.
+		}
 	}
 
 	// Switch sessions cleanly while preserving per-session unsent drafts via fsync.
@@ -340,155 +359,6 @@ func wireSessionAndHelm(
 			}
 		}
 	}
-}
-
-func splitConsultStages(raw string) (backendQ, localFilter string) {
-	trimmed := strings.TrimSpace(raw)
-	if left, right, ok := strings.Cut(trimmed, "#"); ok {
-		return strings.TrimSpace(left), strings.TrimSpace(right)
-	}
-	return trimmed, trimmed
-}
-
-func matchesOrderless(haystack, query string) bool {
-	if query == "" {
-		return true
-	}
-	lh := strings.ToLower(haystack)
-	for _, tok := range strings.Fields(query) {
-		if strings.HasPrefix(tok, "!") {
-			neg := strings.TrimPrefix(tok, "!")
-			if neg != "" && strings.Contains(lh, neg) {
-				return false
-			}
-			continue
-		}
-		if !strings.Contains(lh, tok) {
-			if _, _, ok := search.ScoreAndMask(tok, haystack); !ok {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func dispatchRustBackendSearch(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	tgt *grpcwire.Target,
-	eng *search.HelmEngine,
-	gen uint64,
-	sessID string,
-	backendQ string,
-	localFilter string,
-	markDirty func(),
-) {
-	defer cancel()
-	var wg sync.WaitGroup
-	if proj := tgt.Projection(); proj != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := proj.QueryProjectGraph(ctx, &projectionv1.QueryProjectGraphRequest{
-				ProjectId: "default",
-				SessionId: &sessID,
-				Surfaces: []projectionv1.GraphVisibleSurface{
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_WORKSPACE,
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_MEMORY,
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_TOOLS,
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_SESSIONS,
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_CONTENT,
-					projectionv1.GraphVisibleSurface_GRAPH_VISIBLE_SURFACE_TOPOLOGY,
-				},
-				SecretVisibility: projectionv1.SecretVisibility_SECRET_VISIBILITY_DENIED,
-				Query:            backendQ,
-				Page:             &commonv1.CursorPageRequest{MaxItems: 64},
-			})
-			if err != nil || ctx.Err() != nil || resp == nil {
-				return
-			}
-			cands := make([]search.Candidate, 0, len(resp.GetRecords()))
-			for _, rec := range resp.GetRecords() {
-				title := strings.TrimSpace(rec.GetTitle())
-				if title == "" {
-					title = rec.GetRecordId()
-				}
-				loc := rec.GetSourcePath()
-				if loc != "" && rec.GetStartLine() > 0 {
-					loc = fmt.Sprintf("%s:L%d", loc, rec.GetStartLine())
-				}
-				if loc == "" {
-					loc = rec.GetKind()
-				}
-				if !matchesOrderless(title+" "+rec.GetSummary()+" "+loc, localFilter) {
-					continue
-				}
-				score, mask, _ := search.ScoreAndMask(localFilter, title)
-				cands = append(cands, search.Candidate{
-					ID:            "rust:" + rec.GetRecordId(),
-					SourceID:      "rust-graph",
-					Title:         title,
-					Subtitle:      loc,
-					Location:      loc,
-					Snippet:       rec.GetSummary(),
-					Score:         score + 40,
-					MatchMask:     mask,
-					PayloadKind:   "file",
-					PayloadTarget: loc,
-				})
-			}
-			if len(cands) > 0 {
-				eng.IngestBatch(gen, search.SourceMeta{
-					ID:       "rust-graph",
-					Label:    "Rust Search",
-					Priority: 2,
-				}, cands)
-				markDirty()
-			}
-		}()
-	}
-	if uiClient := tgt.UI(); uiClient != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := uiClient.BrowseCommands(ctx, &uiv1.BrowseCommandsRequest{
-				SessionId: sessID,
-				Query:     backendQ,
-			})
-			if err != nil || ctx.Err() != nil || resp == nil || resp.GetCandidates() == nil {
-				return
-			}
-			names := resp.GetCandidates().GetNames()
-			cands := make([]search.Candidate, 0, len(names))
-			for _, name := range names {
-				if !matchesOrderless(name, localFilter) {
-					continue
-				}
-				score, mask, _ := search.ScoreAndMask(localFilter, name)
-				cands = append(cands, search.Candidate{
-					ID:            "rust-cmd:" + name,
-					SourceID:      "rust-commands",
-					Title:         name,
-					Subtitle:      "Scheme / Rust command",
-					Location:      "M-x",
-					Snippet:       "Execute admitted Scheme command: " + name,
-					Score:         score + 15,
-					MatchMask:     mask,
-					PayloadKind:   "command",
-					PayloadTarget: name,
-				})
-			}
-			if len(cands) > 0 {
-				eng.IngestBatch(gen, search.SourceMeta{
-					ID:       "rust-commands",
-					Label:    "Scheme Commands",
-					Priority: 6,
-				}, cands)
-				markDirty()
-			}
-		}()
-	}
-	wg.Wait()
 }
 
 func ensureSessionEntry(app *mygoshell.WorkbenchApp, sessionID, title string) {

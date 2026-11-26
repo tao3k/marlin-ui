@@ -56,6 +56,7 @@ func main() {
 	cfg := appconfig.DefaultConfig()
 	showVersion := false
 	flag.BoolVar(&showVersion, "version", false, "print build version and exit")
+	flag.StringVar(&cfg.ConfigFile, "config", cfg.ConfigFile, "Marlin model & host TOML config file (e.g. ./example.toml or ~/.config/marlin/config.toml)")
 	flag.StringVar(&cfg.AppServerBin, "app-server", cfg.AppServerBin, "local Rust marlin-app-server binary (auto-discovered if omitted)")
 	flag.StringVar(&cfg.HostAddr, "host", cfg.HostAddr, "remote Rust marlin-agent-core gRPC address (e.g. 127.0.0.1:50051)")
 	flag.StringVar(&cfg.AuthToken, "token", cfg.AuthToken, "Bearer auth token for remote Rust host")
@@ -79,6 +80,26 @@ func main() {
 
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+
+	cfg.ModelCfg = appconfig.LoadModelConfig(cfg.ConfigFile)
+	if cfg.ModelCfg.Warning != "" {
+		log.Printf("model config warning: %s", cfg.ModelCfg.Warning)
+	} else if cfg.ModelCfg.Loaded {
+		cfg.ConfigFile = cfg.ModelCfg.SourcePath
+		if !explicitFlags["host"] && cfg.HostAddr == "" && cfg.ModelCfg.Host.Addr != "" {
+			cfg.HostAddr = cfg.ModelCfg.Host.Addr
+		}
+		if !explicitFlags["app-server"] && cfg.AppServerBin == "" && cfg.ModelCfg.Host.AppServerBin != "" {
+			cfg.AppServerBin = cfg.ModelCfg.Host.AppServerBin
+		}
+		if !explicitFlags["session"] && cfg.ModelCfg.Session.Session != "" {
+			cfg.SessionID = cfg.ModelCfg.Session.Session
+		}
+		if !explicitFlags["real-session"] && cfg.ModelCfg.Host.RealSession != nil {
+			cfg.RealSession = *cfg.ModelCfg.Host.RealSession
+		}
+		log.Printf("loaded model config %s (%s): %s", cfg.ModelCfg.SourcePath, cfg.ModelCfg.SourceOrigin, cfg.ModelCfg.SummaryLabel())
+	}
 
 	prefs, err := appconfig.LoadPrefs(cfg.PrefsFile)
 	if err != nil {
@@ -377,6 +398,8 @@ func main() {
 
 		initGlass := emacsWin.UIModules().Glass
 		initVibrancy := desktopVibrancy(initGlass, emacsWin.IsLightTheme(), emacsWin.VibrancyMode())
+		initPal, initOp := emacsWin.ActivePaletteAndOpacity()
+		featurekit.SyncWebIslandTheme(initPal, initOp)
 		title := fmt.Sprintf("Marlin — %s", link.Endpoint)
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:         title,
@@ -397,10 +420,6 @@ func main() {
 			pageOpts := mygo.PageOptions{
 				PreloadScript: preloadJS,
 				Untrusted:     tier != async.TrustTier0FirstParty,
-			}
-			if tier == async.TrustTier0FirstParty {
-				// Prevent macOS App Nap from freezing active first-party BPMN/Workflow canvases.
-				pageOpts.BackgroundThrottling = mygo.ThrottlingOff
 			}
 			wv, err := win.NewWebView(mygo.WebViewOptions{
 				Transparent: true,
@@ -434,6 +453,20 @@ func main() {
 			}, nil
 		})
 		win.Invalidate()
+
+		// Pre-warm the built-in *Workflow Canvas* WKWebView off the first-click
+		// critical path shortly after the initial Dashboard frame has painted,
+		// eliminating the 300ms+ WebKit cold-boot stall when switching tabs.
+		bgScope.Go(func(warmCtx context.Context) {
+			timer := time.NewTimer(350 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-warmCtx.Done():
+				return
+			case <-timer.C:
+				featurekit.PrewarmWebIsland(featurekit.BuiltinWorkflowStudioIslandID)
+			}
+		})
 
 		// Live auto-reload watcher inside StructuredScope (quiescence-drained on quit).
 		bgScope.Go(func(watchCtx context.Context) {

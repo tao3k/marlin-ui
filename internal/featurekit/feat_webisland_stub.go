@@ -25,10 +25,14 @@ type WebViewInstance struct {
 // WebViewFactory is a no-op stub when WebView islands are pruned (marlin_minimal / Web WASM).
 type WebViewFactory func(islandID, html, preloadJS string, tier async.TrustTier) (WebViewInstance, error)
 
-func SetWebViewFactory(WebViewFactory)          {}
-func SetWebViewInvalidate(func())               {}
-func RegisterUserIslands(map[string]string)     {}
-func SyncWebIslandTheme(kit.Palette, float32)   {}
+// BuiltinWorkflowStudioIslandID is exported for build-tag parity when WebView islands are pruned.
+const BuiltinWorkflowStudioIslandID = "workflow-graph"
+
+func SetWebViewFactory(WebViewFactory)            {}
+func SetWebViewInvalidate(func())                 {}
+func RegisterUserIslands(map[string]string)       {}
+func PrewarmWebIsland(string)                     {}
+func SyncWebIslandTheme(kit.Palette, float32)     {}
 func DispatchWebIslandAction(string, string) bool { return false }
 func NotifyWebIslandVisibility(string)            {}
 func CheckWorkflowBridgeRPC() error               { return async.ErrUntrustedRPCForbidden }

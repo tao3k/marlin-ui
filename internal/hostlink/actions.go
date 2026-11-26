@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tao3k/marlin-mygo/control/grpcwire"
 	"github.com/tao3k/marlin-mygo/control/transport"
 	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/engine/notify"
@@ -29,6 +30,7 @@ func wireInteractiveActions(
 	adaptive *mygoshell.AdaptiveShell,
 	targets *transport.TargetRegistry,
 	federation *transport.FederationSupervisor,
+	rustSearch *grpcwire.RustSearchBridge,
 	copyText func(string),
 	markDirty func(),
 ) {
@@ -60,12 +62,44 @@ func wireInteractiveActions(
 		toast("Copied to Clipboard", fmt.Sprintf("%d characters copied", len(text)))
 	}
 
-	// 1. Helm action dispatch: route session:* and target:* candidates natively,
-	// delegating all other candidates to BindDefaultHelmSources' built-in handler.
+	// 1. Helm Embark action dispatch: pure UI navigation (session:*, target:*)
+	// stays local; all workspace/DSL/command/agent actions dispatch strictly to
+	// the authoritative Rust host via grpcwire.RustSearchBridge.DispatchHelmAction.
 	if app.HelmSearch != nil {
-		prevExec := app.HelmSearch.OnExecuteAction
 		app.HelmSearch.OnExecuteAction = func(action search.TargetAction, cands []search.Candidate) {
-			var remaining []search.Candidate
+			if len(cands) == 0 {
+				return
+			}
+			if action == search.ActionMentionInComposer && tr != nil {
+				var mentions []string
+				for _, cand := range cands {
+					ref := cand.Location
+					if ref == "" {
+						ref = cand.PayloadTarget
+					}
+					if ref == "" {
+						ref = cand.Title
+					}
+					mentions = append(mentions, "@cite:"+ref)
+				}
+				cur := tr.ComposerText()
+				if cur != "" && !strings.HasSuffix(cur, " ") {
+					cur += " "
+				}
+				tr.SetComposerText(cur + strings.Join(mentions, " ") + " ")
+				toast("Attached Context", fmt.Sprintf("Inserted %d citation(s) into composer", len(mentions)))
+				if rustSearch != nil {
+					go func(batch []search.Candidate) {
+						dctx, cancel := context.WithTimeout(linkCtx, 2*time.Second)
+						defer cancel()
+						_ = rustSearch.DispatchHelmAction(dctx, "export-context", batch)
+					}(append([]search.Candidate(nil), cands...))
+				}
+				markDirty()
+				return
+			}
+
+			var rustBatch []search.Candidate
 			for _, cand := range cands {
 				switch {
 				case strings.HasPrefix(cand.PayloadTarget, "session:"):
@@ -79,11 +113,29 @@ func wireInteractiveActions(
 						app.FederationUI.OnSelectTarget(tid)
 					}
 				default:
-					remaining = append(remaining, cand)
+					rustBatch = append(rustBatch, cand)
 				}
 			}
-			if len(remaining) > 0 && prevExec != nil {
-				prevExec(action, remaining)
+
+			if len(rustBatch) > 0 && rustSearch != nil {
+				rustAction := "open"
+				switch action {
+				case search.ActionExecuteCommand:
+					rustAction = "command"
+				case search.ActionOpenSplitRight:
+					rustAction = "dispatch-agent"
+				case search.ActionOpenInNewTab:
+					rustAction = "export-context"
+				}
+				go func(act string, batch []search.Candidate) {
+					dctx, cancel := context.WithTimeout(linkCtx, 2*time.Second)
+					defer cancel()
+					if err := rustSearch.DispatchHelmAction(dctx, act, batch); err != nil {
+						toast("Rust Helm Action Error", err.Error())
+						return
+					}
+					toast("Rust Helm Dispatched", fmt.Sprintf("%s (%d target(s))", act, len(batch)))
+				}(rustAction, rustBatch)
 			}
 			markDirty()
 		}

@@ -14,6 +14,8 @@ import (
 
 // Config configures one Marlin UI runtime launch.
 type Config struct {
+	ConfigFile     string
+	ModelCfg       ModelConfig
 	AppServerBin   string
 	HostAddr       string
 	AuthToken      string
@@ -48,6 +50,7 @@ func DefaultConfig() Config {
 		turso = filepath.Join(home, ".local", "share", "marlin", "session.turso")
 	}
 	return Config{
+		ConfigFile:     strings.TrimSpace(os.Getenv("MARLIN_CONFIG")),
 		AppServerBin:   strings.TrimSpace(os.Getenv("MARLIN_APP_SERVER_BIN")),
 		HostAddr:       strings.TrimSpace(os.Getenv("MARLIN_HOST")),
 		AuthToken:      strings.TrimSpace(os.Getenv("MARLIN_TOKEN")),

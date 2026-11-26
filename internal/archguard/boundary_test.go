@@ -234,7 +234,7 @@ func TestQuintConcurrencyInvariantsAST(t *testing.T) {
 				}
 				if fn, ok := n.(*ast.FuncDecl); ok {
 					switch fn.Name.Name {
-					case "View", "hydraBodyFor", "buildWidgetRuntime":
+					case "View", "hydraBodyFor", "buildWidgetRuntime", "syncFromGRPCWorkbench":
 						if fn.Recv != nil && fn.Body != nil {
 							ast.Inspect(fn.Body, func(inner ast.Node) bool {
 								if lit, isLit := inner.(*ast.FuncLit); isLit {

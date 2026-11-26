@@ -27,9 +27,10 @@ type RenderProps struct {
 	GlassOpacity float32
 	KeyMode      meow.Mode
 	Keypad      string
-	ActiveHydra *hydra.Body
-	Helm        *mygoshell.HelmMinibufferController
-	GateTitle   string
+	ActiveHydra   *hydra.Body
+	Helm          *mygoshell.HelmMinibufferController
+	RustConnected bool
+	GateTitle     string
 	GatePrompt  string
 
 	CommandCandidates func(query string) []Candidate
@@ -69,7 +70,7 @@ func Render(c *ui.Context, p RenderProps) {
 		var items []Candidate
 		switch mode {
 		case ModeHelm:
-			renderHelm(c, s, th, val, p.Helm, p.OnEcho)
+			renderHelm(c, s, th, val, p.Helm, p.RustConnected, p.OnEcho)
 		case ModeCommand:
 			if p.CommandCandidates != nil {
 				items = p.CommandCandidates(val)

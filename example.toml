@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+# Marlin Desktop / UI Model & Host Configuration (compatible with marlin-agent-tui/example.toml).
+# Copy this file to ./marlin.toml or ~/.config/marlin/config.toml, or pass:
+#   marlin-desktop -config ./example.toml
+#
+# IMPORTANT: Marlin UI never executes LLM calls directly in Go. This file is
+# projected into the UI (*Models* buffer & *conversation* header) and forwarded
+# to the authoritative Rust marlin-agent-core host via MARLIN_CONFIG.
+
+# Anthropic-compatible DeepSeek route. The base URL and API key come from
+# ANTHROPIC_BASE_URL (for DeepSeek: https://api.deepseek.com/anthropic)
+# and ANTHROPIC_API_KEY when not specified here.
+provider = "deepseek"
+model = "deepseek-flash"
+protocol = "anthropic"
+credential_env = "ANTHROPIC_API_KEY"
+timeout_seconds = 120
+
+# Optional Anthropic thinking settings; provider/model support varies.
+[anthropic]
+thinking = { type = "adaptive" }
+effort = "low"
+max_tokens = 8192
+# Manual mode instead: thinking = { type = "enabled", budget_tokens = 4096 }
+
+# DeepSeek V4 Pro shares the Anthropic environment with the default V4.1 Flash.
+# Use *Models* buffer or M-x models to inspect routes.
+[models.deepseek-v4-pro]
+provider = "deepseek"
+model = "deepseek-v4-pro"
+protocol = "anthropic"
+credential_env = "ANTHROPIC_API_KEY"
+
+# Optional OpenAI Responses API route.
+# [models.openai]
+# provider = "openai"
+# model = "gpt-4.1-mini"
+# endpoint = "https://api.openai.com/v1/responses"
+# protocol = "open-ai-responses"
+# credential_env = "OPENAI_API_KEY"
+
+# Optional local conversation journal; the parent directory must exist.
+# [session]
+# path = "/absolute/path/to/conversation.db"
+# project = "project:example"
+# session = "marlin-main"
+# agent = "agent:example"
+
+# Optional Rust gRPC host override for marlin-desktop.
+# [host]
+# addr = "127.0.0.1:50051"
+# app_server_bin = "/path/to/marlin-mygo-host"
+# real_session = true

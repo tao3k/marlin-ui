@@ -45,12 +45,13 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 	warning := t.Warning
 	danger := t.Danger
 	font := t.Font
-	const cardRadius float32 = 14
+	const (
+		cardRadius float32 = 14
+		fsMeta     float32 = 12.5
+		fsUI       float32 = 13.5
+		fsTitle    float32 = 14
+	)
 
-	partsByID := make(map[string]chatroom.Participant, len(snap.Participants))
-	for _, p := range snap.Participants {
-		partsByID[p.ID] = p
-	}
 	var activeCh chatroom.Channel
 	for _, ch := range snap.Channels {
 		if ch.ID == snap.ActiveChannelID {
@@ -85,8 +86,8 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 			ui.Column(c.Key("bento-room-channels")).Radius(cardRadius).Background(cardBg).
 				Padding(14, 14).Gap(6).AlignItems(ui.Stretch).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(0, 4, 4, 4).Children(func() {
-					ui.Text(c, "CHANNELS").Font(font).FontSize(11).FontWeight(700).TextColor(muted).NoWrap()
-					ui.Text(c, fmt.Sprintf("%d", len(snap.Channels))).Font(font).FontSize(11).FontWeight(700).TextColor(info).NoWrap()
+					ui.Text(c, "CHANNELS").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(muted).NoWrap()
+					ui.Text(c, fmt.Sprintf("%d", len(snap.Channels))).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(info).NoWrap()
 				})
 				for _, ch := range snap.Channels {
 					item := ch
@@ -95,7 +96,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						Height(32).Padding(0, 10).Radius(8).Gap(8).AlignItems(ui.Center).Justify(ui.Start))
 					bg := ui.Transparent
 					fg := muted
-					w := 500
+					w := 400
 					if active {
 						bg = hoverBg
 						fg = ink
@@ -110,9 +111,9 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						if item.IsDM {
 							prefix = "@"
 						}
-						ui.Text(c, prefix).Font(font).FontSize(13).FontWeight(700).TextColor(accent).NoWrap()
+						ui.Text(c, prefix).Font(font).FontSize(fsUI).FontWeight(700).TextColor(accent).NoWrap()
 						ui.Text(c, strings.TrimPrefix(strings.TrimPrefix(item.Name, "#"), "@")).
-							Font(font).FontSize(13).FontWeight(w).TextColor(fg).Grow(1).NoWrap().MaxLines(1)
+							Font(font).FontSize(fsUI).FontWeight(w).TextColor(fg).Grow(1).NoWrap().MaxLines(1)
 					})
 					if btn.Clicked() {
 						selectCh = item.ID
@@ -124,9 +125,9 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 			ui.Column(c.Key("bento-room-agents")).Grow(1).MinHeight(0).Radius(cardRadius).Background(cardBg).
 				Padding(14, 14).Gap(6).AlignItems(ui.Stretch).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Padding(0, 4, 4, 4).Children(func() {
-					ui.Text(c, "AGENTS & TEAM").Font(font).FontSize(11).FontWeight(700).TextColor(muted).NoWrap()
+					ui.Text(c, "AGENTS & TEAM").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(muted).NoWrap()
 					ui.Text(c, fmt.Sprintf("%d/%d tasks", doneCount, len(snap.Items))).
-						Font(font).FontSize(11).FontWeight(700).TextColor(success).NoWrap()
+						Font(font).FontSize(fsMeta).FontWeight(700).TextColor(success).NoWrap()
 				})
 				ui.Scroll(c.Key("br-agents-scroll")).Grow(1).Children(func() {
 					ui.Column(c).Gap(4).AlignItems(ui.Stretch).Children(func() {
@@ -149,8 +150,8 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 							row.Children(func() {
 								ui.Box(c).Width(8).Height(8).Radius(999).Background(dot)
 								ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-									ui.Text(c, part.DisplayName).Font(font).FontSize(12.5).FontWeight(600).TextColor(ink).NoWrap().MaxLines(1)
-									ui.Text(c, part.Handle+" · "+part.RoleTitle).Font(font).FontSize(10.5).TextColor(muted).NoWrap().MaxLines(1)
+									ui.Text(c, part.DisplayName).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(ink).NoWrap().MaxLines(1)
+									ui.Text(c, part.Handle+" · "+part.RoleTitle).Font(font).FontSize(fsMeta).TextColor(muted).NoWrap().MaxLines(1)
 								})
 							})
 							if row.Clicked() {
@@ -169,22 +170,22 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 				Padding(0, 18).Gap(12).AlignItems(ui.Center).Children(func() {
 				ui.Row(c).Padding(4, 10).Radius(999).Background(insetBg).AlignItems(ui.Center).Gap(6).Children(func() {
 					ui.Box(c).Width(7).Height(7).Radius(999).Background(accent)
-					ui.Text(c, "AGENT ROOM").Font(font).FontSize(11).FontWeight(700).TextColor(accent).NoWrap()
+					ui.Text(c, "AGENT ROOM").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(accent).NoWrap()
 				})
-				ui.Text(c, activeCh.Name).Font(font).FontSize(15).FontWeight(700).TextColor(ink).NoWrap()
+				ui.Text(c, activeCh.Name).Font(font).FontSize(fsTitle).FontWeight(700).TextColor(ink).NoWrap()
 				if activeCh.Topic != "" {
-					ui.Text(c, "· "+activeCh.Topic).Font(font).FontSize(12).TextColor(muted).Grow(1).NoWrap().MaxLines(1)
+					ui.Text(c, "· "+activeCh.Topic).Font(font).FontSize(fsMeta).TextColor(muted).Grow(1).NoWrap().MaxLines(1)
 				} else {
 					ui.Spacer(c)
 				}
 				if g := ctrl.PendingGateCount(); g > 0 {
 					ui.Row(c).Padding(4, 10).Radius(999).Background(insetBg).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d gate", g)).Font(font).FontSize(11.5).FontWeight(700).TextColor(warning).NoWrap()
+						ui.Text(c, fmt.Sprintf("%d gate", g)).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(warning).NoWrap()
 					})
 				}
 
-				// Clean pill mode switchers.
-				tabs := []struct {
+				// Clean pill mode switchers (stack-allocated array: zero heap alloc per frame).
+				tabs := [3]struct {
 					tab   chatroom.ViewTab
 					label string
 				}{
@@ -199,7 +200,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						b := kit.ActionControl(ui.ButtonBase(c.Key("br-tab-"+string(item.tab))).Label(item.label).
 							Padding(5, 11).Radius(8).AlignItems(ui.Center).Justify(ui.Center))
 						fg := muted
-						w := 500
+						w := 400
 						if active {
 							b.Background(cardBg)
 							fg = info
@@ -209,7 +210,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 							fg = ink
 						}
 						b.Children(func() {
-							ui.Text(c, item.label).Font(font).FontSize(12).FontWeight(w).TextColor(fg).NoWrap()
+							ui.Text(c, item.label).Font(font).FontSize(fsMeta).FontWeight(w).TextColor(fg).NoWrap()
 						})
 						if b.Clicked() {
 							m.activeTab = item.tab
@@ -220,7 +221,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 
 			if snap.LastError != "" {
 				ui.Row(c).Radius(10).Background(cardBg).Padding(8, 14).Children(func() {
-					ui.Text(c, snap.LastError).Font(font).FontSize(12).FontWeight(600).TextColor(danger)
+					ui.Text(c, snap.LastError).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(danger)
 				})
 			}
 
@@ -232,7 +233,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 					ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 						ui.Row(c).Grow(1).Padding(7, 12).Radius(10).Background(insetBg).AlignItems(ui.Center).Children(func() {
 							inp := ui.TextInputBase(c.Key("br-new-matter"), &m.itemDraft).
-								Placeholder("Add collaborative task / matter...").Font(font).FontSize(13).TextColor(ink).Grow(1)
+								Placeholder("Add collaborative task / matter...").Font(font).FontSize(fsUI).TextColor(ink).Grow(1)
 							if inp.Submitted() {
 								addItem = true
 							}
@@ -240,7 +241,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						btn := ui.ButtonBase(c.Key("br-add-matter")).Label("Add Task").
 							Padding(7, 14).Radius(10).Background(info).AlignItems(ui.Center)
 						btn.Children(func() {
-							ui.Text(c, "+ Add Task").Font(font).FontSize(12.5).FontWeight(700).TextColor(canvas).NoWrap()
+							ui.Text(c, "+ Add Task").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(canvas).NoWrap()
 						})
 						if btn.Clicked() {
 							addItem = true
@@ -264,7 +265,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 									nextSt = chatroom.ItemInProgress
 								}
 								owner := item.OwnerID
-								if p, ok := partsByID[item.OwnerID]; ok {
+								if p, ok := findParticipant(snap.Participants, item.OwnerID); ok {
 									owner = p.Handle
 								}
 								ui.Row(c.Key("br-item-"+item.ID)).Radius(10).Background(insetBg).
@@ -275,14 +276,14 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 										sBtn.Background(hoverBg)
 									}
 									sBtn.Children(func() {
-										ui.Text(c, string(item.Status)).Font(font).FontSize(11).FontWeight(700).TextColor(pillCol).NoWrap()
+										ui.Text(c, string(item.Status)).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(pillCol).NoWrap()
 									})
 									if sBtn.Clicked() {
 										nextItemID = item.ID
 										nextItemStat = nextSt
 									}
-									ui.Text(c, item.Title).Font(font).FontSize(13.5).FontWeight(600).TextColor(ink).Grow(1)
-									ui.Text(c, owner).Font(font).FontSize(12).TextColor(muted).NoWrap()
+									ui.Text(c, item.Title).Font(font).FontSize(fsUI).FontWeight(700).TextColor(ink).Grow(1)
+									ui.Text(c, owner).Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 								})
 							}
 						})
@@ -293,7 +294,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 				ui.Column(c.Key("br-roles-card")).Grow(1).MinHeight(0).Radius(cardRadius).Background(cardBg).
 					Padding(16, 18).Gap(10).AlignItems(ui.Stretch).Children(func() {
 					ui.Text(c, "Role-Governed Agent Capabilities (human-only gate approval invariant)").
-						Font(font).FontSize(12).TextColor(muted).NoWrap()
+						Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 					ui.Scroll(c.Key("br-roles-scroll")).Grow(1).Children(func() {
 						ui.Column(c).Gap(8).AlignItems(ui.Stretch).Children(func() {
 							for _, p := range snap.Participants {
@@ -301,8 +302,8 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 								ui.Row(c.Key("br-role-"+part.ID)).Radius(10).Background(insetBg).
 									Padding(10, 14).Gap(12).AlignItems(ui.Center).Children(func() {
 									ui.Column(c).Width(200).Gap(2).Children(func() {
-										ui.Text(c, part.DisplayName).Font(font).FontSize(13).FontWeight(700).TextColor(ink).NoWrap()
-										ui.Text(c, part.Handle+" · "+part.HostNode).Font(font).FontSize(11).TextColor(muted).NoWrap()
+										ui.Text(c, part.DisplayName).Font(font).FontSize(fsUI).FontWeight(700).TextColor(ink).NoWrap()
+										ui.Text(c, part.Handle+" · "+part.HostNode).Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 									})
 									roleChip(c, font, "post", part.Permissions.CanPost, success, muted, cardBg)
 									roleChip(c, font, "tasks", part.Permissions.CanManageItems, info, muted, cardBg)
@@ -328,7 +329,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 								author := item.AuthorID
 								handle := ""
 								roleCol := info
-								if p, ok := partsByID[item.AuthorID]; ok {
+								if p, ok := findParticipant(snap.Participants, item.AuthorID); ok {
 									author = p.DisplayName
 									handle = p.Handle
 									if p.Kind == chatroom.ParticipantHuman {
@@ -340,9 +341,9 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 								ui.Column(c.Key("br-msg-"+item.ID)).Radius(12).Background(insetBg).
 									Padding(12, 14).Gap(6).AlignItems(ui.Stretch).Children(func() {
 									ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-										ui.Text(c, author).Font(font).FontSize(13).FontWeight(700).TextColor(roleCol).NoWrap()
+										ui.Text(c, author).Font(font).FontSize(fsUI).FontWeight(700).TextColor(roleCol).NoWrap()
 										if handle != "" {
-											ui.Text(c, handle).Font(font).FontSize(11.5).TextColor(muted).NoWrap()
+											ui.Text(c, handle).Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 										}
 										ui.Spacer(c)
 										tb := ui.ButtonBase(c.Key("br-th-"+item.ID)).Label("Thread").
@@ -351,13 +352,13 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 											tb.Background(hoverBg)
 										}
 										tb.Children(func() {
-											ui.Text(c, "Reply").Font(font).FontSize(11.5).TextColor(muted).NoWrap()
+											ui.Text(c, "Reply").Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 										})
 										if tb.Clicked() {
 											openThread = item.ID
 										}
 									})
-									ui.Text(c, item.Body).Font(font).FontSize(13.5).LineHeight(1.45).TextColor(ink)
+									ui.Text(c, item.Body).Font(font).FontSize(fsUI).LineHeight(1.45).TextColor(ink)
 								})
 							}
 						})
@@ -367,14 +368,14 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 					ui.Row(c.Key("br-composer")).Radius(12).Background(insetBg).Padding(8, 12).Gap(10).AlignItems(ui.Center).Children(func() {
 						inp := ui.TextInputBase(c.Key("br-draft"), &m.draft).
 							Placeholder("Message " + activeCh.Name + " (mention @architect, @reviewer)...").
-							Font(font).FontSize(13.5).TextColor(ink).Grow(1)
+							Font(font).FontSize(fsUI).TextColor(ink).Grow(1)
 						if inp.Submitted() {
 							sendMsg = true
 						}
 						sb := ui.ButtonBase(c.Key("br-send")).Label("Send").
 							Padding(6, 14).Radius(9).Background(accent).AlignItems(ui.Center)
 						sb.Children(func() {
-							ui.Text(c, "Send").Font(font).FontSize(12.5).FontWeight(700).TextColor(canvas).NoWrap()
+							ui.Text(c, "Send").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(canvas).NoWrap()
 						})
 						if sb.Clicked() {
 							sendMsg = true
@@ -389,13 +390,13 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 			ui.Column(c.Key("br-thread-card")).Width(280).Radius(cardRadius).Background(cardBg).
 				Padding(14, 16).Gap(10).AlignItems(ui.Stretch).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-					ui.Text(c, "THREAD").Font(font).FontSize(11.5).FontWeight(700).TextColor(info).NoWrap()
+					ui.Text(c, "THREAD").Font(font).FontSize(fsMeta).FontWeight(700).TextColor(info).NoWrap()
 					cb := ui.ButtonBase(c.Key("br-th-close")).Label("Close").Padding(2, 8).Radius(6)
 					if cb.Hovered() {
 						cb.Background(hoverBg)
 					}
 					cb.Children(func() {
-						ui.Text(c, "✕").Font(font).FontSize(12).TextColor(muted).NoWrap()
+						ui.Text(c, "✕").Font(font).FontSize(fsMeta).TextColor(muted).NoWrap()
 					})
 					if cb.Clicked() {
 						closeThread = true
@@ -406,19 +407,19 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						for _, rep := range snap.ThreadReplies {
 							r := rep
 							author := r.AuthorID
-							if p, ok := partsByID[r.AuthorID]; ok {
+							if p, ok := findParticipant(snap.Participants, r.AuthorID); ok {
 								author = p.DisplayName
 							}
 							ui.Column(c.Key("br-rep-"+r.ID)).Radius(10).Background(insetBg).Padding(10, 12).Gap(4).Children(func() {
-								ui.Text(c, author).Font(font).FontSize(12).FontWeight(700).TextColor(accent).NoWrap()
-								ui.Text(c, r.Body).Font(font).FontSize(12.5).LineHeight(1.4).TextColor(ink)
+								ui.Text(c, author).Font(font).FontSize(fsMeta).FontWeight(700).TextColor(accent).NoWrap()
+								ui.Text(c, r.Body).Font(font).FontSize(fsMeta).LineHeight(1.4).TextColor(ink)
 							})
 						}
 					})
 				})
 				ui.Row(c).Radius(10).Background(insetBg).Padding(6, 10).Gap(6).AlignItems(ui.Center).Children(func() {
 					inp := ui.TextInputBase(c.Key("br-th-draft"), &m.threadDraft).
-						Placeholder("Reply in thread...").Font(font).FontSize(12.5).TextColor(ink).Grow(1)
+						Placeholder("Reply in thread...").Font(font).FontSize(fsMeta).TextColor(ink).Grow(1)
 					if inp.Submitted() {
 						sendThread = true
 					}
@@ -464,12 +465,21 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 	}
 }
 
+func findParticipant(list []chatroom.Participant, id string) (chatroom.Participant, bool) {
+	for i := range list {
+		if list[i].ID == id {
+			return list[i], true
+		}
+	}
+	return chatroom.Participant{}, false
+}
+
 func roleChip(c *ui.Context, font, label string, on bool, onCol, offCol, bg ui.Color) {
 	col := offCol
 	if on {
 		col = onCol
 	}
 	ui.Row(c).Padding(3, 8).Radius(999).Background(bg).Children(func() {
-		ui.Text(c, label).Font(font).FontSize(11).FontWeight(600).TextColor(col).NoWrap()
+		ui.Text(c, label).Font(font).FontSize(12.5).FontWeight(700).TextColor(col).NoWrap()
 	})
 }
