@@ -74,14 +74,14 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 
 func renderDoomDashboard(c *ui.Context, th theme.Theme, bc *Context) {
 	ui.Column(c.Key("doom-dashboard")).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(22).Children(func() {
-		// Iconic Doom Emacs ASCII Banner in calm base5 slate gray (#5b6268).
+		// Iconic ASCII Banner in calm base5 slate gray (#5b6268).
 		ui.Column(c.Key("doom-ascii-banner")).AlignItems(ui.Center).Gap(2).Children(func() {
 			for i, line := range doomMarlinBanner {
 				ui.Text(c.Key(fmt.Sprintf("banner-%d", i)), line).
 					Font(theme.FontMono).FontSize(13).TextColor(th.BannerInk).NoWrap()
 			}
 			ui.Box(c).Height(6)
-			ui.Text(c, "M A R L I N   ·   E M A C S").Font(theme.FontMono).FontSize(13).FontWeight(600).TextColor(th.InkMuted).NoWrap()
+			ui.Text(c, "M A R L I N   A I").Font(theme.FontMono).FontSize(13.5).FontWeight(700).TextColor(th.InkMuted).NoWrap()
 		})
 
 		// Authentic Doom Dashboard menu: Doom blue labels on left, muted keybindings on right.
@@ -129,9 +129,9 @@ func renderDoomDashboard(c *ui.Context, th theme.Theme, bc *Context) {
 			}
 		})
 
-		// Subtle Doom Emacs loaded summary footer + tiny green status emblem.
+		// Quiet status summary footer + tiny green ready dot.
 		ui.Column(c.Key("doom-dash-footer")).AlignItems(ui.Center).Gap(10).Children(func() {
-			footer := fmt.Sprintf("Marlin loaded %d buffers across 8 Emacs modules · %s", len(Catalog()), th.Name)
+			footer := fmt.Sprintf("Marlin AI · %d buffers ready · %s", len(Catalog()), th.Name)
 			ui.Text(c, footer).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.BannerInk).NoWrap()
 			ui.Box(c).Width(10).Height(10).Radius(theme.RadiusPill).Background(th.Success)
 		})

@@ -19,6 +19,7 @@ import (
 
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/engine/promptgate"
+	"github.com/tao3k/marlin-mygo/engine/search"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mapper"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
@@ -341,6 +342,20 @@ func (f *Frame) View(c *ui.Context) {
 			gateTitle = req.Title
 			gatePrompt = req.Prompt
 			gateID = req.ID
+		}
+	}
+	if f.miniState.Mode() == minibuffer.ModeHelm && helm != nil && helm.Engine != nil {
+		if c.Shortcut(ui.Ctrl, ui.KeyO) {
+			helm.Engine.JumpSource(1)
+		} else if c.Shortcut(0, ui.KeyTab) {
+			helm.Engine.ToggleMarkCurrent()
+			helm.Engine.MoveSelection(1)
+		} else if c.Shortcut(ui.Cmd, ui.KeyEnter) {
+			if targets := helm.Engine.ResolveActionTargets(nil); len(targets) > 0 && helm.OnExecuteAction != nil {
+				helm.OnExecuteAction(search.ActionMentionInComposer, targets)
+				f.miniState.Close()
+				f.Echo(fmt.Sprintf("Attached %d item(s)", len(targets)))
+			}
 		}
 	}
 	if f.miniState.Mode() == minibuffer.ModeGateReview && gateID != "" {

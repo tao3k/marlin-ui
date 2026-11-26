@@ -52,11 +52,12 @@ func ActionLink(c *ui.Context, key, label string, tone ui.Color, th Theme) ui.El
 	return btn
 }
 
-// VerticoRow renders one soft-rounded Vertico / Helm candidate row:
+// VerticoRow renders one soft-rounded Vertico / Helm candidate row with
+// Orderless/fuzzy matched-character highlighting (matching Emacs orderless-match-face-0):
 //
 //	selected:   subtle elevated tint + "› " (accent) + name (Doom blue bold) + description (muted)
 //	unselected: canvas               + "  "          + name (ink)            + description (muted)
-func VerticoRow(c *ui.Context, key, name, desc string, nameWidth float32, selected bool, th Theme) ui.Element {
+func VerticoRow(c *ui.Context, key, name, desc, query string, nameWidth float32, selected bool, th Theme) ui.Element {
 	if nameWidth <= 0 {
 		nameWidth = 240
 	}
@@ -79,12 +80,63 @@ func VerticoRow(c *ui.Context, key, name, desc string, nameWidth float32, select
 	row.Background(bg)
 	row.Children(func() {
 		ui.Text(c, marker).Font(FontMono).FontSize(FontSizeBody).FontWeight(700).TextColor(th.Accent).Width(18).NoWrap()
-		ui.Text(c, name).Font(FontMono).FontSize(FontSizeUI).FontWeight(weight).TextColor(nameCol).Width(nameWidth).NoWrap().MaxLines(1)
+		renderHighlightedRuns(c, name, query, FontSizeUI, weight, nameCol, nameWidth, false, th)
 		if desc != "" {
-			ui.Text(c, desc).Font(FontMono).FontSize(FontSizeMeta).TextColor(th.InkMuted).Grow(1).NoWrap().MaxLines(1)
+			renderHighlightedRuns(c, desc, query, FontSizeMeta, 400, th.InkMuted, 0, true, th)
 		}
 	})
 	return row
+}
+
+func renderHighlightedRuns(
+	c *ui.Context,
+	text, query string,
+	fontSize float32,
+	baseWeight int,
+	baseCol ui.Color,
+	fixedWidth float32,
+	grow bool,
+	th Theme,
+) {
+	runs := MatchRuns(text, query)
+	hasMatch := false
+	for _, r := range runs {
+		if r.Matched {
+			hasMatch = true
+			break
+		}
+	}
+	if !hasMatch {
+		el := ui.Text(c, text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).NoWrap().MaxLines(1)
+		if fixedWidth > 0 {
+			el.Width(fixedWidth)
+		} else if grow {
+			el.Grow(1)
+		}
+		return
+	}
+
+	hitBg := ui.RGBA(236, 190, 123, 44) // warm Doom gold translucent highlight pill
+	if th.IsLight {
+		hitBg = ui.RGBA(193, 132, 1, 36)
+	}
+	box := ui.Row(c).AlignItems(ui.Center).Clip()
+	if fixedWidth > 0 {
+		box.Width(fixedWidth)
+	} else if grow {
+		box.Grow(1)
+	}
+	box.Children(func() {
+		for _, r := range runs {
+			if r.Matched {
+				ui.Row(c).Background(hitBg).Radius(3).Padding(0, 1).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, r.Text).Font(FontMono).FontSize(fontSize).FontWeight(700).TextColor(th.Warning).NoWrap()
+				})
+			} else {
+				ui.Text(c, r.Text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).NoWrap()
+			}
+		}
+	})
 }
 
 // TabulatedHeader renders a clean borderless Doom Emacs tabulated-list header strip.

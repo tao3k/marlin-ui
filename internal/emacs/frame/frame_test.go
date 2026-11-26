@@ -86,9 +86,9 @@ func TestDoomEmacsFrameHydraModelineAndGRPCProjection(t *testing.T) {
 
 	tt := ui.NewTester(fr.View, 1280, 820)
 
-	// 1. Authentic Doom Emacs launch: sort-tab, Doom ASCII Dashboard, Doom Modeline ('dashboard preset, NORMAL mode), clean Echo Area.
-	if fr.KeyMode() != meow.ModeNormal || !tt.HasText("*conversation*") || !tt.HasText("Recently opened sessions") || !tt.HasText("NORMAL") || !tt.HasText("~/marlin/marlin-main/") {
-		t.Fatalf("expected Doom Emacs dashboard + modeline, got %q", strings.Join(tt.Texts(), " | "))
+	// 1. Authentic launch: sort-tab, MARLIN AI Dashboard, Doom Modeline ('dashboard preset, NORMAL mode), clean Echo Area.
+	if fr.KeyMode() != meow.ModeNormal || !tt.HasText("*conversation*") || !tt.HasText("M A R L I N   A I") || !tt.HasText("Recently opened sessions") || !tt.HasText("NORMAL") || !tt.HasText("~/marlin/marlin-main/") {
+		t.Fatalf("expected MARLIN AI dashboard + modeline, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
 	// 2. Pressing SPC pops up the multi-column Doom Leader Hydra Minibuffer drawer!
@@ -136,11 +136,11 @@ func TestDoomEmacsFrameHydraModelineAndGRPCProjection(t *testing.T) {
 		t.Fatalf("expected restored remote in *Targets* buffer, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
-	// 4. Vertico M-x & Helm ('helm modeline preset).
+	// 4. Modern Vertico/Consult Helm ('helm modeline preset, Source Filter Pills, Follow-Mode Preview, Embark actions).
 	fr.OpenHelm()
 	tt.Frame()
-	if fr.MiniMode() != minibuffer.ModeHelm || !tt.HasText("HELM") {
-		t.Fatalf("expected Helm minibuffer mode, got %q", strings.Join(tt.Texts(), " | "))
+	if fr.MiniMode() != minibuffer.ModeHelm || !tt.HasText("HELM") || !tt.HasText("Preview") || !tt.HasText("Attach") || !tt.HasText("Mark [TAB]") {
+		t.Fatalf("expected modern Helm with Preview & Embark actions, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
 	// 5. *Settings* Emacs customize buffer (zero popup modal).

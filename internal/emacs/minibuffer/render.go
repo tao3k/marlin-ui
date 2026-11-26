@@ -57,22 +57,22 @@ func Render(c *ui.Context, p RenderProps) {
 		var items []Candidate
 		switch mode {
 		case ModeHelm:
-			renderHelm(c, s, th, p.Helm, p.OnEcho)
+			renderHelm(c, s, th, val, p.Helm, p.OnEcho)
 		case ModeCommand:
 			if p.CommandCandidates != nil {
 				items = p.CommandCandidates(val)
 			}
-			renderVertico(c, s, th, items)
+			renderVertico(c, s, th, val, items)
 		case ModeBufferSwitch:
 			if p.BufferCandidates != nil {
 				items = p.BufferCandidates(val)
 			}
-			renderVertico(c, s, th, items)
+			renderVertico(c, s, th, val, items)
 		case ModeThemeSwitch:
 			if p.ThemeCandidates != nil {
 				items = p.ThemeCandidates(val)
 			}
-			renderVertico(c, s, th, items)
+			renderVertico(c, s, th, val, items)
 		}
 
 		// 3. Echo Area when SPC Keypad/Hydra is active.

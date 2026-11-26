@@ -12,7 +12,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
-func renderVertico(c *ui.Context, s *State, th theme.Theme, items []Candidate) {
+func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items []Candidate) {
 	s.mu.Lock()
 	sel := s.selected
 	s.mu.Unlock()
@@ -24,7 +24,7 @@ func renderVertico(c *ui.Context, s *State, th theme.Theme, items []Candidate) {
 		BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
 		for i := 0; i < limit; i++ {
 			it := items[i]
-			if theme.VerticoRow(c, "vrow-"+it.ID, it.Name, it.Desc, 240, i == sel, th).Clicked() {
+			if theme.VerticoRow(c, "vrow-"+it.ID, it.Name, it.Desc, query, 240, i == sel, th).Clicked() {
 				if it.Run != nil {
 					it.Run()
 				}
