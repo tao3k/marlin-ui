@@ -55,4 +55,43 @@ func TestWorkspaceIsolationAndDoomPopupLifecycle(t *testing.T) {
 	if !ok || !containsBuf(mainWS.Buffers, buffer.Models) || containsBuf(mainWS.Buffers, buffer.Packages) {
 		t.Fatalf("expected main workspace isolation on switch back: %+v", mainWS.Buffers)
 	}
+
+	// 5. Per-workspace multi-pane splits isolate and restore across workspace switches.
+	splitSnap := mgr.SplitVertical(buffer.Conversation)
+	if splitSnap.Active.SplitMode != SplitVertical || splitSnap.Active.SecondaryBuffer != buffer.Conversation || splitSnap.Active.FocusedPane != 1 {
+		t.Fatalf("expected vertical split on main, got %+v", splitSnap.Active)
+	}
+	// Opening *Targets* while secondary pane is focused routes to SecondaryBuffer.
+	_, splitSnap = mgr.OpenBuffer(buffer.Targets)
+	if splitSnap.Active.SecondaryBuffer != buffer.Targets || splitSnap.Active.ActiveBuffer != buffer.Models {
+		t.Fatalf("expected secondary pane to update to *Targets*, got primary=%s secondary=%s", splitSnap.Active.ActiveBuffer, splitSnap.Active.SecondaryBuffer)
+	}
+	// Switching to review workspace must still be single-pane!
+	revWS, ok := mgr.SwitchByIndex(1)
+	if !ok || revWS.SplitMode != SplitSingle {
+		t.Fatalf("expected review workspace to remain SplitSingle, got %+v", revWS)
+	}
+	// Stepping back to main restores main's vertical split!
+	backWS, ok := mgr.StepWorkspace(-1)
+	if !ok || backWS.ID != "main" || backWS.SplitMode != SplitVertical || backWS.SecondaryBuffer != buffer.Targets {
+		t.Fatalf("expected main split restored on StepWorkspace(-1), got %+v", backWS)
+	}
+	// CycleFocusPane & DeleteOtherWindows collapse cleanly to focused buffer.
+	focused, _ := mgr.CycleFocusPane()
+	if focused != 0 {
+		t.Fatalf("expected CycleFocusPane -> 0, got %d", focused)
+	}
+	closed, afterClose := mgr.CloseFocusedPane()
+	if !closed || afterClose.Active.SplitMode != SplitSingle || afterClose.Active.ActiveBuffer != buffer.Targets {
+		t.Fatalf("expected closing pane 0 to promote secondary *Targets*, got closed=%v active=%+v", closed, afterClose.Active)
+	}
+	// Killing review workspace leaves main intact; killing last workspace is denied.
+	killed, afterKill := mgr.KillWorkspace("review")
+	if !killed || len(afterKill.Workspaces) != 1 {
+		t.Fatalf("expected KillWorkspace(review) to succeed, got killed=%v count=%d", killed, len(afterKill.Workspaces))
+	}
+	killedLast, _ := mgr.KillWorkspace("main")
+	if killedLast {
+		t.Fatalf("expected KillWorkspace on last remaining workspace to fail closed")
+	}
 }

@@ -56,18 +56,30 @@ func DefaultPopupRules() []PopupRule {
 	}
 }
 
-// Perspective holds one workspace's isolated window state, open tabs, and
-// workspace-local popup drawer state (matching Doom persp-mode).
+// SplitMode selects single-pane or split-pane window layout within a workspace.
+type SplitMode string
+
+const (
+	SplitSingle     SplitMode = "single"
+	SplitVertical   SplitMode = "vertical"   // left | right (SPC w v)
+	SplitHorizontal SplitMode = "horizontal" // top / bottom (SPC w s)
+)
+
+// Perspective holds one workspace's isolated window state, split layout,
+// open tabs, and workspace-local popup drawer state (matching Doom persp-mode).
 type Perspective struct {
-	ID           string
-	Name         string
-	ProjectRoot  string
-	ActiveBuffer buffer.ID
-	Buffers      []buffer.ID
-	PopupBuffer  buffer.ID
-	PopupRule    *PopupRule
-	PopupVisible bool
-	LastPopup    buffer.ID
+	ID              string
+	Name            string
+	ProjectRoot     string
+	ActiveBuffer    buffer.ID
+	SplitMode       SplitMode
+	SecondaryBuffer buffer.ID
+	FocusedPane     int // 0 = primary pane, 1 = secondary pane
+	Buffers         []buffer.ID
+	PopupBuffer     buffer.ID
+	PopupRule       *PopupRule
+	PopupVisible    bool
+	LastPopup       buffer.ID
 }
 
 // Snapshot is an immutable read-only view of all workspaces and the active
@@ -102,6 +114,7 @@ func NewManager(initialTabs []buffer.ID) *Manager {
 				ID:           "main",
 				Name:         "main",
 				ActiveBuffer: tabs[0],
+				SplitMode:    SplitSingle,
 				Buffers:      tabs,
 			},
 		},
@@ -187,6 +200,7 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 		Name:         cleanName,
 		ProjectRoot:  strings.TrimSpace(projectRoot),
 		ActiveBuffer: buffer.Conversation,
+		SplitMode:    SplitSingle,
 		Buffers:      []buffer.ID{buffer.Dashboard, buffer.Conversation},
 	}
 	m.workspaces = append(m.workspaces, ws)
@@ -194,8 +208,8 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 	return clonePerspective(ws)
 }
 
-// Switch activates the target workspace and restores its isolated buffer set
-// and popup drawer state.
+// Switch activates the target workspace and restores its isolated buffer set,
+// split layout, and popup drawer state.
 func (m *Manager) Switch(id string) (Perspective, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -208,11 +222,191 @@ func (m *Manager) Switch(id string) (Perspective, bool) {
 	return Perspective{}, false
 }
 
+// SwitchByIndex activates the 0-based workspace index (SPC l 1..4).
+func (m *Manager) SwitchByIndex(idx int) (Perspective, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if idx < 0 || idx >= len(m.workspaces) {
+		return Perspective{}, false
+	}
+	m.activeID = m.workspaces[idx].ID
+	return clonePerspective(m.workspaces[idx]), true
+}
+
+// StepWorkspace cycles to the next (+1) or previous (-1) workspace.
+func (m *Manager) StepWorkspace(delta int) (Perspective, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.workspaces)
+	if n <= 1 {
+		return Perspective{}, false
+	}
+	cur := m.activeIndexLocked()
+	if cur < 0 {
+		cur = 0
+	}
+	next := (cur + delta) % n
+	if next < 0 {
+		next += n
+	}
+	m.activeID = m.workspaces[next].ID
+	return clonePerspective(m.workspaces[next]), true
+}
+
+// KillWorkspace removes a workspace unless it is the last remaining perspective.
+// If id is empty, kills the currently active workspace.
+func (m *Manager) KillWorkspace(id string) (killed bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.workspaces) <= 1 {
+		return false, m.snapshotLocked()
+	}
+	target := strings.TrimSpace(id)
+	if target == "" {
+		target = m.activeID
+	}
+	remaining := make([]Perspective, 0, len(m.workspaces))
+	for _, w := range m.workspaces {
+		if w.ID == target {
+			killed = true
+			continue
+		}
+		remaining = append(remaining, w)
+	}
+	if !killed || len(remaining) == 0 {
+		return false, m.snapshotLocked()
+	}
+	m.workspaces = remaining
+	if m.activeID == target {
+		m.activeID = remaining[0].ID
+	}
+	return true, m.snapshotLocked()
+}
+
+// SplitVertical splits the active workspace left | right (Doom SPC w v).
+func (m *Manager) SplitVertical(secondary buffer.ID) Snapshot {
+	return m.applySplit(SplitVertical, secondary)
+}
+
+// SplitHorizontal splits the active workspace top / bottom (Doom SPC w s).
+func (m *Manager) SplitHorizontal(secondary buffer.ID) Snapshot {
+	return m.applySplit(SplitHorizontal, secondary)
+}
+
+func (m *Manager) applySplit(mode SplitMode, secondary buffer.ID) Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if secondary == "" {
+		secondary = defaultSecondaryBuffer(ws.ActiveBuffer)
+	}
+	ws.SplitMode = mode
+	ws.SecondaryBuffer = secondary
+	ws.FocusedPane = 1
+	if !containsBuf(ws.Buffers, secondary) {
+		ws.Buffers = append(ws.Buffers, secondary)
+	}
+	return m.snapshotLocked()
+}
+
+// DeleteOtherWindows collapses any active split into a single window keeping
+// the focused pane's buffer active (Doom SPC w o / C-x 1).
+func (m *Manager) DeleteOtherWindows() Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitMode != SplitSingle && ws.FocusedPane == 1 && ws.SecondaryBuffer != "" {
+		ws.ActiveBuffer = ws.SecondaryBuffer
+	}
+	ws.SplitMode = SplitSingle
+	ws.SecondaryBuffer = ""
+	ws.FocusedPane = 0
+	return m.snapshotLocked()
+}
+
+// CloseFocusedPane closes the currently focused pane when split (Doom SPC w d).
+func (m *Manager) CloseFocusedPane() (closed bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitMode == SplitSingle {
+		return false, m.snapshotLocked()
+	}
+	if ws.FocusedPane == 0 && ws.SecondaryBuffer != "" {
+		ws.ActiveBuffer = ws.SecondaryBuffer
+	}
+	ws.SplitMode = SplitSingle
+	ws.SecondaryBuffer = ""
+	ws.FocusedPane = 0
+	return true, m.snapshotLocked()
+}
+
+// CycleFocusPane alternates focus between pane 0 and pane 1 (Doom SPC w w).
+func (m *Manager) CycleFocusPane() (focused int, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return 0, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" {
+		ws.FocusedPane = 0
+		return 0, m.snapshotLocked()
+	}
+	if ws.FocusedPane == 0 {
+		ws.FocusedPane = 1
+	} else {
+		ws.FocusedPane = 0
+	}
+	return ws.FocusedPane, m.snapshotLocked()
+}
+
+// FocusPane explicitly focuses pane 0 (primary) or pane 1 (secondary).
+func (m *Manager) FocusPane(pane int) Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" || pane <= 0 {
+		ws.FocusedPane = 0
+	} else {
+		ws.FocusedPane = 1
+	}
+	return m.snapshotLocked()
+}
+
+func defaultSecondaryBuffer(primary buffer.ID) buffer.ID {
+	switch primary {
+	case buffer.Conversation:
+		return buffer.Sessions
+	case buffer.Dashboard:
+		return buffer.Conversation
+	default:
+		return buffer.Conversation
+	}
+}
+
 // OpenBuffer routes buf through Doom popup rules:
 //   - If buf matches a popup rule AND is not already promoted into this workspace's
 //     main buffer tabs, it opens non-destructively in the Popup Drawer (returning openedAsPopup=true).
-//   - Otherwise it focuses buf in the main window and records it strictly in this
-//     workspace's isolated buffer list.
+//   - Otherwise it focuses buf in the active pane (primary or secondary when split)
+//     and records it strictly in this workspace's isolated buffer list.
 func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -230,7 +424,11 @@ func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) 
 		ws.LastPopup = buf
 		return true, m.snapshotLocked()
 	}
-	ws.ActiveBuffer = buf
+	if ws.SplitMode != SplitSingle && ws.FocusedPane == 1 {
+		ws.SecondaryBuffer = buf
+	} else {
+		ws.ActiveBuffer = buf
+	}
 	if !alreadyMainTab {
 		ws.Buffers = append(ws.Buffers, buf)
 	}

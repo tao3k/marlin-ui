@@ -582,33 +582,69 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 		tokText = fmt.Sprintf("%d / %dk tok", usage.UsedTokens, maxK)
 	}
 
-	ui.Row(c.Key("conv-composer-bar")).Height(38).Padding(0, 24).Gap(8).AlignItems(ui.Center).
-		Background(theme.GlassTone(c, th.Bar, th, 0.34, 0.60)).
-		BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).Children(func() {
-		dtTone := th.InkMuted
-		if deepThink {
-			dtTone = th.Accent
+	submitDraft := func() {
+		if bc == nil || bc.ComposerDraft == nil || bc.OnSubmitPrompt == nil {
+			return
 		}
-		if theme.ActionButton(c, "conv-deep-think", "Deep Think", dtTone, deepThink, th).Clicked() {
-			tr.SetDeepThink(!deepThink)
+		text := strings.TrimSpace(*bc.ComposerDraft)
+		if text == "" {
+			return
 		}
-		if tr.OnPickAttachment != nil {
-			if theme.ActionButton(c, "conv-attach-btn", "+ Attach", th.Info, false, th).Clicked() {
-				tr.OnPickAttachment()
+		*bc.ComposerDraft = ""
+		bc.OnSubmitPrompt(text)
+	}
+
+	ui.Row(c.Key("conv-composer-dock")).Padding(10, 24, 12, 24).Justify(ui.Center).
+		Background(theme.GlassTone(c, th.Bar, th, 0.24, 0.44)).
+		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.70)).Children(func() {
+		ui.Column(c.Key("conv-composer-card")).Grow(1).MaxWidth(860).Padding(10, 14, 8, 14).Gap(8).Radius(14).
+			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.56, 0.84)).
+			BorderWidth(1).BorderColor(theme.GlassTone(c, th.Border, th, 0.50, 0.72)).
+			AlignItems(ui.Stretch).Children(func() {
+			if bc != nil && bc.ComposerDraft != nil {
+				inp := ui.TextInputBase(c.Key("conv-composer-input"), bc.ComposerDraft).
+					Placeholder("Ask Marlin anything… (@cite file, Enter to send, ESC for Normal)").
+					Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Grow(1)
+				if inp.Submitted() {
+					submitDraft()
+				}
 			}
-		}
-		if inFlight && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnCancelTurn != nil {
-			if theme.ActionButton(c, "conv-stop-turn", "■ Stop", th.Danger, true, th).Clicked() {
-				bc.Adaptive.Desktop.OnCancelTurn()
-			}
-		}
-		ui.Spacer(c)
-		ui.Text(c, tokText).Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).NoWrap()
-		if bc != nil && bc.OnWidgetAction != nil {
-			if theme.ActionLink(c, "conv-compose-insert", "Compose (i)", th.Info, th).Clicked() {
-				bc.OnWidgetAction("cmd:insert")
-			}
-		}
+			ui.Row(c.Key("conv-composer-toolbar")).Gap(8).AlignItems(ui.Center).Children(func() {
+				dtTone := th.InkMuted
+				if deepThink {
+					dtTone = th.Accent
+				}
+				if theme.ActionButton(c, "conv-deep-think", "Deep Think", dtTone, deepThink, th).Clicked() {
+					tr.SetDeepThink(!deepThink)
+				}
+				if tr.OnPickAttachment != nil {
+					if theme.ActionButton(c, "conv-attach-btn", "+ Attach", th.Info, false, th).Clicked() {
+						tr.OnPickAttachment()
+					}
+				}
+				if inFlight && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnCancelTurn != nil {
+					if theme.ActionButton(c, "conv-stop-turn", "■ Stop", th.Danger, true, th).Clicked() {
+						bc.Adaptive.Desktop.OnCancelTurn()
+					}
+				}
+				ui.Spacer(c)
+				ui.Text(c, tokText).Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted).NoWrap()
+				if bc != nil && bc.ComposerDraft != nil && bc.OnSubmitPrompt != nil {
+					hasDraft := strings.TrimSpace(*bc.ComposerDraft) != ""
+					sendTone := th.InkMuted
+					if hasDraft {
+						sendTone = th.Accent
+					}
+					if theme.ActionButton(c, "conv-send-btn", "Send ↵", sendTone, hasDraft, th).Clicked() {
+						submitDraft()
+					}
+				} else if bc != nil && bc.OnWidgetAction != nil {
+					if theme.ActionLink(c, "conv-compose-insert", "Compose (i)", th.Info, th).Clicked() {
+						bc.OnWidgetAction("cmd:insert")
+					}
+				}
+			})
+		})
 	})
 }
 

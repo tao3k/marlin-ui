@@ -6,6 +6,7 @@ package frame
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/tabs"
@@ -141,6 +142,169 @@ func (f *Frame) WorkspaceSnapshot() workspace.Snapshot {
 		return workspace.Snapshot{}
 	}
 	return f.wsMgr.Snapshot()
+}
+
+// SwitchWorkspaceIndex activates the 0-based perspective workspace (SPC l 1..4).
+func (f *Frame) SwitchWorkspaceIndex(idx int) bool {
+	if f.wsMgr == nil {
+		return false
+	}
+	ws, ok := f.wsMgr.SwitchByIndex(idx)
+	if !ok {
+		f.Echo(fmt.Sprintf("No workspace #%d", idx+1))
+		return false
+	}
+	f.syncFromWorkspaceLocked(ws)
+	f.Echo(fmt.Sprintf("Workspace %d: %s", idx+1, ws.Name))
+	return true
+}
+
+// StepWorkspace cycles to the next (+1) or previous (-1) perspective workspace.
+func (f *Frame) StepWorkspace(delta int) bool {
+	if f.wsMgr == nil {
+		return false
+	}
+	ws, ok := f.wsMgr.StepWorkspace(delta)
+	if !ok {
+		return false
+	}
+	f.syncFromWorkspaceLocked(ws)
+	f.Echo("Workspace: " + ws.Name)
+	return true
+}
+
+// KillActiveWorkspace closes the current perspective workspace (SPC l d) unless
+// it is the last remaining workspace.
+func (f *Frame) KillActiveWorkspace() bool {
+	if f.wsMgr == nil {
+		return false
+	}
+	killed, snap := f.wsMgr.KillWorkspace("")
+	if !killed {
+		f.Echo("Cannot kill last remaining workspace")
+		return false
+	}
+	f.syncFromWorkspaceLocked(snap.Active)
+	f.Echo("Killed workspace -> " + snap.Active.Name)
+	return true
+}
+
+// SplitVertical splits the active workspace left | right (Doom SPC w v).
+func (f *Frame) SplitVertical(secondary buffer.ID) {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.SplitVertical(secondary)
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo("Split right: " + string(snap.Active.SecondaryBuffer))
+}
+
+// SplitHorizontal splits the active workspace top / bottom (Doom SPC w s).
+func (f *Frame) SplitHorizontal(secondary buffer.ID) {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.SplitHorizontal(secondary)
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo("Split below: " + string(snap.Active.SecondaryBuffer))
+}
+
+// DeleteOtherWindows collapses any split to a single window (Doom SPC w o).
+func (f *Frame) DeleteOtherWindows() {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.DeleteOtherWindows()
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo("Single window: " + string(snap.Active.ActiveBuffer))
+}
+
+// CloseFocusedPane closes the active split pane (Doom SPC w d).
+func (f *Frame) CloseFocusedPane() {
+	if f.wsMgr == nil {
+		return
+	}
+	closed, snap := f.wsMgr.CloseFocusedPane()
+	if !closed {
+		f.Echo("Only one window open")
+		return
+	}
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo("Closed split pane -> " + string(snap.Active.ActiveBuffer))
+}
+
+// CycleFocusPane alternates focus between split panes (Doom SPC w w).
+func (f *Frame) CycleFocusPane() {
+	if f.wsMgr == nil {
+		return
+	}
+	pane, snap := f.wsMgr.CycleFocusPane()
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo(fmt.Sprintf("Focused window [%d]", pane+1))
+}
+
+// FocusPane explicitly focuses pane 0 (primary) or pane 1 (secondary).
+func (f *Frame) FocusPane(pane int) {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.FocusPane(pane)
+	f.syncSplitStateLocked(snap.Active)
+}
+
+func (f *Frame) syncSplitStateLocked(ws workspace.Perspective) {
+	f.mu.Lock()
+	f.activeBuffer = ws.ActiveBuffer
+	f.activeFeatureID = ""
+	f.activeExtID = ""
+	f.activePluginID = ""
+	f.openTabs = append([]buffer.ID(nil), ws.Buffers...)
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.notifyWebIslandVisibility("")
+	f.requestFrame()
+}
+
+// SelectModel switches the active LLM route alias live (e.g. clicking a row in
+// *Models*), updates the modeline & transcript header immediately, and
+// dispatches `model.select <alias>` over marlin.ui.v1 gRPC to the Rust authority.
+func (f *Frame) SelectModel(alias, displayLabel string) {
+	cleanAlias := strings.TrimSpace(alias)
+	if cleanAlias == "" {
+		return
+	}
+	lbl := strings.TrimSpace(displayLabel)
+	if lbl == "" {
+		lbl = cleanAlias
+	}
+	f.mu.Lock()
+	f.modelLabel = lbl
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	if f.Adaptive != nil && f.Adaptive.Desktop != nil {
+		if f.Adaptive.Desktop.Transcript != nil {
+			f.Adaptive.Desktop.Transcript.SetModelLabel(lbl)
+		}
+		if f.Adaptive.Desktop.OnCommandInvoke != nil {
+			f.Adaptive.Desktop.OnCommandInvoke("model.select " + cleanAlias)
+		}
+	}
+	f.Echo("Active model: " + lbl)
+	f.requestFrame()
+}
+
+func (f *Frame) buildSplitProps(wsSnap workspace.Snapshot) window.SplitProps {
+	act := wsSnap.Active
+	if act.SplitMode == "" || act.SplitMode == workspace.SplitSingle || act.SecondaryBuffer == "" {
+		return window.SplitProps{Mode: workspace.SplitSingle}
+	}
+	return window.SplitProps{
+		Mode:            act.SplitMode,
+		SecondaryBuffer: act.SecondaryBuffer,
+		FocusedPane:     act.FocusedPane,
+		OnFocusPane:     f.FocusPane,
+		OnCloseSplit:    f.CloseFocusedPane,
+	}
 }
 
 func (f *Frame) syncFromWorkspaceLocked(ws workspace.Perspective) {

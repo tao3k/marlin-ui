@@ -45,6 +45,22 @@ action = "hydra:SPC b"
 
 [[heads]]
 prefix = "SPC"
+key = "w"
+label = "+windows & popups"
+column = "Navigation"
+is_prefix = "true"
+action = "hydra:SPC w"
+
+[[heads]]
+prefix = "SPC"
+key = "l"
+label = "+workspaces"
+column = "Navigation"
+is_prefix = "true"
+action = "hydra:SPC l"
+
+[[heads]]
+prefix = "SPC"
 key = "t"
 label = "+themes & toggles"
 column = "Navigation"
@@ -327,5 +343,151 @@ prefix = "SPC m"
 key = "q"
 label = "Quit hydra"
 column = "Federation"
+exit = "true"
+action = ""
+
+[[hydras]]
+prefix = "SPC w"
+id = "windows"
+title = "+windows & Doom popups"
+
+[[heads]]
+prefix = "SPC w"
+key = "v"
+label = "Split vertical (left | right)"
+column = "Splits"
+exit = "true"
+action = "cmd:win-split-right"
+
+[[heads]]
+prefix = "SPC w"
+key = "s"
+label = "Split horizontal (top / bottom)"
+column = "Splits"
+exit = "true"
+action = "cmd:win-split-below"
+
+[[heads]]
+prefix = "SPC w"
+key = "w"
+label = "Cycle focused pane"
+column = "Splits"
+exit = "false"
+action = "cmd:win-other"
+
+[[heads]]
+prefix = "SPC w"
+key = "d"
+label = "Close focused split pane"
+column = "Splits"
+exit = "true"
+action = "cmd:win-delete"
+
+[[heads]]
+prefix = "SPC w"
+key = "o"
+label = "Only this pane (delete others)"
+column = "Splits"
+exit = "true"
+action = "cmd:win-only"
+
+[[heads]]
+prefix = "SPC w"
+key = "p"
+label = "Toggle Doom popup drawer"
+column = "Popups"
+exit = "true"
+action = "cmd:popup-toggle"
+
+[[heads]]
+prefix = "SPC w"
+key = "r"
+label = "Raise popup to main window"
+column = "Popups"
+exit = "true"
+action = "cmd:popup-raise"
+
+[[heads]]
+prefix = "SPC w"
+key = "q"
+label = "Quit hydra"
+column = "Popups"
+exit = "true"
+action = ""
+
+[[hydras]]
+prefix = "SPC l"
+id = "workspaces"
+title = "+workspaces (persp-mode)"
+
+[[heads]]
+prefix = "SPC l"
+key = "c"
+label = "Create isolated workspace"
+column = "Manage"
+exit = "true"
+action = "cmd:ws-new"
+
+[[heads]]
+prefix = "SPC l"
+key = "d"
+label = "Kill active workspace"
+column = "Manage"
+exit = "true"
+action = "cmd:ws-kill"
+
+[[heads]]
+prefix = "SPC l"
+key = "n"
+label = "Next workspace"
+column = "Manage"
+exit = "false"
+action = "cmd:ws-next"
+
+[[heads]]
+prefix = "SPC l"
+key = "p"
+label = "Previous workspace"
+column = "Manage"
+exit = "false"
+action = "cmd:ws-prev"
+
+[[heads]]
+prefix = "SPC l"
+key = "1"
+label = "Switch to workspace #1"
+column = "Jump"
+exit = "true"
+action = "cmd:ws-1"
+
+[[heads]]
+prefix = "SPC l"
+key = "2"
+label = "Switch to workspace #2"
+column = "Jump"
+exit = "true"
+action = "cmd:ws-2"
+
+[[heads]]
+prefix = "SPC l"
+key = "3"
+label = "Switch to workspace #3"
+column = "Jump"
+exit = "true"
+action = "cmd:ws-3"
+
+[[heads]]
+prefix = "SPC l"
+key = "4"
+label = "Switch to workspace #4"
+column = "Jump"
+exit = "true"
+action = "cmd:ws-4"
+
+[[heads]]
+prefix = "SPC l"
+key = "q"
+label = "Quit hydra"
+column = "Jump"
 exit = "true"
 action = ""

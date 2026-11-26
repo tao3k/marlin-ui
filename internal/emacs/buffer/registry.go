@@ -92,6 +92,7 @@ type Context struct {
 	ModelCfg       appconfig.ModelConfig
 	ActiveModel    string
 	ActiveArtifact *ArtifactSelection
+	ComposerDraft  *string
 	TableCursor    int
 	MessagesLog     []string
 	AvailableThemes []theme.Theme
@@ -130,6 +131,8 @@ type Context struct {
 	ToggleThinking     func(key string)
 	OnOpenArtifact     func(dataType, title, payload string)
 	OnCloseArtifact    func()
+	OnSubmitPrompt     func(text string)
+	OnSelectModel      func(alias, displayLabel string)
 }
 
 // Render dispatches rendering to the active buffer's major mode.

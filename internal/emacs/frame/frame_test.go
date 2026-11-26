@@ -404,3 +404,83 @@ func TestW3CTokensJSONCustomSidebarAndWebIslandIntegration(t *testing.T) {
 		t.Fatalf("expected custom JSON sidebar + WebIsland rendered inside EdgeRail, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }
+
+func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	var invokedCmd string
+	sh.Desktop.OnCommandInvoke = func(name string) {
+		invokedCmd = name
+	}
+
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-splits"},
+	})
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+
+	// 1. SPC w v -> vertical split renders both [1] and [2] pane headers.
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	if fr.KeypadPrefix() != "SPC" {
+		t.Fatalf("expected SPC keypad, got %q", fr.KeypadPrefix())
+	}
+	tt.Key(0, ui.KeyW)
+	tt.Frame()
+	if fr.KeypadPrefix() != "SPC w" {
+		t.Fatalf("expected SPC w keypad, got %q", fr.KeypadPrefix())
+	}
+	tt.Key(0, ui.KeyV)
+	tt.Frame()
+	if !tt.HasText("[1] *Dashboard*") || !tt.HasText("[2] *conversation*") {
+		t.Fatalf("expected vertical split panes rendered, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 2. SPC l c creates a fresh isolated workspace (single-pane), SPC l 1 restores split.
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyL)
+	tt.Frame()
+	tt.Key(0, ui.KeyC)
+	tt.Frame()
+	if got := fr.WorkspaceSnapshot().Active.SplitMode; got != "single" {
+		t.Fatalf("expected new workspace to start single-pane, got %q", got)
+	}
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyL)
+	tt.Frame()
+	tt.Key(0, ui.Key1)
+	tt.Frame()
+	if got := fr.WorkspaceSnapshot().Active.SplitMode; got != "vertical" {
+		t.Fatalf("expected switching back to workspace #1 to restore vertical split, got %q", got)
+	}
+
+	// 3. Open *Help* popup drawer; ESC in Normal mode dismisses popup without disturbing main split.
+	fr.SelectBuffer(buffer.Help)
+	tt.Frame()
+	if !fr.WorkspaceSnapshot().Active.PopupVisible {
+		t.Fatalf("expected *Help* popup visible")
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.PopupVisible {
+		t.Fatalf("expected ESC in Normal mode to dismiss active Doom popup drawer")
+	}
+	if got := fr.WorkspaceSnapshot().Active.SplitMode; got != "vertical" {
+		t.Fatalf("expected main split untouched after ESC popup dismiss, got %q", got)
+	}
+
+	// 4. Live SelectModel updates active model label and dispatches model.select to Rust host.
+	fr.SelectModel("deepseek-v4-pro", "deepseek-v4-pro · deepseek-reasoner (deepseek)")
+	tt.Frame()
+	if invokedCmd != "model.select deepseek-v4-pro" {
+		t.Fatalf("expected OnCommandInvoke('model.select deepseek-v4-pro'), got %q", invokedCmd)
+	}
+	if !tt.HasText("deepseek-v4-pro · deepseek-reasoner (deepseek)") {
+		t.Fatalf("expected live model label in modeline/frame, got %q", strings.Join(tt.Texts(), " | "))
+	}
+}

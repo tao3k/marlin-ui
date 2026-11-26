@@ -128,38 +128,40 @@ func Render(c *ui.Context, p Props) {
 			ui.Box(c).Width(4)
 		}
 
-		totalTabs := len(p.OpenTabs) + len(p.FeatureBuffers)
-		idx := 0
-		for _, id := range p.OpenTabs {
-			bid := id
-			active := p.ActiveBuffer == bid && p.ActiveFeatureID == ""
-			if renderTab(c, "ctab-"+string(bid), string(bid), active, th).Clicked() {
-				if p.OnSelectBuffer != nil {
-					p.OnSelectBuffer(bid)
+		// Overflow-protected middle buffer tab strip: clips cleanly so macOS traffic
+		// lights, workspace switcher pills, and right-side Popup controls never collide.
+		ui.Row(c.Key("sort-tab-strip")).Grow(1).MinWidth(0).Gap(2).AlignItems(ui.Center).Clip().Children(func() {
+			totalTabs := len(p.OpenTabs) + len(p.FeatureBuffers)
+			idx := 0
+			for _, id := range p.OpenTabs {
+				bid := id
+				active := p.ActiveBuffer == bid && p.ActiveFeatureID == ""
+				if renderTab(c, "ctab-"+string(bid), string(bid), active, th).Clicked() {
+					if p.OnSelectBuffer != nil {
+						p.OnSelectBuffer(bid)
+					}
+				}
+				idx++
+				if idx < totalTabs {
+					ui.Text(c, "|").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).
+						TextColor(th.TabSeparator).Padding(0, 3).NoWrap()
 				}
 			}
-			idx++
-			if idx < totalTabs {
-				ui.Text(c, "|").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).
-					TextColor(th.TabSeparator).Padding(0, 3).NoWrap()
-			}
-		}
-		for _, fb := range p.FeatureBuffers {
-			b := fb
-			active := p.ActiveFeatureID == b.ID
-			if renderTab(c, "ctab-feat-"+b.ID, "*"+b.Title+"*", active, th).Clicked() {
-				if p.OnSelectFeature != nil {
-					p.OnSelectFeature(b.ID)
+			for _, fb := range p.FeatureBuffers {
+				b := fb
+				active := p.ActiveFeatureID == b.ID
+				if renderTab(c, "ctab-feat-"+b.ID, "*"+b.Title+"*", active, th).Clicked() {
+					if p.OnSelectFeature != nil {
+						p.OnSelectFeature(b.ID)
+					}
+				}
+				idx++
+				if idx < totalTabs {
+					ui.Text(c, "|").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).
+						TextColor(th.TabSeparator).Padding(0, 3).NoWrap()
 				}
 			}
-			idx++
-			if idx < totalTabs {
-				ui.Text(c, "|").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).
-					TextColor(th.TabSeparator).Padding(0, 3).NoWrap()
-			}
-		}
-
-		ui.Spacer(c)
+		})
 
 		if p.PopupLabel != "" && p.OnTogglePopup != nil {
 			popTone := th.InkMuted
@@ -228,7 +230,7 @@ func renderTab(c *ui.Context, key, label string, active bool, th theme.Theme) ui
 		btn.Background(bg)
 	}
 	btn.Children(func() {
-		ui.Text(c, label).Font(theme.FontMono).FontSize(fontSize).FontWeight(weight).TextColor(ink).NoWrap()
+		ui.Text(c, label).Font(kit.FontDisplay).FontSize(fontSize).FontWeight(weight).TextColor(ink).NoWrap()
 	})
 	return btn
 }

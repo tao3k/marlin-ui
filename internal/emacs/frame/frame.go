@@ -96,9 +96,10 @@ type Frame struct {
 	uiModules       widgets.Modules
 	zenMode         bool
 	railPinned      bool
-	dashPromptDraft string
-	dashTaskDraft   string
-	localTasks      []widgets.TaskItem
+	dashPromptDraft   string
+	dashTaskDraft     string
+	convComposerDraft string
+	localTasks        []widgets.TaskItem
 	startedAt       time.Time
 	themeUserSet    bool
 	syncedWBGen     atomic.Uint64
@@ -738,6 +739,9 @@ func (f *Frame) View(c *ui.Context) {
 		},
 		OnOpenArtifact:  f.openArtifactStage,
 		OnCloseArtifact: f.closeArtifactStage,
+		ComposerDraft:   &f.convComposerDraft,
+		OnSubmitPrompt:  f.submitPrompt,
+		OnSelectModel:   f.SelectModel,
 	}
 
 	mapCtx := mapper.Context{
@@ -847,7 +851,7 @@ func (f *Frame) View(c *ui.Context) {
 
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
-				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, f.buildPopupProps(snap.Workspaces))
+				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, f.buildSplitProps(snap.Workspaces), f.buildPopupProps(snap.Workspaces))
 			}
 			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
 		})
@@ -929,6 +933,7 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 			f.miniState.Echo(notice, 2*time.Second)
 		},
 		OnCloseMinibuffer:    f.miniState.Close,
+		OnDismissPopup:       f.DismissPopup,
 		OnReturnFocusToFrame: f.requestRefocusFrame,
 		OnOpenCommands:       f.OpenCommands,
 		OnOpenHelm:           f.OpenHelm,

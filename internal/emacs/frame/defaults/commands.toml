@@ -125,3 +125,43 @@ action = "buffer:*Packages*"
 name = "package-refresh-contents"
 desc = "Refresh Official Marketplace registry index from tao3k/marlin-ui-marketplace"
 action = "cmd:refresh-packages"
+
+[[commands]]
+name = "split-window-right"
+desc = "Split active workspace vertically left | right (SPC w v)"
+action = "cmd:win-split-right"
+
+[[commands]]
+name = "split-window-below"
+desc = "Split active workspace horizontally top / bottom (SPC w s)"
+action = "cmd:win-split-below"
+
+[[commands]]
+name = "delete-other-windows"
+desc = "Collapse split panes to focused window only (SPC w o)"
+action = "cmd:win-only"
+
+[[commands]]
+name = "other-window"
+desc = "Cycle focus between active split panes (SPC w w)"
+action = "cmd:win-other"
+
+[[commands]]
+name = "popup-toggle"
+desc = "Toggle active workspace's Doom popup drawer (SPC w p)"
+action = "cmd:popup-toggle"
+
+[[commands]]
+name = "popup-raise"
+desc = "Promote active popup drawer into a main window tab (SPC w r)"
+action = "cmd:popup-raise"
+
+[[commands]]
+name = "workspace-new"
+desc = "Create a new isolated persp-mode workspace (SPC l c)"
+action = "cmd:ws-new"
+
+[[commands]]
+name = "workspace-kill"
+desc = "Kill active workspace if others remain (SPC l d)"
+action = "cmd:ws-kill"

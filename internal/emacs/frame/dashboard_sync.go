@@ -454,6 +454,38 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.probeTargets()
 	case "cmd:refresh-packages":
 		f.RefreshPackagesAsync()
+	case "cmd:win-split-right":
+		f.SplitVertical("")
+	case "cmd:win-split-below":
+		f.SplitHorizontal("")
+	case "cmd:win-delete":
+		f.CloseFocusedPane()
+	case "cmd:win-only":
+		f.DeleteOtherWindows()
+	case "cmd:win-other":
+		f.CycleFocusPane()
+	case "cmd:popup-toggle":
+		f.TogglePopup()
+	case "cmd:popup-raise":
+		f.RaisePopup()
+	case "cmd:popup-dismiss":
+		f.DismissPopup()
+	case "cmd:ws-new":
+		f.CreateWorkspace("", "")
+	case "cmd:ws-kill":
+		f.KillActiveWorkspace()
+	case "cmd:ws-next":
+		f.StepWorkspace(1)
+	case "cmd:ws-prev":
+		f.StepWorkspace(-1)
+	case "cmd:ws-1":
+		f.SwitchWorkspaceIndex(0)
+	case "cmd:ws-2":
+		f.SwitchWorkspaceIndex(1)
+	case "cmd:ws-3":
+		f.SwitchWorkspaceIndex(2)
+	case "cmd:ws-4":
+		f.SwitchWorkspaceIndex(3)
 	default:
 		f.Echo("Widget action: " + act)
 	}

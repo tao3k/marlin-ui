@@ -98,16 +98,54 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 
 func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 	cat := buffer.Catalog()
-	all := make([]minibuffer.Candidate, 0, len(cat))
+	wsBufs := make(map[buffer.ID]bool)
+	wsName := "main"
+	if f.wsMgr != nil {
+		wsSnap := f.wsMgr.Snapshot()
+		if wsSnap.Active.Name != "" {
+			wsName = wsSnap.Active.Name
+		}
+		for _, b := range wsSnap.Active.Buffers {
+			wsBufs[b] = true
+		}
+	}
+
+	var inWS, popups, other []minibuffer.Candidate
 	for _, b := range cat {
 		bid := b.ID
-		all = append(all, minibuffer.Candidate{
+		desc := b.Description
+		if wsBufs[bid] {
+			inWS = append(inWS, minibuffer.Candidate{
+				ID:   string(bid),
+				Name: string(bid),
+				Desc: "[" + wsName + "] " + desc,
+				Run:  func() { f.SelectBuffer(bid) },
+			})
+			continue
+		}
+		if f.wsMgr != nil {
+			if rule, ok := f.wsMgr.MatchPopupRule(bid); ok {
+				popups = append(popups, minibuffer.Candidate{
+					ID:   string(bid),
+					Name: string(bid),
+					Desc: "[popup:" + string(rule.Side) + "] " + desc,
+					Run:  func() { f.SelectBuffer(bid) },
+				})
+				continue
+			}
+		}
+		other = append(other, minibuffer.Candidate{
 			ID:   string(bid),
 			Name: string(bid),
-			Desc: b.Description,
+			Desc: "[all] " + desc,
 			Run:  func() { f.SelectBuffer(bid) },
 		})
 	}
+
+	all := make([]minibuffer.Candidate, 0, len(cat))
+	all = append(all, inWS...)
+	all = append(all, popups...)
+	all = append(all, other...)
 	return minibuffer.FilterCandidates(all, query)
 }
 

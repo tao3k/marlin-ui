@@ -19,6 +19,16 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 )
 
+// SplitProps describes an active per-workspace multi-pane window split
+// (Doom SPC w v vertical or SPC w s horizontal).
+type SplitProps struct {
+	Mode            workspace.SplitMode
+	SecondaryBuffer buffer.ID
+	FocusedPane     int
+	OnFocusPane     func(pane int)
+	OnCloseSplit    func()
+}
+
 // PopupProps describes an active Doom Emacs-governed popup drawer docked on the
 // right or bottom edge of the primary Emacs Window without disturbing its layout.
 type PopupProps struct {
@@ -30,10 +40,10 @@ type PopupProps struct {
 	OnDismiss func()
 }
 
-// RenderBody paints the active Emacs buffer, a live Scheme extension buffer
-// (via marlin-mygo/runtime/mapper), or a mounted feature renderer inside the
-// full-bleed primary Emacs Window, optionally flanked by a non-destructive
-// frosted-glass Doom Popup Drawer (set-popup-rule!).
+// RenderBody paints the active Emacs buffer (or per-workspace split panes), a
+// live Scheme extension buffer (via marlin-mygo/runtime/mapper), or a mounted
+// feature renderer inside the primary Emacs Window, optionally flanked by a
+// non-destructive frosted-glass Doom Popup Drawer (set-popup-rule!).
 func RenderBody(
 	c *ui.Context,
 	th theme.Theme,
@@ -43,9 +53,16 @@ func RenderBody(
 	featHost *features.Host,
 	bc *buffer.Context,
 	mapCtx mapper.Context,
+	split SplitProps,
 	popup PopupProps,
 ) {
 	renderMain := func() {
+		if activeExt == nil && activeFeatID == "" &&
+			(split.Mode == workspace.SplitVertical || split.Mode == workspace.SplitHorizontal) &&
+			split.SecondaryBuffer != "" {
+			renderSplitPanes(c, th, activeBuf, bc, split)
+			return
+		}
 		ui.Column(c.Key("doom-window")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if activeExt != nil {
 				ui.Scroll(c.Key("scheme-ext-scroll-"+activeExt.ID)).Grow(1).Padding(16, 24).Children(func() {
@@ -79,6 +96,79 @@ func RenderBody(
 	ui.Column(c.Key("doom-window-popup-vsplit")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		renderMain()
 		renderPopupDrawer(c, th, bc, popup, false)
+	})
+}
+
+func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *buffer.Context, split SplitProps) {
+	renderPane := func(paneIdx int, buf buffer.ID, showDivider bool) {
+		focused := split.FocusedPane == paneIdx
+		pane := ui.Column(c.Key(fmt.Sprintf("doom-split-pane-%d", paneIdx))).
+			Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
+		if showDivider {
+			divCol := theme.GlassTone(c, th.BorderSubtle, th, 0.55, 0.72)
+			if split.Mode == workspace.SplitVertical {
+				pane.BorderWidth(0, 0, 0, 1).BorderColor(divCol)
+			} else {
+				pane.BorderWidth(1, 0, 0, 0).BorderColor(divCol)
+			}
+		}
+		pane.Children(func() {
+			hdrBg := theme.GlassTone(c, th.Bar, th, 0.30, 0.52)
+			accentLine := th.BorderSubtle
+			dotCol := th.InkMuted
+			titleCol := th.InkMuted
+			weight := 500
+			if focused {
+				hdrBg = theme.GlassTone(c, th.SurfaceElevated, th, 0.44, 0.68)
+				accentLine = kit.WithAlpha(th.Accent, 0.65)
+				dotCol = th.Accent
+				titleCol = th.Ink
+				weight = 700
+			}
+			hdr := ui.Row(c.Key(fmt.Sprintf("doom-split-hdr-%d", paneIdx))).
+				Height(28).Padding(0, 12).Gap(8).AlignItems(ui.Center).
+				Background(hdrBg).BorderWidth(0, 0, 1, 0).BorderColor(accentLine)
+			hdr.Children(func() {
+				ui.Box(c).Width(6).Height(6).Radius(theme.RadiusPill).Background(dotCol)
+				lbl := fmt.Sprintf("[%d] %s", paneIdx+1, buf)
+				btn := ui.ButtonBase(c.Key(fmt.Sprintf("doom-split-focus-%d", paneIdx))).
+					Label(lbl).Padding(2, 4).Radius(theme.RadiusSmall).AlignItems(ui.Center)
+				btn.Children(func() {
+					ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(12).FontWeight(weight).TextColor(titleCol).NoWrap()
+				})
+				if btn.Clicked() && split.OnFocusPane != nil {
+					split.OnFocusPane(paneIdx)
+				}
+				if focused {
+					ui.Row(c).Padding(1, 6).Radius(theme.RadiusPill).
+						Background(kit.WithAlpha(th.Accent, 0.16)).Children(func() {
+						ui.Text(c, "ACTIVE").Font(theme.FontMono).FontSize(9.5).FontWeight(700).TextColor(th.Accent).NoWrap()
+					})
+				}
+				ui.Spacer(c)
+				if paneIdx == 1 && split.OnCloseSplit != nil {
+					if theme.ActionLink(c, "doom-split-close", "×", th.InkMuted, th).Clicked() {
+						split.OnCloseSplit()
+					}
+				}
+			})
+			ui.Column(c.Key(fmt.Sprintf("doom-split-body-%d", paneIdx))).
+				Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+				buffer.Render(c, buf, th, bc)
+			})
+		})
+	}
+
+	if split.Mode == workspace.SplitVertical {
+		ui.Row(c.Key("doom-window-vsplit")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+			renderPane(0, primaryBuf, false)
+			renderPane(1, split.SecondaryBuffer, true)
+		})
+		return
+	}
+	ui.Column(c.Key("doom-window-hsplit")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+		renderPane(0, primaryBuf, false)
+		renderPane(1, split.SecondaryBuffer, true)
 	})
 }
 

@@ -6,6 +6,7 @@ package buffer
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -37,10 +38,10 @@ func renderSessions(c *ui.Context, th theme.Theme, bc *Context) {
 					}
 					sel := active || idx == bc.TableCursor
 					if theme.TabulatedRow(c, "srow-"+sess.SessionID, []theme.TableColumn{
-						{Label: sess.SessionID, Width: 220, Color: th.Info, Bold: active},
+						{Label: sess.SessionID, Width: 220, Color: th.Info, Bold: active, Mono: true},
 						{Label: sess.Title, Color: th.Ink},
-						{Label: fmt.Sprintf("%d", sess.TurnCount), Width: 80, Color: th.InkMuted},
-						{Label: state, Width: 90, Color: stateCol},
+						{Label: fmt.Sprintf("%d", sess.TurnCount), Width: 80, Color: th.InkMuted, Mono: true},
+						{Label: state, Width: 90, Color: stateCol, Mono: true},
 					}, sel, th).Clicked() {
 						if app.OnSelectSession != nil {
 							app.OnSelectSession(sess.SessionID)
@@ -84,9 +85,9 @@ func renderTargets(c *ui.Context, th theme.Theme, bc *Context) {
 					}
 					if theme.TabulatedRow(c, "trow-"+meta.ID, []theme.TableColumn{
 						{Label: meta.DisplayName, Width: 180, Color: th.Info, Bold: active},
-						{Label: meta.Address, Color: th.Ink},
-						{Label: string(meta.Mode), Width: 130, Color: th.InkMuted},
-						{Label: string(meta.Phase), Width: 90, Color: phaseCol},
+						{Label: meta.Address, Color: th.Ink, Mono: true},
+						{Label: string(meta.Mode), Width: 130, Color: th.InkMuted, Mono: true},
+						{Label: string(meta.Phase), Width: 90, Color: phaseCol, Mono: true},
 					}, active, th).Clicked() {
 						if bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.FederationUI != nil && bc.Adaptive.Desktop.FederationUI.OnSelectTarget != nil {
 							bc.Adaptive.Desktop.FederationUI.OnSelectTarget(meta.ID)
@@ -122,10 +123,10 @@ func renderProcesses(c *ui.Context, th theme.Theme, bc *Context) {
 		for _, p := range snap.Processes {
 			proc := p
 			theme.TabulatedRow(c, "prow-"+proc.ProcessID, []theme.TableColumn{
-				{Label: proc.ProcessID, Width: 160, Color: th.Info},
-				{Label: proc.Command, Color: th.Ink},
-				{Label: proc.State, Width: 100, Color: th.Success},
-				{Label: fmt.Sprintf("%d", proc.ExitCode), Width: 60, Color: th.InkMuted},
+				{Label: proc.ProcessID, Width: 160, Color: th.Info, Mono: true},
+				{Label: proc.Command, Color: th.Ink, Mono: true},
+				{Label: proc.State, Width: 100, Color: th.Success, Mono: true},
+				{Label: fmt.Sprintf("%d", proc.ExitCode), Width: 60, Color: th.InkMuted, Mono: true},
 			}, false, th)
 		}
 	})
@@ -155,7 +156,8 @@ func renderModels(c *ui.Context, th theme.Theme, bc *Context) {
 			if len(routes) > 0 {
 				ui.Scroll(c.Key("models-scroll")).Grow(1).Children(func() {
 					ui.Column(c).AlignItems(ui.Stretch).Children(func() {
-						for _, rt := range routes {
+						for _, route := range routes {
+							rt := route
 							cred := rt.CredentialEnv
 							credCol := th.InkMuted
 							if cred != "" {
@@ -169,13 +171,19 @@ func renderModels(c *ui.Context, th theme.Theme, bc *Context) {
 							} else {
 								cred = "host-managed"
 							}
-							theme.TabulatedRow(c, "mrow-"+rt.Alias, []theme.TableColumn{
-								{Label: rt.Alias, Width: 190, Color: th.Info, Bold: rt.IsDefault},
+							isActive := rt.IsDefault
+							if strings.TrimSpace(bc.ActiveModel) != "" {
+								isActive = strings.HasPrefix(bc.ActiveModel, rt.Alias) || strings.Contains(bc.ActiveModel, rt.Model)
+							}
+							if theme.TabulatedRow(c, "mrow-"+rt.Alias, []theme.TableColumn{
+								{Label: rt.Alias, Width: 190, Color: th.Info, Bold: isActive, Mono: true},
 								{Label: rt.Provider, Width: 120, Color: th.Accent},
-								{Label: rt.Model, Width: 200, Color: th.Ink},
-								{Label: rt.Protocol, Width: 150, Color: th.InkMuted},
-								{Label: cred, Color: credCol},
-							}, rt.IsDefault, th)
+								{Label: rt.Model, Width: 200, Color: th.Ink, Mono: true},
+								{Label: rt.Protocol, Width: 150, Color: th.InkMuted, Mono: true},
+								{Label: cred, Color: credCol, Mono: true},
+							}, isActive, th).Clicked() && bc.OnSelectModel != nil {
+								bc.OnSelectModel(rt.Alias, fmt.Sprintf("%s · %s (%s)", rt.Alias, rt.Model, rt.Provider))
+							}
 						}
 					})
 				})
@@ -187,11 +195,11 @@ func renderModels(c *ui.Context, th theme.Theme, bc *Context) {
 			activeModel = bc.ActiveModel
 		}
 		theme.TabulatedRow(c, "mrow-default", []theme.TableColumn{
-			{Label: activeModel, Width: 190, Color: th.Info, Bold: true},
+			{Label: activeModel, Width: 190, Color: th.Info, Bold: true, Mono: true},
 			{Label: "marlin-core", Width: 120, Color: th.Accent},
 			{Label: "no example.toml loaded", Width: 200, Color: th.InkMuted},
-			{Label: "grpc", Width: 150, Color: th.InkMuted},
-			{Label: "pass -config ./example.toml", Color: th.Warning},
+			{Label: "grpc", Width: 150, Color: th.InkMuted, Mono: true},
+			{Label: "pass -config ./example.toml", Color: th.Warning, Mono: true},
 		}, true, th)
 	})
 }
@@ -214,17 +222,18 @@ func renderMessages(c *ui.Context, th theme.Theme, bc *Context) {
 func renderHelp(c *ui.Context, th theme.Theme) {
 	bindings := [][2]string{
 		{"Enter", "Send prompt / confirm Vertico or Helm candidate"},
-		{"ESC", "Enter Meow NORMAL mode / close Minibuffer list"},
+		{"ESC", "Enter Meow NORMAL mode / dismiss active Doom Popup Drawer / close Minibuffer"},
 		{"i / a", "Enter Meow INSERT mode (focus Minibuffer)"},
 		{"SPC SPC / SPC x / M-x / Cmd+K", "Open Vertico M-x commands"},
-		{"SPC b b / Cmd+B", "Switch Emacs buffer (*conversation*, *Sessions*, *Targets*, ...)"},
+		{"SPC b b / Cmd+B", "Switch Emacs buffer (active workspace buffers prioritized first)"},
+		{"SPC w v / SPC w s", "Split active workspace vertically (left | right) or horizontally (top / bottom)"},
+		{"SPC w w / SPC w d / SPC w o", "Cycle focused pane / close split pane / delete other windows"},
+		{"SPC w p / SPC w r", "Toggle Doom Popup Drawer / raise popup buffer into main window"},
+		{"SPC l c / SPC l d / SPC l 1..4", "Create, kill, or jump between isolated persp-mode workspaces"},
 		{"SPC s / Cmd+P", "Open 120Hz Helm live multi-source search"},
-		{"SPC t t", "Switch CSS theme pack (nord-bento, doom-one, doom-tokyo-night, doom-one-light)"},
-		{"SPC t v", "Toggle hot-pluggable Liquid Glass GPU surface module"},
-		{"SPC t a", "Toggle hot-pluggable 120Hz Spring Motion module"},
-		{"SPC t z", "Toggle immersive Zen Mode (borderless Bento widget desktop)"},
+		{"SPC t t / v / a / z", "Switch theme / Liquid Glass / 120Hz Motion / Zen Mode"},
 		{"SPC t r", "Reload ~/.config/marlin/ui/ themes, CSS & custom S-exp/TOML widgets"},
-		{"SPC h", "Open *Help* keybindings buffer"},
+		{"SPC h", "Open *Help* keybindings popup drawer"},
 		{"Cmd+,", "Open *Settings* buffer (Theme, Remote Targets, Account, Features)"},
 		{"C-n / C-p / Up / Down", "Move candidate selection"},
 		{"j / k (Normal)", "Move selection down / up in tabulated buffers"},
@@ -239,7 +248,7 @@ func renderHelp(c *ui.Context, th theme.Theme) {
 			ui.Column(c).AlignItems(ui.Stretch).Children(func() {
 				for _, b := range bindings {
 					theme.TabulatedRow(c, "hrow-"+b[0], []theme.TableColumn{
-						{Label: b[0], Width: 280, Color: th.Info, Bold: true},
+						{Label: b[0], Width: 280, Color: th.Info, Bold: true, Mono: true},
 						{Label: b[1], Color: th.Ink},
 					}, false, th)
 				}

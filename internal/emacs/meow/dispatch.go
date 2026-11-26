@@ -16,6 +16,7 @@ type Handlers struct {
 	IsMinibufferActive   func() bool
 	OnCancel             func(notice string)
 	OnCloseMinibuffer    func()
+	OnDismissPopup       func() bool
 	OnReturnFocusToFrame func()
 	OnOpenCommands       func()
 	OnOpenHelm           func()
@@ -100,6 +101,12 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 			return
 		}
 		if !wasKeypad {
+			if s.Mode() == ModeNormal && !c.FocusTakesText() && h.OnDismissPopup != nil && h.OnDismissPopup() {
+				if h.OnReturnFocusToFrame != nil {
+					h.OnReturnFocusToFrame()
+				}
+				return
+			}
 			s.EnterNormal()
 		}
 		if h.OnReturnFocusToFrame != nil {

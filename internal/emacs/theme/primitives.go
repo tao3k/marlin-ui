@@ -39,6 +39,7 @@ type TableColumn struct {
 	Width float32 // 0 means Grow(1)
 	Color ui.Color
 	Bold  bool
+	Mono  bool // true for IDs, paths, keybindings, code, and tabular numbers
 }
 
 // ActionButton renders a soft-rounded, Sheet-styled Doom Emacs action button
@@ -85,7 +86,7 @@ func ActionButton(c *ui.Context, key, label string, tone ui.Color, active bool, 
 		fontSize = cs.FontSize
 	}
 	btn.Children(func() {
-		ui.Text(c, label).Font(FontMono).FontSize(fontSize).FontWeight(weight).TextColor(tone).NoWrap()
+		ui.Text(c, label).Font(kit.FontDisplay).FontSize(fontSize).FontWeight(weight).TextColor(tone).NoWrap()
 	})
 	return btn
 }
@@ -101,7 +102,7 @@ func ActionLink(c *ui.Context, key, label string, tone ui.Color, th Theme) ui.El
 	}
 	btn.Background(bg)
 	btn.Children(func() {
-		ui.Text(c, label).Font(FontMono).FontSize(FontSizeMeta).FontWeight(500).TextColor(tone).NoWrap()
+		ui.Text(c, label).Font(kit.FontDisplay).FontSize(FontSizeMeta).FontWeight(500).TextColor(tone).NoWrap()
 	})
 	return btn
 }
@@ -235,7 +236,7 @@ func TabulatedHeader(c *ui.Context, cols []TableColumn, th Theme) {
 	row.Children(func() {
 		ui.Box(c).Width(16)
 		for _, col := range cols {
-			t := ui.Text(c, col.Label).Font(FontMono).FontSize(FontSizeMeta).FontWeight(600).TextColor(th.InkMuted).NoWrap()
+			t := ui.Text(c, col.Label).Font(kit.FontDisplay).FontSize(FontSizeMeta).FontWeight(600).TextColor(th.InkMuted).NoWrap()
 			if col.Width > 0 {
 				t.Width(col.Width)
 			} else {
@@ -274,7 +275,11 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 			if col.Bold || selected {
 				w = 600
 			}
-			t := ui.Text(c, col.Label).Font(FontMono).FontSize(FontSizeUI).FontWeight(w).TextColor(ink).NoWrap().MaxLines(1)
+			fontFam := kit.FontDisplay
+			if col.Mono {
+				fontFam = FontMono
+			}
+			t := ui.Text(c, col.Label).Font(fontFam).FontSize(FontSizeUI).FontWeight(w).TextColor(ink).NoWrap().MaxLines(1)
 			if col.Width > 0 {
 				t.Width(col.Width)
 			} else {
@@ -289,13 +294,13 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 func FieldRow(c *ui.Context, keyLabel, hint string, th Theme, control func()) {
 	ui.Row(c).Padding(9, 20).Gap(14).AlignItems(ui.Center).
 		BorderWidth(0, 0, 1, 0).BorderColor(GlassTone(c, th.BorderSubtle, th, 0.35, 0.45)).Children(func() {
-		ui.Text(c, keyLabel).Font(FontMono).FontSize(FontSizeUI).FontWeight(500).TextColor(th.Info).Width(210).NoWrap()
+		ui.Text(c, keyLabel).Font(kit.FontDisplay).FontSize(FontSizeUI).FontWeight(600).TextColor(th.Info).Width(210).NoWrap()
 		ui.Row(c).Grow(1).Gap(10).AlignItems(ui.Center).Children(func() {
 			if control != nil {
 				control()
 			}
 			if hint != "" {
-				ui.Text(c, hint).Font(FontMono).FontSize(FontSizeMeta).TextColor(th.InkMuted).NoWrap()
+				ui.Text(c, hint).Font(kit.FontDisplay).FontSize(FontSizeMeta).TextColor(th.InkMuted).NoWrap()
 			}
 		})
 	})
