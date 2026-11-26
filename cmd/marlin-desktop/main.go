@@ -29,6 +29,7 @@ import (
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/async"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 	"github.com/tao3k/marlin-mygo/runtime/widgets"
 
@@ -132,6 +133,18 @@ func main() {
 		link      *hostlink.Link
 		stopVoice func()
 	)
+	// Bind Tier-0 bidirectional Hybrid WebView RPC service (MyGo physically blocks
+	// Tier-2 Untrusted pages from calling any bound Go methods).
+	mygo.Bind(WorkflowBridge{
+		onSave: func(g kit.WorkflowGraph) {
+			if emacsWin != nil {
+				emacsWin.Echo(fmt.Sprintf("Workflow synced (%d nodes, %d edges)", len(g.Nodes), len(g.Edges)))
+			}
+			if win != nil {
+				win.Invalidate()
+			}
+		},
+	})
 	savePrefs := func(next appconfig.UserPrefs) {
 		prefsMu.Lock()
 		prefs = next
@@ -499,4 +512,22 @@ func wireDesktopVoice(ctx context.Context, tr *mygoshell.TranscriptController, i
 	return func() {
 		rec.Cancel()
 	}
+}
+
+// WorkflowBridge is the Tier-0 bidirectional RPC service exposed exclusively to
+// trusted first-party Hybrid WebView studios (*Workflow Canvas*). Tier-2
+// user islands run with PageOptions.Untrusted=true and cannot invoke it.
+type WorkflowBridge struct {
+	onSave func(kit.WorkflowGraph)
+}
+
+func (b WorkflowBridge) SaveGraph(_ context.Context, rawJSON string) (string, error) {
+	g, err := kit.ValidateWorkflowGraphJSON(rawJSON)
+	if err != nil {
+		return "", err
+	}
+	if b.onSave != nil {
+		b.onSave(g)
+	}
+	return fmt.Sprintf("Saved %d nodes, %d edges", len(g.Nodes), len(g.Edges)), nil
 }

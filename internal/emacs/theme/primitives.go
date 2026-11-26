@@ -24,6 +24,15 @@ func GlassTone(c *ui.Context, col ui.Color, th Theme, darkAlpha, lightAlpha floa
 	return kit.WithAlpha(col, a)
 }
 
+// GlassWeight applies visionOS / APCA glass typography weight bumping (400 -> 500)
+// when OS frosted vibrancy is active so body text punches cleanly through blur.
+func GlassWeight(c *ui.Context, base int) int {
+	if c != nil && c.Vibrancy() && base < 500 {
+		return 500
+	}
+	return base
+}
+
 // TableColumn describes one fixed-width or flexible column in Emacs tabulated-list-mode.
 type TableColumn struct {
 	Label string
@@ -261,7 +270,7 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 			if ink == (ui.Color{}) {
 				ink = th.Ink
 			}
-			w := 400
+			w := GlassWeight(c, 400)
 			if col.Bold || selected {
 				w = 600
 			}

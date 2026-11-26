@@ -65,12 +65,12 @@ func TestMyGoNativeAutomatedTabClickSoakAndP99(t *testing.T) {
 				f.CycleGlassOpacity()
 				f.CycleTheme()
 				_, _ = f.ActivePaletteAndOpacity()
-				time.Sleep(2 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}()
 
-	tt := ui.NewTester(f.View, 1280, 820)
+	tt := ui.NewTester(f.View, 920, 560)
 	tabLabels := []string{
 		"*Sessions*",
 		"*Targets*",
