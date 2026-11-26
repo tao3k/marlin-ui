@@ -30,6 +30,8 @@ func SetWebViewInvalidate(func())               {}
 func RegisterUserIslands(map[string]string)     {}
 func SyncWebIslandTheme(kit.Palette, float32)   {}
 func DispatchWebIslandAction(string, string) bool { return false }
-func RecoverWebIsland(string)                   {}
-func ShutdownWebIslands()                       {}
-func WebIslandHost() kit.WebIslandHost          { return nil }
+func NotifyWebIslandVisibility(string)            {}
+func CheckWorkflowBridgeRPC() error               { return async.ErrUntrustedRPCForbidden }
+func RecoverWebIsland(string)                     {}
+func ShutdownWebIslands()                         {}
+func WebIslandHost() kit.WebIslandHost            { return nil }

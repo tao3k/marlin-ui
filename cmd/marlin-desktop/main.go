@@ -262,8 +262,8 @@ func main() {
 
 		tr := adaptive.Desktop.Transcript
 		tr.OnPickAttachment = func() {
-			go func() {
-				paths, err := composer.PickFilesNative(ctx, composer.NativePickerOptions{
+			bgScope.Go(func(taskCtx context.Context) {
+				paths, err := composer.PickFilesNative(taskCtx, composer.NativePickerOptions{
 					Title:         "Attach files to Marlin",
 					AllowMultiple: true,
 				})
@@ -274,17 +274,17 @@ func main() {
 					}
 					invalidate()
 				}
-			}()
+			})
 		}
 		tr.OnPasteAttachment = func() {
-			go func() {
-				if in, ok, err := composer.ReadClipboardAttachment(ctx); err == nil && ok {
+			bgScope.Go(func(taskCtx context.Context) {
+				if in, ok, err := composer.ReadClipboardAttachment(taskCtx); err == nil && ok {
 					_, _ = tr.AttachFile(in)
 					invalidate()
 				}
-			}()
+			})
 		}
-		stopVoice = wireDesktopVoice(ctx, tr, invalidate)
+		stopVoice = wireDesktopVoice(bgScope, tr, invalidate)
 
 		var (
 			hasLastVibrancy bool
@@ -331,9 +331,10 @@ func main() {
 			FeatureLedger:       ledger,
 			FeatureHost:         host,
 			PackageStore:        pkgStore,
-			WebHost:             featurekit.WebIslandHost(),
-			OnWebIslandAction:   featurekit.DispatchWebIslandAction,
-			InitialThemeID:      cfg.ThemeID,
+			WebHost:               featurekit.WebIslandHost(),
+			OnWebIslandAction:     featurekit.DispatchWebIslandAction,
+			OnWebIslandVisibility: featurekit.NotifyWebIslandVisibility,
+			InitialThemeID:        cfg.ThemeID,
 			ThemeBundle:         themeBundle,
 			OnReloadThemeBundle: func() appconfig.UIThemeBundle {
 				b := appconfig.LoadUIThemeBundle(themeDir)
@@ -434,11 +435,13 @@ func main() {
 		})
 		win.Invalidate()
 
-		// Live auto-reload watcher for ~/.config/marlin/ui/ via off-lock FencedLane.
-		appconfig.WatchUIThemeDir(ctx, themeDir, 600*time.Millisecond, func() {
-			if emacsWin != nil {
-				emacsWin.ReloadThemesAsync()
-			}
+		// Live auto-reload watcher inside StructuredScope (quiescence-drained on quit).
+		bgScope.Go(func(watchCtx context.Context) {
+			appconfig.WatchUIThemeDir(watchCtx, themeDir, 600*time.Millisecond, func() {
+				if emacsWin != nil {
+					emacsWin.ReloadThemesAsync()
+				}
+			})
 		})
 
 		// Demand-driven 1Hz live clock tick inside StructuredScope:
@@ -498,27 +501,27 @@ func desktopVibrancy(glassOn, isLight bool, mode string) mygo.Vibrancy {
 	}
 }
 
-func wireDesktopVoice(ctx context.Context, tr *mygoshell.TranscriptController, invalidate func()) func() {
+func wireDesktopVoice(scope *async.StructuredScope, tr *mygoshell.TranscriptController, invalidate func()) func() {
 	rec := composer.NewNativeAudioRecorder()
 	tr.OnStartVoice = func() {
-		go func() {
-			if err := rec.Start(ctx, tr.Voice, invalidate); err != nil {
+		scope.Go(func(taskCtx context.Context) {
+			if err := rec.Start(taskCtx, tr.Voice, invalidate); err != nil {
 				if tr.Voice != nil {
 					tr.Voice.Fail(err)
 				}
 				invalidate()
 			}
-		}()
+		})
 	}
 	tr.OnStopVoice = func() {
-		go func() {
+		scope.Go(func(_ context.Context) {
 			if name, wav, err := rec.Stop(); err == nil && len(wav) > 0 {
 				_, _ = tr.CompleteVoiceAudio(name, wav)
 			} else if err != nil && tr.Voice != nil {
 				tr.Voice.Fail(err)
 			}
 			invalidate()
-		}()
+		})
 	}
 	tr.OnCancelVoice = func() {
 		rec.Cancel()
@@ -537,6 +540,9 @@ type WorkflowBridge struct {
 }
 
 func (b WorkflowBridge) SaveGraph(_ context.Context, rawJSON string) (string, error) {
+	if err := featurekit.CheckWorkflowBridgeRPC(); err != nil {
+		return "", err
+	}
 	g, err := kit.ValidateWorkflowGraphJSON(rawJSON)
 	if err != nil {
 		return "", err

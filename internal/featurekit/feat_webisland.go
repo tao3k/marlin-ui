@@ -47,11 +47,16 @@ type WebViewInstance struct {
 // inside the active desktop window with explicit trust tier and preload JS.
 type WebViewFactory func(islandID, html, preloadJS string, tier async.TrustTier) (WebViewInstance, error)
 
+// BuiltinWorkflowStudioIslandID is the ONLY island ID permitted Tier-0
+// first-party host RPC (default-deny per HybridWebViewFocusLifecycle.qnt).
+const BuiltinWorkflowStudioIslandID = "workflow-graph"
+
 var (
 	webIslandMu       sync.Mutex
 	webViewFactory    WebViewFactory
 	webViewInvalidate func()
 	webViewScope      = async.NewStructuredScope(context.Background())
+	webViewPermits    = async.NewPermitPool(1, 2)
 	webViewCache      = map[string]*WebViewInstance{}
 	webViewPending    = map[string]bool{}
 	webViewUseSeq     uint64
@@ -121,8 +126,46 @@ func RegisterUserIslands(islands map[string]string) {
 
 	for _, j := range jobs {
 		job := j
-		go job.fn(job.html)
+		webViewScope.Go(func(ctx context.Context) {
+			if ctx.Err() == nil {
+				job.fn(job.html)
+			}
+		})
 	}
+}
+
+// NotifyWebIslandVisibility enforces HybridWebViewFocusLifecycle.qnt focus
+// revocation: hidden islands invoke HideTab() (clearing shown & focused) while
+// the active island invokes ShowTab() when ready.
+func NotifyWebIslandVisibility(activeIslandID string) {
+	webIslandMu.Lock()
+	defer webIslandMu.Unlock()
+	for id, inst := range webViewCache {
+		if inst == nil || inst.lifecycle == nil {
+			continue
+		}
+		if id == activeIslandID {
+			inst.lifecycle.ShowTab()
+		} else {
+			inst.lifecycle.HideTab()
+		}
+	}
+}
+
+// CheckWorkflowBridgeRPC verifies that the first-party Tier-0 Workflow Studio
+// island is mounted, Ready, and permitted host RPC (tier0-rpc-capability-gate).
+func CheckWorkflowBridgeRPC() error {
+	webIslandMu.Lock()
+	inst := webViewCache[BuiltinWorkflowStudioIslandID]
+	var lc *async.WebViewLifecycle
+	if inst != nil {
+		lc = inst.lifecycle
+	}
+	webIslandMu.Unlock()
+	if lc == nil {
+		return async.ErrUntrustedRPCForbidden
+	}
+	return lc.CheckHostRPC()
 }
 
 // SyncWebIslandTheme updates the theme palette and glass opacity for built-in
@@ -245,17 +288,42 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 	inv := webViewInvalidate
 	webIslandMu.Unlock()
 
-	tier := async.TrustTier0FirstParty
+	// Default-DENY Tier-0 trust gate (HybridWebViewFocusLifecycle.qnt):
+	// ONLY the explicit BuiltinWorkflowStudioIslandID without user override
+	// receives TrustTier0FirstParty. Unregistered external island IDs fail closed.
+	tier := async.TrustTier2Untrusted
 	if hasUser {
 		tier = async.TrustTier2Untrusted
-	} else {
+	} else if islandID == BuiltinWorkflowStudioIslandID {
+		tier = async.TrustTier0FirstParty
 		html = kit.WorkflowStudioHTML(pal)
+	} else {
+		webIslandMu.Lock()
+		delete(webViewPending, islandID)
+		webIslandMu.Unlock()
+		return nil
+	}
+	permitID, permitErr := webViewPermits.Admit()
+	if permitErr != nil {
+		webIslandMu.Lock()
+		delete(webViewPending, islandID)
+		webIslandMu.Unlock()
+		return nil
 	}
 	preload := kit.WebIslandThemeScript(pal, op)
 	lc := async.NewWebViewLifecycle(tier)
 	lc.RequestAsyncMount()
 
-	webViewScope.Go(func(_ context.Context) {
+	if !webViewScope.Go(func(ctx context.Context) {
+		webViewPermits.Start(permitID)
+		defer webViewPermits.Drain(permitID)
+		if ctx.Err() != nil {
+			webViewPermits.BeginCancelCleanup(permitID)
+			webIslandMu.Lock()
+			delete(webViewPending, islandID)
+			webIslandMu.Unlock()
+			return
+		}
 		inst, err := factory(islandID, html, preload, tier)
 		webIslandMu.Lock()
 		delete(webViewPending, islandID)
@@ -296,14 +364,18 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 				}
 			}
 			if evicted != nil {
-				go func(e *WebViewInstance) {
+				e := evicted
+				webViewScope.Go(func(_ context.Context) {
+					if e.lifecycle != nil {
+						e.lifecycle.HideTab()
+					}
 					if e.evalLane != nil {
 						e.evalLane.Close()
 					}
 					if e.Destroy != nil {
 						e.Destroy()
 					}
-				}(evicted)
+				})
 			}
 		}
 		latestPal := webIslandPalette
@@ -311,6 +383,7 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		cached := webViewCache[islandID]
 		webIslandMu.Unlock()
 
+		webViewPermits.Complete(permitID)
 		if err == nil && cached != nil {
 			if cached.evalLane != nil {
 				cached.evalLane.Submit(kit.WebIslandThemeScript(latestPal, latestOp))
@@ -319,7 +392,14 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 				inv()
 			}
 		}
-	})
+	}) {
+		webViewPermits.Start(permitID)
+		webViewPermits.BeginCancelCleanup(permitID)
+		webViewPermits.Drain(permitID)
+		webIslandMu.Lock()
+		delete(webViewPending, islandID)
+		webIslandMu.Unlock()
+	}
 	return nil
 }
 

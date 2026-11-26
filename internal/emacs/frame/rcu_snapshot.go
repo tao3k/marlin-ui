@@ -18,6 +18,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
@@ -47,6 +48,8 @@ type frameSnapshot struct {
 	StatusItems     []schema.UIStatusItem
 	SchemeExts      []schema.UIExtensionRegion
 	MessagesLog     []string
+	LocalTasks      []widgets.TaskItem
+	TomlHydras      map[string]declarativeHydraDef
 }
 
 func (f *Frame) initAsyncRuntime() {
@@ -74,6 +77,10 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 	for k, v := range f.themeSurfaces {
 		surfs[k] = v
 	}
+	hydras := make(map[string]declarativeHydraDef, len(f.tomlHydras))
+	for k, v := range f.tomlHydras {
+		hydras[k] = v
+	}
 	return frameSnapshot{
 		Theme:           f.Theme,
 		ThemeCatalog:    append([]theme.Theme(nil), f.themeCatalog...),
@@ -97,6 +104,24 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		StatusItems:     append([]schema.UIStatusItem(nil), f.statusItems...),
 		SchemeExts:      append([]schema.UIExtensionRegion(nil), f.schemeExts...),
 		MessagesLog:     append([]string(nil), f.messagesLog...),
+		LocalTasks:      append([]widgets.TaskItem(nil), f.localTasks...),
+		TomlHydras:      hydras,
+	}
+}
+
+// hydraBodyFor resolves the active Hydra popup wait-free from an RCU snapshot
+// (zero mutex acquisitions on the 120Hz render thread).
+func (f *Frame) hydraBodyFor(snap frameSnapshot, prefix string) hydra.Body {
+	def, ok := snap.TomlHydras[prefix]
+	if !ok {
+		def = snap.TomlHydras["SPC"]
+	}
+	return f.materializeHydra(def)
+}
+
+func (f *Frame) notifyWebIslandVisibility(activeIslandID string) {
+	if f.onWebIslandVisibility != nil {
+		f.onWebIslandVisibility(activeIslandID)
 	}
 }
 

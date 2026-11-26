@@ -51,9 +51,10 @@ type Config struct {
 	FeatureLedger       *features.GovernanceLedger
 	FeatureHost         *features.Host
 	PackageStore        *marketplace.PackageStore
-	WebHost             kit.WebIslandHost
-	OnWebIslandAction   func(islandID, event string) bool
-	InitialThemeID      string
+	WebHost               kit.WebIslandHost
+	OnWebIslandAction     func(islandID, event string) bool
+	OnWebIslandVisibility func(activeIslandID string)
+	InitialThemeID        string
 	ThemeBundle         appconfig.UIThemeBundle
 	OnReloadThemeBundle func() appconfig.UIThemeBundle
 	OnGlassChanged      func(enabled bool)
@@ -135,9 +136,10 @@ type Frame struct {
 	onAddTaskFn         func(title string) error
 	onCycleTaskFn       func(id string) error
 	onPrefsChanged      func(appconfig.UserPrefs)
-	onApplyFeatures     func(spec string)
-	onWebIslandAction   func(islandID, event string) bool
-	invalidate          func()
+	onApplyFeatures       func(spec string)
+	onWebIslandAction     func(islandID, event string) bool
+	onWebIslandVisibility func(activeIslandID string)
+	invalidate            func()
 }
 
 // New initializes Marlin UI's Doom Emacs Frame.
@@ -173,9 +175,10 @@ func New(cfg Config) *Frame {
 		onAddTaskFn:         cfg.OnAddTask,
 		onCycleTaskFn:       cfg.OnCycleTask,
 		onPrefsChanged:      cfg.OnPrefsChanged,
-		onApplyFeatures:     cfg.OnApplyFeatures,
-		onWebIslandAction:   cfg.OnWebIslandAction,
-		invalidate:          inv,
+		onApplyFeatures:       cfg.OnApplyFeatures,
+		onWebIslandAction:     cfg.OnWebIslandAction,
+		onWebIslandVisibility: cfg.OnWebIslandVisibility,
+		invalidate:            inv,
 	}
 	preferred := strings.TrimSpace(cfg.InitialThemeID)
 	if preferred == "" {
@@ -247,6 +250,7 @@ func (f *Frame) SelectBuffer(id buffer.ID) {
 	}
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	f.notifyWebIslandVisibility("")
 	f.refocusFrame.Store(true)
 	f.requestFrame()
 }
@@ -321,6 +325,11 @@ func (f *Frame) SelectFeature(fid string) {
 	}
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	if fid == "feature:webisland" {
+		f.notifyWebIslandVisibility("workflow-graph")
+	} else {
+		f.notifyWebIslandVisibility("")
+	}
 	f.refocusFrame.Store(true)
 	f.requestFrame()
 }
@@ -671,7 +680,7 @@ func (f *Frame) View(c *ui.Context) {
 	var wrt *widgets.Runtime
 	if isDashboard || (snap.CustomSidebar != nil && snap.CustomSidebar.Body != nil) {
 		sig = f.buildLiveSignals(th, modelLbl, sessLbl, pendingGateCount)
-		wrt = f.buildWidgetRuntime(mods, pendingGateCount, gateTitle, gateID, pg)
+		wrt = f.buildWidgetRuntime(snap, mods, pendingGateCount, gateTitle, gateID, pg)
 		wrt.Modules.GlassOpacity = glassOp
 	}
 
@@ -697,7 +706,7 @@ func (f *Frame) View(c *ui.Context) {
 		PackageFilter:       snap.PackageFilter,
 		OnSelectBuffer:      f.SelectBuffer,
 		OnSetTheme:          f.SetTheme,
-		OnReloadThemes:      f.ReloadThemes,
+		OnReloadThemes:      f.ReloadThemesAsync,
 		OnToggleGlass:       f.ToggleGlass,
 		OnCycleGlassOpacity: f.CycleGlassOpacity,
 		OnToggleMotion:      f.ToggleMotion,
@@ -737,7 +746,7 @@ func (f *Frame) View(c *ui.Context) {
 	kp := f.meowState.Keypad()
 	var activeHydra *hydra.Body
 	if kp != "" {
-		b := f.hydraBodyFor(kp)
+		b := f.hydraBodyFor(snap, kp)
 		activeHydra = &b
 	}
 
@@ -892,7 +901,7 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 		},
 		OnFocusMinibuffer: f.miniState.RequestFocus,
 		OnHydraKey: func(ctx *ui.Context, keyScope ui.Element, prefix string) bool {
-			body := f.hydraBodyFor(prefix)
+			body := f.hydraBodyFor(f.loadSnapshot(), prefix)
 			head, ok := body.MatchKeyInScope(ctx, keyScope)
 			if !ok {
 				return false
@@ -906,16 +915,6 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 			return true
 		},
 	})
-}
-
-func (f *Frame) hydraBodyFor(prefix string) hydra.Body {
-	f.mu.Lock()
-	def, ok := f.tomlHydras[prefix]
-	if !ok {
-		def = f.tomlHydras["SPC"]
-	}
-	f.mu.Unlock()
-	return f.materializeHydra(def)
 }
 
 func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {

@@ -200,6 +200,7 @@ func (f *Frame) mountAndFocusPlugin(pkg marketplace.ManagedPackage) {
 	f.activeExtID = ""
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	f.notifyWebIslandVisibility(pkg.ID)
 	f.Echo("Mounted plugin: " + pkg.Name)
 }
 
@@ -218,6 +219,7 @@ func (f *Frame) unmountPluginTab(id string) {
 	}
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	f.notifyWebIslandVisibility("")
 }
 
 func (f *Frame) applyMarketplaceLayout(pkg marketplace.ManagedPackage) {

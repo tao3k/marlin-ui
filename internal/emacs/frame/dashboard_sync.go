@@ -458,14 +458,12 @@ func (f *Frame) dispatchWidgetAction(action string) {
 	}
 }
 
-func (f *Frame) buildWidgetRuntime(mods widgets.Modules, pendingGateCount int, gateTitle, gateID string, pg *mygoshell.PromptGateController) *widgets.Runtime {
+func (f *Frame) buildWidgetRuntime(snap frameSnapshot, mods widgets.Modules, pendingGateCount int, gateTitle, gateID string, pg *mygoshell.PromptGateController) *widgets.Runtime {
 	var tasks []widgets.TaskItem
 	if f.roomTasksFn != nil {
 		tasks = f.roomTasksFn()
 	} else {
-		f.mu.Lock()
-		tasks = append([]widgets.TaskItem(nil), f.localTasks...)
-		f.mu.Unlock()
+		tasks = snap.LocalTasks
 	}
 	agentWorking := false
 	lastReply := ""
@@ -506,6 +504,7 @@ func (f *Frame) buildWidgetRuntime(mods widgets.Modules, pendingGateCount int, g
 					Status: "OPEN",
 					Owner:  "@you",
 				})
+				f.publishSnapshotLocked()
 				f.mu.Unlock()
 			}
 			f.Echo("Added task: " + title)
@@ -527,6 +526,7 @@ func (f *Frame) buildWidgetRuntime(mods widgets.Modules, pendingGateCount int, g
 						}
 					}
 				}
+				f.publishSnapshotLocked()
 				f.mu.Unlock()
 			}
 			f.invalidate()

@@ -17,10 +17,9 @@ import (
 )
 
 // WatchUIThemeDir observes ~/.config/marlin/ui/ using a zero-dependency,
-// pure-Go recursive stat fingerprint poller (safe across macOS/Linux/Windows
-// with CGO_ENABLED=0). Whenever any TOML manifest, W3C tokens.json, CSS
-// override, TSX-compiled JSON widget/sidebar, or HTML WebView island changes
-// on disk, onChange is invoked automatically for instant live hot-reload.
+// pure-Go recursive stat fingerprint poller until ctx is cancelled. Callers
+// should run this inside an async.StructuredScope so shutdown drains cleanly
+// (StructuredCancellation.qnt child-quiescence-barrier).
 func WatchUIThemeDir(ctx context.Context, dir string, interval time.Duration, onChange func()) {
 	if dir == "" || onChange == nil {
 		return
@@ -29,22 +28,20 @@ func WatchUIThemeDir(ctx context.Context, dir string, interval time.Duration, on
 		interval = 600 * time.Millisecond
 	}
 	lastSig := fingerprintUIDir(dir)
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				sig := fingerprintUIDir(dir)
-				if sig != lastSig {
-					lastSig = sig
-					onChange()
-				}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sig := fingerprintUIDir(dir)
+			if sig != lastSig {
+				lastSig = sig
+				onChange()
 			}
 		}
-	}()
+	}
 }
 
 func fingerprintUIDir(root string) string {

@@ -194,3 +194,77 @@ func TestGoPureFrontendAndEmacsHierarchyConstraints(t *testing.T) {
 		t.Fatalf("expected to inspect production Go files, found 0")
 	}
 }
+
+// TestQuintConcurrencyInvariantsAST mechanically enforces our Deterministic
+// Engineering Quint concurrency laws against production Go AST:
+//  1. StructuredCancellation.qnt (child-quiescence-barrier): zero raw `go ...`
+//     goroutine statements in cmd/marlin-desktop, internal/featurekit,
+//     internal/appconfig, and internal/emacs/* (must use StructuredScope / FencedLane).
+//  2. UiMainThreadRcuSnapshot.qnt (off-thread-io-lock-free): zero `f.mu.Lock()`
+//     acquisitions inside Frame.View, hydraBodyFor, or buildWidgetRuntime.
+func TestQuintConcurrencyInvariantsAST(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	fset := token.NewFileSet()
+
+	structuredDirs := []string{
+		"cmd/marlin-desktop",
+		"internal/featurekit",
+		"internal/appconfig",
+		"internal/emacs",
+	}
+	for _, sub := range structuredDirs {
+		root := filepath.Join(repoRoot, sub)
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			relPath, _ := filepath.Rel(repoRoot, path)
+			file, parseErr := parser.ParseFile(fset, path, nil, 0)
+			if parseErr != nil {
+				t.Errorf("parse %s: %v", relPath, parseErr)
+				return nil
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				if goStmt, ok := n.(*ast.GoStmt); ok {
+					pos := fset.Position(goStmt.Pos())
+					t.Errorf("Quint StructuredCancellation.qnt violation in %s:%d: raw fire-and-forget `go` statement forbidden (use async.StructuredScope.Go or async.FencedLane)", relPath, pos.Line)
+				}
+				if fn, ok := n.(*ast.FuncDecl); ok {
+					switch fn.Name.Name {
+					case "View", "hydraBodyFor", "buildWidgetRuntime":
+						if fn.Recv != nil && fn.Body != nil {
+							ast.Inspect(fn.Body, func(inner ast.Node) bool {
+								if lit, isLit := inner.(*ast.FuncLit); isLit {
+									// Ignore deferred UI click callbacks (OnAddTask/OnCycleTask) that run on user click, not during render.
+									_ = lit
+									return false
+								}
+								call, ok := inner.(*ast.CallExpr)
+								if !ok {
+									return true
+								}
+								sel, ok := call.Fun.(*ast.SelectorExpr)
+								if !ok || sel.Sel.Name != "Lock" {
+									return true
+								}
+								if xSel, ok := sel.X.(*ast.SelectorExpr); ok && xSel.Sel.Name == "mu" {
+									pos := fset.Position(call.Pos())
+									t.Errorf("Quint UiMainThreadRcuSnapshot.qnt violation in %s:%d (%s): render-thread f.mu.Lock() forbidden (read wait-free RCU frameSnapshot)", relPath, pos.Line, fn.Name.Name)
+								}
+								return true
+							})
+						}
+					}
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", sub, err)
+		}
+	}
+}
