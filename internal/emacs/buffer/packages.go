@@ -186,7 +186,13 @@ func renderPackageRow(c *ui.Context, pkg marketplace.ManagedPackage, selected bo
 					}
 				}
 			case marketplace.PackageStatusInstalled:
-				if (pkg.Kind == marketplace.PackageKindTheme || pkg.Kind == marketplace.PackageKindLayout) && !pkg.Active {
+				if pkg.Kind == marketplace.PackageKindPlugin {
+					if theme.ActionButton(c, "pkg-open-"+pkg.ID, "Open", th.Info, false, th).Clicked() {
+						if bc != nil && bc.OnPackageApply != nil {
+							bc.OnPackageApply(pkg.ID)
+						}
+					}
+				} else if (pkg.Kind == marketplace.PackageKindTheme || pkg.Kind == marketplace.PackageKindLayout) && !pkg.Active {
 					if theme.ActionButton(c, "pkg-use-"+pkg.ID, "Apply", th.Accent, false, th).Clicked() {
 						if bc != nil && bc.OnPackageApply != nil {
 							bc.OnPackageApply(pkg.ID)
@@ -199,6 +205,58 @@ func renderPackageRow(c *ui.Context, pkg marketplace.ManagedPackage, selected bo
 					}
 				}
 			}
+		})
+	})
+}
+
+// RenderMountedPlugin renders an installed Official Marketplace plugin mounted
+// as a live Emacs Tab in the primary viewport.
+func RenderMountedPlugin(c *ui.Context, th theme.Theme, pkg marketplace.ManagedPackage, bc *Context) {
+	ui.Column(c.Key("mounted-plugin-"+pkg.ID)).Fill().AlignItems(ui.Stretch).Children(func() {
+		barBg := theme.GlassTone(c, th.Bar, th, 0.24, 0.42)
+		ui.Row(c.Key("mplug-bar-"+pkg.ID)).Padding(8, 14).Gap(10).AlignItems(ui.Center).
+			Background(barBg).Children(func() {
+			ui.Text(c, pkg.Name).Font(theme.FontMono).FontSize(theme.FontSizeUI).
+				FontWeight(700).TextColor(th.Ink).NoWrap()
+			runtimeLbl := "declarative"
+			if pkg.PluginEntry != nil && pkg.PluginEntry.Runtime != "" {
+				runtimeLbl = string(pkg.PluginEntry.Runtime)
+			}
+			ui.Text(c, fmt.Sprintf("%s · %s · %s", pkg.ID, runtimeLbl, pkg.Version)).
+				Font(theme.FontMono).FontSize(theme.FontSizeMeta).
+				FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).NoWrap()
+			ui.Box(c).Grow(1)
+			if theme.ActionButton(c, "mplug-back-"+pkg.ID, "Packages", th.Info, false, th).Clicked() {
+				if bc != nil && bc.OnSelectBuffer != nil {
+					bc.OnSelectBuffer(Packages)
+				}
+			}
+			if theme.ActionButton(c, "mplug-rm-"+pkg.ID, "Remove", th.Danger, false, th).Clicked() {
+				if bc != nil && bc.OnPackageRemove != nil {
+					bc.OnPackageRemove(pkg.ID)
+				}
+			}
+		})
+		ui.Box(c).Height(1).Background(kit.WithAlpha(th.Border, 0.35))
+
+		cardBg := theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.54)
+		ui.Column(c).Grow(1).Padding(24, 28).Gap(14).Children(func() {
+			ui.Column(c.Key("mplug-card-"+pkg.ID)).Padding(18, 20).Gap(10).Radius(14).
+				Background(cardBg).Border(1, kit.WithAlpha(th.Border, 0.40)).Children(func() {
+				ui.Text(c, "OFFICIAL MARKETPLACE PLUGIN").Font(theme.FontMono).FontSize(11).
+					FontWeight(700).TextColor(th.Accent).NoWrap()
+				ui.Text(c, pkg.Name).Font(theme.FontMono).FontSize(18).
+					FontWeight(700).TextColor(th.Ink).NoWrap()
+				ui.Text(c, pkg.Summary).Font(theme.FontMono).FontSize(theme.FontSizeUI).
+					FontWeight(theme.GlassWeight(c, 400)).TextColor(th.Ink)
+				slot := "workbench.main"
+				if pkg.PluginEntry != nil && pkg.PluginEntry.SlotID != "" {
+					slot = string(pkg.PluginEntry.SlotID)
+				}
+				ui.Text(c, fmt.Sprintf("Trust: %s  |  Publisher: %s  |  Slot: %s  |  Revision: %s",
+					pkg.TrustTier, pkg.PublisherID, slot, pkg.Version)).
+					Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted)
+			})
 		})
 	})
 }

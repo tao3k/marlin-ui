@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/async"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
@@ -36,6 +37,8 @@ type frameSnapshot struct {
 	ActiveBuffer    buffer.ID
 	ActiveFeatureID string
 	ActiveExtID     string
+	ActivePluginID  string
+	MountedPlugins  []marketplace.ManagedPackage
 	OpenTabs        []buffer.ID
 	TableCursor     int
 	PackageFilter   string
@@ -84,6 +87,8 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		ActiveBuffer:    f.activeBuffer,
 		ActiveFeatureID: f.activeFeatureID,
 		ActiveExtID:     f.activeExtID,
+		ActivePluginID:  f.activePluginID,
+		MountedPlugins:  append([]marketplace.ManagedPackage(nil), f.mountedPlugins...),
 		OpenTabs:        append([]buffer.ID(nil), f.openTabs...),
 		TableCursor:     f.tableCursor,
 		PackageFilter:   f.packageFilter,

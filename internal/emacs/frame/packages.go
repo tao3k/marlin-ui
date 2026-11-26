@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/runtime/async"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/tabs"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
@@ -127,6 +130,7 @@ func (f *Frame) RemovePackage(id string) {
 		f.Echo("Remove error: " + err.Error())
 		return
 	}
+	f.unmountPluginTab(id)
 	if f.onReloadThemeBundle != nil {
 		f.ReloadThemesAsync()
 	}
@@ -134,7 +138,8 @@ func (f *Frame) RemovePackage(id string) {
 	f.requestFrame()
 }
 
-// ApplyPackage activates an installed Official Marketplace theme or layout live.
+// ApplyPackage activates an installed Official Marketplace theme, layout
+// perspective, or mounts a plugin into the Emacs Tab bar live.
 func (f *Frame) ApplyPackage(id string) {
 	if f.pkgStore == nil {
 		return
@@ -168,11 +173,141 @@ func (f *Frame) ApplyPackage(id string) {
 		}
 		f.SetTheme(marketplace.ThemePackSlug(found.ID))
 	case marketplace.PackageKindLayout:
-		f.Echo("Activated workspace layout: " + found.Name)
-	default:
-		f.Echo("Enabled plugin: " + found.Name)
+		f.applyMarketplaceLayout(*found)
+	case marketplace.PackageKindPlugin:
+		f.mountAndFocusPlugin(*found)
 	}
 	f.requestFrame()
+}
+
+func (f *Frame) mountAndFocusPlugin(pkg marketplace.ManagedPackage) {
+	f.miniState.Close()
+	f.meowState.ClearKeypad()
+	f.mu.Lock()
+	exists := false
+	for i := range f.mountedPlugins {
+		if f.mountedPlugins[i].ID == pkg.ID {
+			f.mountedPlugins[i] = pkg
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		f.mountedPlugins = append(f.mountedPlugins, pkg)
+	}
+	f.activePluginID = pkg.ID
+	f.activeFeatureID = ""
+	f.activeExtID = ""
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.Echo("Mounted plugin: " + pkg.Name)
+}
+
+func (f *Frame) unmountPluginTab(id string) {
+	f.mu.Lock()
+	next := f.mountedPlugins[:0]
+	for _, p := range f.mountedPlugins {
+		if p.ID != id {
+			next = append(next, p)
+		}
+	}
+	f.mountedPlugins = append([]marketplace.ManagedPackage(nil), next...)
+	if f.activePluginID == id {
+		f.activePluginID = ""
+		f.activeBuffer = buffer.Packages
+	}
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+}
+
+func (f *Frame) applyMarketplaceLayout(pkg marketplace.ManagedPackage) {
+	persp := pkg.Category
+	if pkg.LayoutSpec != nil && strings.TrimSpace(pkg.LayoutSpec.Perspective) != "" {
+		persp = strings.TrimSpace(pkg.LayoutSpec.Perspective)
+	}
+	switch persp {
+	case "focus":
+		f.mu.Lock()
+		f.openTabs = []buffer.ID{buffer.Dashboard, buffer.Conversation}
+		f.railPinned = false
+		f.activeBuffer = buffer.Conversation
+		f.activeFeatureID = ""
+		f.activeExtID = ""
+		f.activePluginID = ""
+		f.publishSnapshotLocked()
+		f.mu.Unlock()
+	case "cockpit":
+		f.mu.Lock()
+		f.openTabs = []buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets, buffer.Packages}
+		f.railPinned = true
+		f.activeBuffer = buffer.Dashboard
+		f.activeFeatureID = ""
+		f.activeExtID = ""
+		f.activePluginID = ""
+		f.publishSnapshotLocked()
+		f.mu.Unlock()
+	case "review":
+		f.mu.Lock()
+		f.openTabs = []buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets}
+		f.activeBuffer = buffer.Sessions
+		f.activeFeatureID = ""
+		f.activeExtID = ""
+		f.activePluginID = ""
+		f.publishSnapshotLocked()
+		f.mu.Unlock()
+	case "dev-git-github":
+		if _, err := f.pkgStore.Install("tao3k.git-workbench"); err == nil {
+			f.ApplyPackage("tao3k.git-workbench")
+		}
+		if _, err := f.pkgStore.Install("tao3k.github-workbench"); err == nil {
+			f.ApplyPackage("tao3k.github-workbench")
+		}
+		f.SelectFeature("pkg:tao3k.git-workbench")
+	default:
+		f.SelectBuffer(buffer.Dashboard)
+	}
+	f.Echo("Applied layout perspective: " + pkg.Name)
+}
+
+func (f *Frame) appendMountedPluginTabs(snap frameSnapshot, featBufs []tabs.FeatureTab) ([]tabs.FeatureTab, *marketplace.ManagedPackage) {
+	var active *marketplace.ManagedPackage
+	for i := range snap.MountedPlugins {
+		p := snap.MountedPlugins[i]
+		featBufs = append(featBufs, tabs.FeatureTab{
+			ID:    "pkg:" + p.ID,
+			Title: "*" + p.Name + "*",
+		})
+		if snap.ActivePluginID == p.ID {
+			cp := p
+			active = &cp
+		}
+	}
+	return featBufs, active
+}
+
+func (f *Frame) selectMountedPlugin(id string) bool {
+	if !strings.HasPrefix(id, "pkg:") {
+		return false
+	}
+	pid := strings.TrimPrefix(id, "pkg:")
+	f.miniState.Close()
+	f.meowState.ClearKeypad()
+	f.mu.Lock()
+	f.activePluginID = pid
+	f.activeFeatureID = ""
+	f.activeExtID = ""
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.requestFrame()
+	return true
+}
+
+func renderMountedPluginViewport(c *ui.Context, th theme.Theme, pkg *marketplace.ManagedPackage, bc *buffer.Context) bool {
+	if pkg == nil {
+		return false
+	}
+	buffer.RenderMountedPlugin(c, th, *pkg, bc)
+	return true
 }
 
 func (f *Frame) registerMarketplaceTheme(pack marketplace.ThemePack) {

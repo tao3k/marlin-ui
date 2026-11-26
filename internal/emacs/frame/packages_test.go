@@ -88,4 +88,24 @@ func TestPackagesBufferInstallApplyRemoveFlow(t *testing.T) {
 	if f.ActiveBuffer() != buffer.Packages {
 		t.Fatalf("expected active buffer *Packages*, got %s", f.ActiveBuffer())
 	}
+
+	// Plugin stream: Install -> Open mounts live Emacs Tab -> Remove cleanly unmounts.
+	f.InstallPackage("tao3k.git-workbench")
+	f.ApplyPackage("tao3k.git-workbench")
+	tt.Frame()
+	if !tt.HasText("OFFICIAL MARKETPLACE PLUGIN") || !tt.HasText("*Git Workbench*") {
+		t.Fatalf("expected mounted *Git Workbench* tab and plugin viewport")
+	}
+	f.RemovePackage("tao3k.git-workbench")
+	tt.Frame()
+	if tt.HasText("OFFICIAL MARKETPLACE PLUGIN") {
+		t.Fatalf("expected plugin viewport unmounted after RemovePackage")
+	}
+
+	// Layout stream: Apply Deep Focus perspective switches active buffer to *conversation*.
+	f.ApplyPackage("tao3k.layout-focus")
+	tt.Frame()
+	if f.ActiveBuffer() != buffer.Conversation {
+		t.Fatalf("expected Deep Focus layout to focus *conversation*, got %s", f.ActiveBuffer())
+	}
 }

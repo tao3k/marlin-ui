@@ -123,6 +123,8 @@ type Frame struct {
 	pkgStore       *marketplace.PackageStore
 	pkgRefreshLane *async.FencedLane[struct{}, marketplace.PackageStoreSnapshot]
 	packageFilter  string
+	mountedPlugins []marketplace.ManagedPackage
+	activePluginID string
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)
@@ -231,6 +233,7 @@ func (f *Frame) SelectBuffer(id buffer.ID) {
 	f.activeBuffer = id
 	f.activeFeatureID = ""
 	f.activeExtID = ""
+	f.activePluginID = ""
 	f.tableCursor = 0
 	found := false
 	for _, t := range f.openTabs {
@@ -302,9 +305,13 @@ func (f *Frame) CycleTheme() {
 
 // SelectFeature focuses an opted-in feature buffer (e.g. "feature:chatroom") or Scheme extension.
 func (f *Frame) SelectFeature(fid string) {
+	if f.selectMountedPlugin(fid) {
+		return
+	}
 	f.miniState.Close()
 	f.meowState.ClearKeypad()
 	f.mu.Lock()
+	f.activePluginID = ""
 	if strings.HasPrefix(fid, "scheme-ext:") {
 		f.activeExtID = strings.TrimPrefix(fid, "scheme-ext:")
 		f.activeFeatureID = ""
@@ -611,6 +618,8 @@ func (f *Frame) View(c *ui.Context) {
 			activeExt = &cp
 		}
 	}
+	var activePlugin *marketplace.ManagedPackage
+	featBufs, activePlugin = f.appendMountedPluginTabs(snap, featBufs)
 
 	var pg *mygoshell.PromptGateController
 	var helm *mygoshell.HelmMinibufferController
@@ -653,7 +662,7 @@ func (f *Frame) View(c *ui.Context) {
 		}
 	}
 
-	isDashboard := activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil
+	isDashboard := activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
 	if f.pacer != nil {
 		f.pacer.SetLiveClockVisible(isDashboard && mods.Motion)
 	}
@@ -734,6 +743,8 @@ func (f *Frame) View(c *ui.Context) {
 	activeTabKey := activeFeat
 	if activeExtID != "" {
 		activeTabKey = "scheme-ext:" + activeExtID
+	} else if activePlugin != nil {
+		activeTabKey = "pkg:" + activePlugin.ID
 	}
 
 	// 4-region Doom Emacs frame (or 100% borderless Zen Mode hiding tabs/modeline/resting echo).
@@ -774,7 +785,9 @@ func (f *Frame) View(c *ui.Context) {
 		}
 
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-			window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx)
+			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
+				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx)
+			}
 			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
 		})
 		if showChrome {
