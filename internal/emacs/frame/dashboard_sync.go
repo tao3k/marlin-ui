@@ -451,6 +451,8 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.EnterInsert()
 	case "cmd:probe-targets":
 		f.probeTargets()
+	case "cmd:refresh-packages":
+		f.RefreshPackagesAsync()
 	default:
 		f.Echo("Widget action: " + act)
 	}
@@ -761,6 +763,8 @@ func majorModeName(id buffer.ID) string {
 		return "Messages"
 	case buffer.Settings:
 		return "Customize"
+	case buffer.Packages:
+		return "Package-Menu"
 	default:
 		return "Marlin-Chat"
 	}

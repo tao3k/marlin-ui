@@ -83,6 +83,14 @@ column = "System"
 exit = "true"
 action = "buffer:*Settings*"
 
+[[heads]]
+prefix = "SPC"
+key = "p"
+label = "Packages (*Packages* Marketplace)"
+column = "System"
+exit = "true"
+action = "buffer:*Packages*"
+
 [[hydras]]
 prefix = "SPC b"
 id = "buffers"

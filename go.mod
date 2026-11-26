@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/egoist/mygo v0.10.1-0.20261124135225-7232afc726f0
-	github.com/tao3k/marlin-mygo v0.0.0-20261126143608-cdd3763c5a0f
+	github.com/tao3k/marlin-mygo v0.0.0-20261126145142-63cf68cc2752
 )
 
 require (
@@ -12,6 +12,7 @@ require (
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-json-experiment/json v1.27.2 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	golang.org/x/exp v0.0.0-20220921023135-46d9e7742f1e // indirect
 	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.60.0 // indirect

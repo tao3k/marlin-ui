@@ -38,6 +38,7 @@ type frameSnapshot struct {
 	ActiveExtID     string
 	OpenTabs        []buffer.ID
 	TableCursor     int
+	PackageFilter   string
 	ModelLabel      string
 	SessionLabel    string
 	StatusItems     []schema.UIStatusItem
@@ -85,6 +86,7 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		ActiveExtID:     f.activeExtID,
 		OpenTabs:        append([]buffer.ID(nil), f.openTabs...),
 		TableCursor:     f.tableCursor,
+		PackageFilter:   f.packageFilter,
 		ModelLabel:      f.modelLabel,
 		SessionLabel:    f.sessionLabel,
 		StatusItems:     append([]schema.UIStatusItem(nil), f.statusItems...),
@@ -170,6 +172,7 @@ func (f *Frame) Close() {
 	if f.reloadLane != nil {
 		f.reloadLane.Close()
 	}
+	f.closePackageStore()
 }
 
 func effectiveSurfaceFromSnap(snap frameSnapshot) (glassOp, chromeOp, viewportOp float32, vibrancy string) {

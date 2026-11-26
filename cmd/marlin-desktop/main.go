@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
@@ -308,6 +310,18 @@ func main() {
 		}
 
 		featurekit.RegisterUserIslands(themeBundle.WebIslands)
+		syncCfg := marketplace.OfficialSyncConfig{
+			LocalRepoDir: strings.TrimSpace(os.Getenv("MARLIN_MARKETPLACE_DIR")),
+		}
+		syncClient, _ := marketplace.NewOfficialSyncClient(syncCfg)
+		pkgStore, pkgErr := marketplace.NewPackageStore(marketplace.PackageStoreConfig{
+			SyncClient: syncClient,
+			StateFile:  filepath.Join(themeDir, "packages-state.json"),
+			UIDir:      themeDir,
+		})
+		if pkgErr != nil {
+			log.Printf("marketplace package store warning: %v", pkgErr)
+		}
 		emacsWin = frame.New(frame.Config{
 			Adaptive:            adaptive,
 			Link:                link,
@@ -316,6 +330,7 @@ func main() {
 			FeatureReg:          reg,
 			FeatureLedger:       ledger,
 			FeatureHost:         host,
+			PackageStore:        pkgStore,
 			WebHost:             featurekit.WebIslandHost(),
 			OnWebIslandAction:   featurekit.DispatchWebIslandAction,
 			InitialThemeID:      cfg.ThemeID,

@@ -18,6 +18,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/engine/promptgate"
 	"github.com/tao3k/marlin-mygo/engine/search"
@@ -49,6 +50,7 @@ type Config struct {
 	FeatureReg          *features.Registry
 	FeatureLedger       *features.GovernanceLedger
 	FeatureHost         *features.Host
+	PackageStore        *marketplace.PackageStore
 	WebHost             kit.WebIslandHost
 	OnWebIslandAction   func(islandID, event string) bool
 	InitialThemeID      string
@@ -115,9 +117,12 @@ type Frame struct {
 	customize *buffer.CustomizeState
 
 	// Deterministic RCU render snapshot + coalesced off-lock reload lane + 120Hz frame pacer.
-	snapStore  *async.SnapshotStore[frameSnapshot]
-	reloadLane *async.FencedLane[struct{}, appconfig.UIThemeBundle]
-	pacer      *async.FramePacer
+	snapStore      *async.SnapshotStore[frameSnapshot]
+	reloadLane     *async.FencedLane[struct{}, appconfig.UIThemeBundle]
+	pacer          *async.FramePacer
+	pkgStore       *marketplace.PackageStore
+	pkgRefreshLane *async.FencedLane[struct{}, marketplace.PackageStoreSnapshot]
+	packageFilter  string
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)
@@ -184,6 +189,7 @@ func New(cfg Config) *Frame {
 	if cfg.Link != nil {
 		f.logMessage(fmt.Sprintf("hostlink mode=%s endpoint=%s", cfg.Link.Mode, cfg.Link.Endpoint))
 	}
+	f.initPackageStore(cfg.PackageStore)
 	f.initAsyncRuntime()
 	return f
 }
@@ -677,6 +683,8 @@ func (f *Frame) View(c *ui.Context) {
 		GlassOpacity:        glassOp,
 		ZenMode:             zen,
 		Customize:           f.customize,
+		PackageSnap:         f.packageSnapshot(),
+		PackageFilter:       snap.PackageFilter,
 		OnSelectBuffer:      f.SelectBuffer,
 		OnSetTheme:          f.SetTheme,
 		OnReloadThemes:      f.ReloadThemes,
@@ -690,6 +698,12 @@ func (f *Frame) View(c *ui.Context) {
 		OnOpenBufferSwitch: f.OpenBufferSwitch,
 		OnOpenThemeSwitch:  f.OpenThemeSwitch,
 		OnOpenSettings:     f.OpenSettings,
+		OnPackageFilter:    f.SetPackageFilter,
+		OnPackageRefresh:   f.RefreshPackagesAsync,
+		OnPackageInstall:   f.InstallPackage,
+		OnPackageUpdate:    f.UpdatePackage,
+		OnPackageRemove:    f.RemovePackage,
+		OnPackageApply:     f.ApplyPackage,
 		OnSavePrefs:        f.saveCustomizePrefs,
 		OnEcho:             f.Echo,
 	}

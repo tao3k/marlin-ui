@@ -110,3 +110,18 @@ action = "cmd:review-gate"
 name = "open-workflow-canvas"
 desc = "Open *Workflow Canvas* Hybrid GPU + Sandboxed WebView BPMN Studio"
 action = "feature:webisland"
+
+[[commands]]
+name = "list-packages"
+desc = "Open *Packages* Official Marketplace package manager (SPC p)"
+action = "buffer:*Packages*"
+
+[[commands]]
+name = "marketplace"
+desc = "Browse & install Official Marketplace themes, plugins & layouts"
+action = "buffer:*Packages*"
+
+[[commands]]
+name = "package-refresh-contents"
+desc = "Refresh Official Marketplace registry index from tao3k/marlin-ui-marketplace"
+action = "cmd:refresh-packages"

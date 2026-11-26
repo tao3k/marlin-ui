@@ -12,6 +12,7 @@ package buffer
 import (
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 	"github.com/tao3k/marlin-mygo/runtime/widgets"
@@ -34,6 +35,7 @@ const (
 	Messages     ID = "*Messages*"
 	Help         ID = "*Help*"
 	Settings     ID = "*Settings*"
+	Packages     ID = "*Packages*"
 )
 
 // Descriptor describes a registered built-in Emacs buffer for switch-buffer completion.
@@ -51,6 +53,7 @@ func Catalog() []Descriptor {
 		{ID: Targets, Description: "Federation Rust gRPC targets table"},
 		{ID: Processes, Description: "Managed runtime processes"},
 		{ID: Models, Description: "Configured model routes"},
+		{ID: Packages, Description: "Official Marketplace package manager (themes, plugins, layouts)"},
 		{ID: Messages, Description: "UI diagnostics log"},
 		{ID: Help, Description: "Meow & Doom keyboard shortcuts"},
 		{ID: Settings, Description: "Customize appearance, remotes, account, features"},
@@ -87,6 +90,8 @@ type Context struct {
 	GlassOpacity    float32
 	ZenMode         bool
 	Customize       *CustomizeState
+	PackageSnap     marketplace.PackageStoreSnapshot
+	PackageFilter   string
 
 	OnSelectBuffer      func(ID)
 	OnSetTheme          func(themeID string)
@@ -101,6 +106,12 @@ type Context struct {
 	OnOpenBufferSwitch func()
 	OnOpenThemeSwitch  func()
 	OnOpenSettings     func()
+	OnPackageFilter    func(kind string)
+	OnPackageRefresh   func()
+	OnPackageInstall   func(id string)
+	OnPackageUpdate    func(id string)
+	OnPackageRemove    func(id string)
+	OnPackageApply     func(id string)
 	OnSavePrefs        func(sessionID, remoteHost string, realSession bool)
 	OnEcho             func(msg string)
 }
@@ -118,6 +129,8 @@ func Render(c *ui.Context, id ID, th theme.Theme, bc *Context) {
 		renderProcesses(c, th, bc)
 	case Models:
 		renderModels(c, th, bc)
+	case Packages:
+		renderPackages(c, th, bc)
 	case Messages:
 		renderMessages(c, th, bc)
 	case Help:
