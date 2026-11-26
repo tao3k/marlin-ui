@@ -31,6 +31,9 @@ func TestFullStackDesktopUIE2E_SettingsAuthHelmAndSavedRemotes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	t.Setenv("MARLIN_OAUTH_GITHUB_CLIENT_ID", "test-gh-client")
+	t.Setenv("MARLIN_OAUTH_GOOGLE_CLIENT_ID", "test-google-client")
+
 	tmp := t.TempDir()
 	cfg := appconfig.Config{
 		SessionID:    "marlin-e2e-main",

@@ -9,4 +9,12 @@ build/
 wasm_exec.js
 go.work
 go.work.sum
+.devenv/
+.direnv/
+.pre-commit-config.yaml
+.bin/
+.cache/
+.config/
+.data/
+.run/
 .DS_Store

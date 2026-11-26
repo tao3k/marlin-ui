@@ -69,7 +69,7 @@ check-feature-pruning:
 
 # Enforce Go modularity hygiene: zero .go files exceeding 1,000 lines.
 check-file-size max_lines="1000":
-    @OVER=$(find . -name '*.go' -exec wc -l {} + | awk -v max={{max_lines}} '$1 > max && $2 != "total" {print}'); if [ -n "$OVER" ]; then echo "Go files exceeding {{max_lines}} lines:"; echo "$OVER"; exit 1; else echo "OK: all Go files are <= {{max_lines}} lines"; fi
+    @OVER=$(find ./cmd ./internal -name '*.go' -exec wc -l {} + | awk -v max={{max_lines}} '$1 > max && $2 != "total" {print}'); if [ -n "$OVER" ]; then echo "Go files exceeding {{max_lines}} lines:"; echo "$OVER"; exit 1; else echo "OK: all Go files are <= {{max_lines}} lines"; fi
 
 # --- Local DEV-ONLY helpers (never baked into Go release binaries) ---
 
@@ -85,7 +85,16 @@ dev-test-rust core="../..":
     if [ ! -x "$BIN" ]; then BIN="$(cd {{core}} && pwd)/target/release/marlin-app-server"; fi; \
     MARLIN_APP_SERVER_BIN="$BIN" go test -v -race -run "TestHostLinkLiveRustAppServerGRPCConnection" ./internal/hostlink
 
+# Validate project.sysml and dev/sysml OpenSysML v2 architecture models.
+sysml-check:
+    sysml -strict -validate -self-check -no-record-cache project.sysml dev/sysml
+
+# Enforce hard Go pure-frontend constraint (MUI-ARCH-R04) and Emacs package hierarchy (MUI-EMACS-R01).
+check-go-boundary:
+    CGO_ENABLED=0 go test -v ./internal/archguard
+
 # Full validation gate.
-check: test check-feature-pruning check-file-size
+check: test check-go-boundary check-feature-pruning check-file-size
+    @if command -v sysml >/dev/null 2>&1; then just sysml-check; else echo "SKIP: sysml CLI not installed"; fi
     CGO_ENABLED=0 go vet ./internal/... ./cmd/marlin-desktop ./cmd/marlin-mobile
     GOOS=js GOARCH=wasm CGO_ENABLED=0 go vet ./cmd/marlin-web

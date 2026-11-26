@@ -69,17 +69,15 @@ func AttachAuthAndSettings(
 		Vault:       vault,
 		OpenBrowser: auth.OpenSystemBrowser,
 	})
-	ghClientID := strings.TrimSpace(os.Getenv("MARLIN_OAUTH_GITHUB_CLIENT_ID"))
-	if ghClientID == "" {
-		ghClientID = "marlin-ui-github"
+	// Register OAuth providers ONLY when real client IDs are configured so we
+	// never render dead placeholder buttons. Enterprise OIDC Discovery is always
+	// available at runtime via OnConfigureOIDC.
+	if ghClientID := strings.TrimSpace(os.Getenv("MARLIN_OAUTH_GITHUB_CLIENT_ID")); ghClientID != "" {
+		_ = mgr.RegisterProvider(auth.GitHubOAuthProvider(ghClientID))
 	}
-	googleClientID := strings.TrimSpace(os.Getenv("MARLIN_OAUTH_GOOGLE_CLIENT_ID"))
-	if googleClientID == "" {
-		googleClientID = "marlin-ui-google"
+	if googleClientID := strings.TrimSpace(os.Getenv("MARLIN_OAUTH_GOOGLE_CLIENT_ID")); googleClientID != "" {
+		_ = mgr.RegisterProvider(auth.GoogleOAuthProvider(googleClientID))
 	}
-	_ = mgr.RegisterProvider(auth.GitHubOAuthProvider(ghClientID))
-	_ = mgr.RegisterProvider(auth.GoogleOAuthProvider(googleClientID))
-	_ = mgr.RegisterProvider(auth.EmailOTPProvider())
 	_, _ = mgr.RestoreFromVault(ctx)
 
 	authCtrl := mygoshell.NewAuthController(mgr)

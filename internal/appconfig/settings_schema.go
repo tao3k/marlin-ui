@@ -23,8 +23,8 @@ func SettingsSchema() schema.BoundedSchema {
 				Label:      "Theme Preset",
 				Kind:       schema.FieldEnum,
 				Required:   true,
-				EnumValues: []string{"midnight", "paper", "doom-one", "tokyo-night", "catppuccin"},
-				Default:    "midnight",
+				EnumValues: []string{"doom-one", "pi", "doom-paper"},
+				Default:    "doom-one",
 			},
 			{
 				Key:        "features_spec",
@@ -70,8 +70,10 @@ func SettingsSchema() schema.BoundedSchema {
 // initial values map for SettingsSchema().
 func InitialSettingsValues(cfg Config, prefs UserPrefs) map[string]any {
 	theme := strings.TrimSpace(cfg.ThemeID)
-	if theme == "" {
-		theme = "midnight"
+	switch theme {
+	case "doom-one", "pi", "doom-paper":
+	default:
+		theme = "doom-one"
 	}
 	feat := normalizeFeaturesPreset(cfg.FeaturesSpec)
 	sess := strings.TrimSpace(cfg.SessionID)

@@ -5,7 +5,10 @@
 //go:build !js
 
 // Command marlin-desktop is the native 120Hz pure-Go desktop client for Marlin
-// Agent Core (macOS, Linux, Windows), built on github.com/tao3k/marlin-mygo.
+// Agent Core (macOS, Linux, Windows). Marlin UI owns its hierarchical Doom
+// Emacs workbench (internal/emacs/{frame,window,buffer,tabs,modeline,minibuffer,meow,theme}),
+// declared in project.sysml and dev/sysml/emacs-workbench.sysml, while
+// github.com/tao3k/marlin-mygo provides the headless engines and gRPC wire.
 package main
 
 import (
@@ -26,6 +29,7 @@ import (
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
+	"github.com/tao3k/marlin-ui/internal/emacs/frame"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
@@ -52,7 +56,7 @@ func main() {
 	flag.StringVar(&cfg.TLSCertFile, "cert", cfg.TLSCertFile, "optional mTLS client certificate PEM file")
 	flag.StringVar(&cfg.TLSKeyFile, "key", cfg.TLSKeyFile, "optional mTLS client private key PEM file")
 	flag.StringVar(&cfg.SessionID, "session", cfg.SessionID, "Marlin session ID")
-	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial theme preset: midnight | paper | doom-one | tokyo-night | catppuccin")
+	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial Doom Emacs theme: doom-one | pi | doom-paper")
 	flag.StringVar(&cfg.FeaturesSpec, "features", cfg.FeaturesSpec, "opt-in UI feature profile: default | all | none | chatroom,compare,canvas")
 	flag.StringVar(&cfg.TursoPath, "turso", cfg.TursoPath, "Turso SQLite file path for supervised local Rust host")
 	flag.StringVar(&cfg.RecoveryFile, "recovery-file", cfg.RecoveryFile, "atomic fsync crash-recovery snapshot file")
@@ -98,16 +102,12 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Headless controllers from marlin-mygo (Transcript, Helm, Projection, Auth, PromptGate, WindowTree).
 	adaptive := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
 		BrandTitle:     "Marlin",
-		BrandSubtitle:  "Desktop · 120Hz Native GPU",
-		InitialThemeID: cfg.ThemeID,
+		InitialThemeID: "midnight",
 		FormFactor:     mygoshell.FormFactorDesktop,
 	})
-	adaptive.Desktop.SidebarCollapsed = prefs.SidebarCollapsed
-	if prefs.Perspective != "" && adaptive.Desktop.OnSelectPerspective != nil {
-		adaptive.Desktop.OnSelectPerspective(prefs.Perspective)
-	}
 	adaptive.Desktop.ActiveSessionID = cfg.SessionID
 	adaptive.Desktop.Sessions = []mygoshell.SessionSummaryView{
 		{SessionID: cfg.SessionID, Title: "Primary Workspace", TurnCount: 0},
@@ -117,25 +117,13 @@ func main() {
 		prefsMu   sync.Mutex
 		win       *mygo.Window
 		tray      *mygo.Tray
+		emacsWin  *frame.Frame
 		link      *hostlink.Link
 		stopVoice func()
 	)
-	savePrefs := func() {
+	savePrefs := func(next appconfig.UserPrefs) {
 		prefsMu.Lock()
-		if adaptive.Desktop != nil {
-			prefs.SidebarCollapsed = adaptive.Desktop.IsSidebarCollapsed()
-			if adaptive.Desktop.ActiveSessionID != "" {
-				prefs.LastSessionID = adaptive.Desktop.ActiveSessionID
-			}
-			if adaptive.Desktop.ActiveThemeNameFn != nil {
-				for _, tp := range mygoshell.BuiltinThemes() {
-					if tp.Name == adaptive.Desktop.ActiveThemeNameFn() {
-						prefs.ThemeID = tp.ID
-						break
-					}
-				}
-			}
-		}
+		prefs = next
 		snap := prefs
 		prefsMu.Unlock()
 		if err := appconfig.SavePrefs(cfg.PrefsFile, snap); err != nil {
@@ -155,12 +143,18 @@ func main() {
 			return
 		}
 		_, _ = adaptive.Desktop.Transcript.StageLocalFiles([]string{path})
+		if emacsWin != nil {
+			emacsWin.Echo("Attached " + path)
+		}
 		if win != nil {
 			win.Invalidate()
 		}
 	})
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
-		savePrefs()
+		prefsMu.Lock()
+		snap := prefs
+		prefsMu.Unlock()
+		_ = appconfig.SavePrefs(cfg.PrefsFile, snap)
 		if tray != nil {
 			tray.Destroy()
 		}
@@ -187,8 +181,6 @@ func main() {
 			}
 		}
 
-		// Attach OS Keychain Vault Auth BEFORE dialing remote gRPC so signed-in
-		// accounts supply fresh OAuth Bearer headers automatically.
 		var applyFeatures func(string)
 		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
 			Config:   cfg,
@@ -198,12 +190,6 @@ func main() {
 				if applyFeatures != nil {
 					applyFeatures(spec)
 				}
-			},
-			OnSavePrefs: func(vals map[string]any) {
-				prefsMu.Lock()
-				appconfig.ApplySettingsValues(&prefs, vals)
-				prefsMu.Unlock()
-				savePrefs()
 			},
 			Invalidate: invalidate,
 		})
@@ -219,49 +205,27 @@ func main() {
 			hostlink.WithClipboardWriter(mygo.Clipboard.WriteText),
 			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
 			hostlink.WithSavedRemotes(prefs.SavedRemotes),
-			hostlink.WithOnSessionChanged(func(_ string) { savePrefs() }),
-			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
+			hostlink.WithOnSessionChanged(func(sid string) {
 				prefsMu.Lock()
-				prefs.UpsertRemote(r)
+				prefs.LastSessionID = sid
+				snap := prefs
 				prefsMu.Unlock()
-				savePrefs()
+				savePrefs(snap)
+			}),
+			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
+				if emacsWin != nil {
+					emacsWin.SyncSavedRemote(r)
+				}
 			}),
 		)
 		if connErr != nil {
 			log.Fatalf("marlin-desktop host connection failed: %v", connErr)
 		}
-		if prevPersp := adaptive.Desktop.OnSelectPerspective; prevPersp != nil {
-			adaptive.Desktop.OnSelectPerspective = func(name string) {
-				prevPersp(name)
-				prefsMu.Lock()
-				prefs.Perspective = name
-				prefsMu.Unlock()
-				savePrefs()
-				invalidate()
-			}
-		}
+
 		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
 		applyFeatures = func(spec string) {
 			reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
 			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
-		}
-
-		// Persist theme cycles triggered from the in-app chrome as well as OS menu.
-		prevCycle := adaptive.Desktop.OnCycleTheme
-		adaptive.Desktop.OnCycleTheme = func() {
-			if prevCycle != nil {
-				prevCycle()
-			}
-			savePrefs()
-			invalidate()
-		}
-		prevToggle := adaptive.Desktop.OnToggleTheme
-		adaptive.Desktop.OnToggleTheme = func() {
-			if prevToggle != nil {
-				prevToggle()
-			}
-			savePrefs()
-			invalidate()
 		}
 
 		tr := adaptive.Desktop.Transcript
@@ -273,6 +237,9 @@ func main() {
 				})
 				if err == nil && len(paths) > 0 {
 					_, _ = tr.StageLocalFiles(paths)
+					if emacsWin != nil {
+						emacsWin.Echo(fmt.Sprintf("Attached %d file(s)", len(paths)))
+					}
 					invalidate()
 				}
 			}()
@@ -287,16 +254,30 @@ func main() {
 		}
 		stopVoice = wireDesktopVoice(ctx, tr, invalidate)
 
-		mygo.App.SetMenu(buildDesktopMenu(adaptive, savePrefs, invalidate))
-		tray = setupDesktopTray(adaptive, focusWindow, invalidate)
+		emacsWin = frame.New(frame.Config{
+			Adaptive:        adaptive,
+			Link:            link,
+			AppConfig:       cfg,
+			Prefs:           prefs,
+			FeatureReg:      reg,
+			FeatureLedger:   ledger,
+			FeatureHost:     host,
+			InitialThemeID:  cfg.ThemeID,
+			OnPrefsChanged:  savePrefs,
+			OnApplyFeatures: applyFeatures,
+			Invalidate:      invalidate,
+		})
 
-		title := fmt.Sprintf("Marlin — %s (%s)", link.Mode, link.Endpoint)
+		mygo.App.SetMenu(buildDesktopMenu(emacsWin, invalidate))
+		tray = setupDesktopTray(emacsWin, focusWindow, invalidate)
+
+		title := fmt.Sprintf("Marlin — %s", link.Endpoint)
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    title,
-			Width:    1360,
-			Height:   880,
+			Width:    1280,
+			Height:   820,
 			StateKey: "marlin-desktop-main",
-			Content:  ui.View(adaptive.View),
+			Content:  ui.View(emacsWin.View),
 		})
 		win.Invalidate()
 	})
@@ -304,7 +285,6 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
-	savePrefs()
 	if stopVoice != nil {
 		stopVoice()
 	}

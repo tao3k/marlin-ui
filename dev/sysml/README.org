@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+#+TITLE: Marlin UI OpenSysML v2 Model Map
+#+LANGUAGE: en
+#+OPTIONS: toc:2
+#+STARTUP: overview
+#+FILETAGS: :marlin:ui:emacs:architecture:sysml:
+
+[[file:../../project.sysml][Project entry]] · [[file:../../README.org][Marlin UI README]]
+
+* Scope and deterministic-engineering contract
+
+This directory owns the authored OpenSysML v2 architecture models for
+=marlin-ui=, following the =deterministic-engineering= architecture content
+contract:
+
+- =project.sysml= at the repository root is the single top-level entry point
+  exposing named architecture and lifecycle views.
+- Every model separates =actual= (source-inspected Go packages) from =target=
+  (planned structural evolution) without claiming target work as implemented.
+- Every element uses stable short IDs (=MUI-PROJECT=, =MUI-ARCH-*=,
+  =MUI-EMACS-*=), directed consumer-to-supplier dependencies, and explicit
+  requirement allocations.
+- Every Go package under =internal/emacs/= maps 1:1 to a declared structural
+  part in =dev/sysml/emacs-workbench.sysml=.
+
+* Model and source correspondence
+
+| Model | Scope | Source ownership |
+|-------+-------+------------------|
+| [[file:../../project.sysml][project.sysml]] | Root project entry and named views | Repository root |
+| [[file:marlin-ui-architecture.sysml][marlin-ui-architecture.sysml]] | 3-target release boundary, headless =marlin-mygo= engine separation, =hostlink=, =appconfig=, =featurekit= | =cmd/*=, =internal/{appconfig,featurekit,hostlink}= |
+| [[file:emacs-workbench.sysml][emacs-workbench.sysml]] | Hierarchical Doom Emacs UI decomposition: =frame=, =theme=, =meow=, =tabs=, =window=, =buffer=, =modeline=, =minibuffer= | =internal/emacs/*= |
+| [[file:emacs-lifecycle.sysml][emacs-lifecycle.sysml]] | Deterministic state machines for Meow modal editing and Minibuffer/Vertico/Helm | =internal/emacs/meow=, =internal/emacs/minibuffer= |
+
+* Requirement traceability
+
+| Requirement | Owner part | Package & verification |
+|-------------+------------+------------------------|
+| =MUI-ARCH-R01= | =actual::releaseTargets::desktopApp= | =cmd/marlin-desktop= binds =internal/emacs/frame.Frame.View= |
+| =MUI-ARCH-R02= | =actual::featureKitBoundary= | =just check-feature-pruning= across Desktop, Mobile, Web WASM (=CGO_ENABLED=0=) |
+| =MUI-ARCH-R03= | =actual::hostlinkTransport= | =internal/hostlink/*_test.go= (zero dev tokens, Vault auth, live Rust gRPC E2E) |
+| =MUI-ARCH-R04= | =actual::goBoundaryGuard= | =internal/archguard/boundary_test.go= + =just check-go-boundary= (hard AST/import gate forbidding Go runtime backend logic) |
+| =MUI-EMACS-R01= | =actual::emacsFrame= | =internal/emacs/{theme,meow,tabs,window,buffer,modeline,minibuffer,frame}= + =just check-file-size= |
+| =MUI-EMACS-R02= | =actual::emacsFrame::emacsTheme= | =internal/emacs/theme/palette_test.go= (=doom-one=, =pi=, =doom-paper=, =Radius=0=) |
+| =MUI-EMACS-R03= | =actual::emacsFrame::emacsModeline=, =emacsMinibuffer= | =internal/emacs/frame/frame_test.go= (live =UIWorkbenchSnapshot= + gRPC =M-x=) |
+| =MUI-EMACS-R04= | =actual::emacsFrame::emacsMeow= | =internal/emacs/meow/state_test.go= + =internal/emacs/frame/frame_test.go= |
+| =MUI-EMACS-R05= | =actual::emacsFrame::emacsBuffer= | =internal/emacs/buffer/customize.go= verified in =frame_test.go= |
+
+* Validate and render
+
+Run strict validation from the repository root:
+
+#+begin_src sh
+just sysml-check
+#+end_src
+
+Which executes:
+
+#+begin_src sh
+sysml -strict -validate -self-check -no-record-cache project.sysml dev/sysml
+#+end_src
+
+Generated diagram outputs stay under =dist/sysml/= (ignored by Git); only
+authored =.sysml= and =.org= sources live in version control.

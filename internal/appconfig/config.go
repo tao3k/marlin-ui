@@ -55,7 +55,7 @@ func DefaultConfig() Config {
 		TLSCertFile:    strings.TrimSpace(os.Getenv("MARLIN_TLS_CERT")),
 		TLSKeyFile:     strings.TrimSpace(os.Getenv("MARLIN_TLS_KEY")),
 		SessionID:      "marlin-main",
-		ThemeID:        "midnight",
+		ThemeID:        "doom-one",
 		FeaturesSpec:   "default",
 		TursoPath:      turso,
 		RecoveryFile:   recPath,

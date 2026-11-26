@@ -2,80 +2,76 @@
 #
 # SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
 
-#+title: Marlin UI — Unified Desktop, Mobile, and Web Client for Marlin Agent Core
-#+filetags: :tao3k:marlin:ui:desktop:mobile:wasm:grpc:
+#+title: Marlin UI — Doom Emacs Desktop, Mobile, and Web Client for Marlin Agent Core
+#+filetags: :tao3k:marlin:ui:emacs:desktop:mobile:wasm:grpc:sysml:
 
 =marlin-ui= is the official three-platform release client for
 [[https://github.com/tao3k/marlin-agent-core][Marlin Agent Core]], built as a
-thin, zero-CGO (=CGO_ENABLED=0=) product shell over the
-[[https://github.com/tao3k/marlin-mygo][marlin-mygo]] 120Hz GPU UI engine library.
+pure-Go (=CGO_ENABLED=0=) native UI shell over the
+[[https://github.com/tao3k/marlin-mygo][marlin-mygo]] headless engine library.
 
-* Architecture Boundary
+* Architecture & Deterministic-Engineering Contract
 
-- *[[https://github.com/tao3k/marlin-mygo][marlin-mygo]] (Library)*: Owns the
-  120Hz GPU scene/layout engine, Emacs composable =WindowTree=, 100k-hit
-  zero-alloc =Helm= live search engine, Tier-0 =PromptGate= & UI Governance
-  Console, bottom-left Account/Vault & tabbed Settings center, =fsync=/=localStorage=
-  power-loss continuity, gRPC transport adapters, and build-tag features
-  (=chatroom=, =compare=, =canvas=).
-- *=marlin-ui= (Release Application)*: Owns the three-target entrypoints,
-  release-safe gRPC discovery (explicit flag/env, co-located sidecar, or =PATH= —
-  never CWD-relative dev build directories), OS Keychain AES-256-GCM credential
-  vault & OAuth 2.1 PKCE authentication, native OS menus and system tray, atomic
-  =0600= user preferences, macOS =Marlin.app= bundling, and CI/Release pipelines.
+Architecture ownership, package boundaries, and state machines are declared in
+OpenSysML v2 at the repository root:
+
+- [[file:project.sysml][project.sysml]]: Top-level project model entry and named architecture views.
+- [[file:dev/sysml/README.org][dev/sysml/README.org]]: Model map, requirement traceability, and strict validation commands (=just sysml-check=).
+- *Hard Go Pure-Frontend Constraint (=MUI-ARCH-R04=)*: Rust (=marlin-agent-core=)
+  owns 100% of the agent Runtime backend (LLM dispatch, tool execution, SQL/Turso
+  storage, gRPC/HTTP servers, process execution). Go in =marlin-ui= is strictly a
+  native UI shell and thin gRPC projection client — mechanically enforced by
+  =internal/archguard/boundary_test.go= (=just check-go-boundary=).
+- *Headless Library Separation (=MUI-ARCH-R01=)*:
+  [[https://github.com/tao3k/marlin-mygo][marlin-mygo]] supplies headless engines
+  (=TranscriptController=, 120Hz =Helm= search, =PromptGate=, =AuthManager=,
+  =WorkbenchController=, gRPC wire), while =marlin-ui= owns its Doom Emacs
+  design system and hierarchical UI under =internal/emacs/*=.
+
+* Hierarchical Doom Emacs Package Structure (=internal/emacs/*=)
+
+Declared 1:1 in [[file:dev/sysml/emacs-workbench.sysml][dev/sysml/emacs-workbench.sysml]] (=MUI-EMACS-A01=..=A08=) and
+enforced acyclic by =just check-go-boundary=:
+
+| Package | SysML Part | Responsibility |
+|---------+------------+----------------|
+| =internal/emacs/theme= | =MUI-EMACS-A02= | Doom Emacs face palettes (=doom-one=, =pi=, =doom-paper=), live =marlin.ui.v1= =UITheme= projection, flat =Radius=0= primitives |
+| =internal/emacs/meow= | =MUI-EMACS-A03= | Meow modal state (=INSERT=, =NORMAL=, =SPC= Keypad leader) and universal Emacs shortcuts |
+| =internal/emacs/tabs= | =MUI-EMACS-A04= | Centaur-Tabs bar (28px, 2px active top accent bar) |
+| =internal/emacs/window= | =MUI-EMACS-A05= | Full-bleed primary Emacs Window viewport + inline Tier-0 =GATE= approval strip |
+| =internal/emacs/buffer= | =MUI-EMACS-A06= | Categorized major modes: =*conversation*= (Doom Dashboard + stream), tabulated buffers (=*Sessions*=, =*Targets*=, =*Processes*=, =*Models*=, =*Messages*=, =*Help*=), and =*Settings*= customize buffer |
+| =internal/emacs/modeline= | =MUI-EMACS-A07= | Authentic 24px Doom Modeline with 3px colored state bar, live gRPC model/session/status |
+| =internal/emacs/minibuffer= | =MUI-EMACS-A08= | Single-line Emacs Minibuffer & Echo Area, inline Vertico (=M-x= merging live =marlin.ui.v1= commands), 120Hz Helm, Keypad Which-Key |
+| =internal/emacs/frame= | =MUI-EMACS-A01= | Top-level 4-region Doom Emacs Frame composition and live =marlin.ui.v1= gRPC synchronization |
 
 * Three Release Targets
 
 | Target  | Entrypoint           | Platforms                                 | Native Capabilities                                                        |
 |---------+----------------------+-------------------------------------------+----------------------------------------------------------------------------|
-| Desktop | =cmd/marlin-desktop= | macOS (arm64/amd64), Linux, Windows       | HTTP/2 gRPC + OS Keychain Vault + Native Menu/Tray + Voice/Files + =fsync= |
+| Desktop | =cmd/marlin-desktop= | macOS (arm64/amd64), Linux, Windows       | Doom Emacs Frame + HTTP/2 gRPC + OS Keychain Vault + Native Menu/Tray + Voice/Files |
 | Mobile  | =cmd/marlin-mobile=  | iOS (Apple HIG 393x852), Android (M3)     | mTLS/TLS 1.3 gRPC + OS Vault + QuickCapture + App Store 2.5.2 OTA Packs    |
 | Web     | =cmd/marlin-web=     | Browser WebAssembly (=GOOS=js GOARCH=wasm=) | Responsive Desktop/Phone + =localStorage= Continuity & Prefs + Helm =Cmd+P= |
 
-* Core Capabilities
-
-- *Unified Tier-0 Settings & Authorization Center (=Cmd+,= / bottom-left dock)*:
-  - /General/: Typed =BoundedSchema= preferences (theme preset, feature profile,
-    active session, default remote gRPC host, durable session streaming, compact
-    sidebar) persisted atomically to =~/.config/marlin/ui-prefs.json= (=0600=).
-  - /Account & Auth/: OS Keychain AES-256-GCM Vault with one-click Lock/Unlock,
-    GitHub & Google OAuth 2.1 PKCE S256, Passwordless Email OTP, and strict-HTTPS
-    Enterprise OIDC Discovery. Signed-in accounts automatically supply per-RPC
-    =Bearer= headers to remote gRPC targets via =OptionalAuthTokenSource= with
-    zero raw token exposure in UI state.
-  - /Governance/: Direct access to Tier-0 UI Feature Governance and Federation
-    Cockpit (with persisted non-secret remote hosts restored on startup).
-- *120Hz Helm Live Search (=Cmd+P= / =SPC s s=) & Emacs WindowTree*:
-  - Live multi-source search across open buffers, sessions, federation targets,
-    transcript rows, workspace diffs, and commands; confirming a session or
-    target candidate switches directly.
-  - Composable split panes (=Cmd+D= / =Cmd+Shift+D= / =SPC w [v/s/d/z/u]=),
-    persisted workspace perspectives (=split= / =focus= / =cockpit= / =zen=),
-    and native OS menu + Retina system tray controls.
-- *Interactive Composer & Projection Bridge*:
-  - Slash commands (=/new=, =/settings=, =/auth=, =/search=, =/federation=,
-    =/governance=, =/keys=, =/theme=, =/sidebar=, =/clear=), live =@= context
-    mentions, =Cmd+F= session search, turn Retry/Fork, multimodal file/clipboard/
-    voice attachments, and Projection Inspector diff/log attachments.
-
-* Feature-Gated Builds & Packaging (Zero Dead Code)
+* Build, Packaging & Verification Gates
 
 #+begin_src shell
+# Full verification gate (tests, -race, Go frontend boundary guard, feature pruning, file-size, sysml-check, vet)
+just check
+
+# Validate OpenSysML v2 architecture models strictly
+just sysml-check
+
+# Verify hard Go pure-frontend & acyclic Emacs package boundary
+just check-go-boundary
+
 # Minimal core client (zero optional features linked)
 just build-desktop marlin_minimal ./dist/marlin-desktop-core
-
-# Default client (core + Multi-Role Agent Chat Room)
-just build-desktop
 
 # Full client across Desktop, Mobile, and Web WASM (ChatRoom + Compare + Canvas)
 just build-all marlin_full
 
-# Package a self-contained macOS Marlin.app bundle (optionally co-locating marlin-app-server)
+# Package a self-contained macOS Marlin.app bundle
 just package-macos-app marlin_full ./dist/Marlin.app
-just package-macos-app marlin_full ./dist/Marlin.app /path/to/marlin-app-server
-
-# Run full verification gate (tests, -race, UI E2E, feature pruning, vet, file-size)
-just check
 #+end_src
 
 * Connecting to Marlin Agent Core (gRPC)
@@ -85,14 +81,7 @@ just check
 ./dist/marlin-desktop -version
 
 # Connect Desktop to a remote TLS 1.3 / mTLS Rust marlin-app-server
-# (if signed into Account & Auth, OAuth Bearer tokens are attached automatically)
 ./dist/marlin-desktop -host core.example.com:50051 -ca ./ca.pem
-
-# Connect Desktop to an explicit installed marlin-app-server binary
-./dist/marlin-desktop -app-server /usr/local/bin/marlin-app-server
-
-# Connect Mobile Companion (iOS or Android viewport profile) to remote Rust host
-./dist/marlin-mobile -platform ios -host tailnet-host:50051 -ca ./ca.pem
 
 # Local DEV-ONLY helpers (isolated strictly to Justfile, never in Go binaries)
 just dev-desktop

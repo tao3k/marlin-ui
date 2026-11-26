@@ -5,6 +5,6 @@
 version = 1
 
 [[annotations]]
-path = ["go.mod", "go.sum"]
+path = ["go.mod", "go.sum", "devenv.lock"]
 SPDX-FileCopyrightText = "2026 tao3k team and Contributors"
 SPDX-License-Identifier = "Apache-2.0 AND LGPL-2.1-or-later"

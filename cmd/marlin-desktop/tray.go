@@ -15,17 +15,15 @@ import (
 
 	"github.com/egoist/mygo"
 
-	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
-
 	"github.com/tao3k/marlin-ui/internal/appconfig"
+	"github.com/tao3k/marlin-ui/internal/emacs/frame"
 )
 
 func setupDesktopTray(
-	adaptive *mygoshell.AdaptiveShell,
+	fr *frame.Frame,
 	focusWindow func(),
 	invalidate func(),
 ) *mygo.Tray {
-	app := adaptive.Desktop
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{
 			Label: "Show Marlin",
@@ -35,36 +33,25 @@ func setupDesktopTray(
 		},
 		mygo.Separator(),
 		{
-			Label: "Helm Live Search",
+			Label: "Helm Search",
 			Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
-				app.OpenHelmSearch()
+				fr.OpenHelm()
 				focusWindow()
 				invalidate()
 			},
 		},
 		{
-			Label: "New Session",
+			Label: "Switch Buffer",
 			Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
-				if app.OnNewSession != nil {
-					app.OnNewSession()
-				}
-				focusWindow()
-				invalidate()
-			},
-		},
-		mygo.Separator(),
-		{
-			Label: "Settings & Vault...",
-			Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
-				app.OpenSettings()
+				fr.OpenBufferSwitch()
 				focusWindow()
 				invalidate()
 			},
 		},
 		{
-			Label: "Federation Cockpit",
+			Label: "*Settings*",
 			Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
-				app.OpenFederation()
+				fr.OpenSettings()
 				focusWindow()
 				invalidate()
 			},
@@ -88,7 +75,7 @@ func setupDesktopTray(
 }
 
 // renderMarlinTrayPNG synthesizes a crisp 32x32 Retina monochrome template
-// icon (stylized "M" wave glyph) in pure Go with zero external asset files.
+// icon (stylized "M" glyph) in pure Go with zero external asset files.
 func renderMarlinTrayPNG() []byte {
 	const size = 32
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
@@ -105,12 +92,10 @@ func renderMarlinTrayPNG() []byte {
 			}
 		}
 	}
-	// Vertical pillars of geometric "M".
 	for y := 7; y <= 25; y++ {
 		drawDot(7, y, 2)
 		drawDot(24, y, 2)
 	}
-	// Twin diagonals meeting at center apex.
 	for i := 0; i <= 8; i++ {
 		drawDot(7+i, 8+i, 2)
 		drawDot(24-i, 8+i, 2)

@@ -49,12 +49,8 @@ func main() {
 	}
 	reg, ledger, host := featurekit.Mount("all", adaptive, continuity.onDraftChanged, invalidate)
 
-	// Bind Tier-0 Settings & ephemeral Web Auth Center so Web WASM shares the
-	// same bottom-left Settings & Authorization dock as Desktop and Mobile.
+	// Bind Tier-0 Settings & ephemeral Web Auth Center (OIDC configured by user).
 	webMgr := auth.NewManager(auth.ManagerConfig{Vault: auth.NewMemoryVault()})
-	_ = webMgr.RegisterProvider(auth.GitHubOAuthProvider("marlin-web-github"))
-	_ = webMgr.RegisterProvider(auth.GoogleOAuthProvider("marlin-web-google"))
-	_ = webMgr.RegisterProvider(auth.EmailOTPProvider())
 	webAuth := mygoshell.NewAuthController(webMgr)
 	webAuth.VaultInfo = auth.VaultSecurityInfo{
 		BackendName: "Web Session Memory Vault",
@@ -84,7 +80,7 @@ func main() {
 	spec := appconfig.SettingsSchema()
 	initTheme := webPrefs.ThemeID
 	if initTheme == "" {
-		initTheme = "midnight"
+		initTheme = "doom-one"
 	}
 	initFeat := webPrefs.FeaturesSpec
 	if initFeat == "" {
