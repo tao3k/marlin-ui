@@ -73,17 +73,26 @@ type CustomizeState struct {
 	OIDCClientID      string
 }
 
+// ArtifactSelection identifies the active Vercel AI SDK Generative UI part
+// displayed in *conversation*'s right-hand Layer 3 Artifact Split Stage.
+type ArtifactSelection struct {
+	DataType string
+	Title    string
+	Payload  string
+}
+
 // Context carries the live data and callbacks needed to render any Emacs buffer.
 type Context struct {
-	Adaptive      *mygoshell.AdaptiveShell
-	Link          *hostlink.Link
-	FeatureReg    *features.Registry
-	FeatureLedger *features.GovernanceLedger
-	FeatureHost   *features.Host
-	WebHost       kit.WebIslandHost
-	ModelCfg      appconfig.ModelConfig
-	ActiveModel   string
-	TableCursor   int
+	Adaptive       *mygoshell.AdaptiveShell
+	Link           *hostlink.Link
+	FeatureReg     *features.Registry
+	FeatureLedger  *features.GovernanceLedger
+	FeatureHost    *features.Host
+	WebHost        kit.WebIslandHost
+	ModelCfg       appconfig.ModelConfig
+	ActiveModel    string
+	ActiveArtifact *ArtifactSelection
+	TableCursor    int
 	MessagesLog     []string
 	AvailableThemes []theme.Theme
 	DashboardNode   *widgets.Node
@@ -119,6 +128,8 @@ type Context struct {
 	OnEcho             func(msg string)
 	IsThinkingOpen     func(key string) bool
 	ToggleThinking     func(key string)
+	OnOpenArtifact     func(dataType, title, payload string)
+	OnCloseArtifact    func()
 }
 
 // Render dispatches rendering to the active buffer's major mode.

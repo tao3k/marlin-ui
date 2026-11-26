@@ -38,6 +38,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/tabs"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/emacs/window"
+	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
@@ -54,6 +55,7 @@ type Config struct {
 	WebHost               kit.WebIslandHost
 	OnWebIslandAction     func(islandID, event string) bool
 	OnWebIslandVisibility func(activeIslandID string)
+	OnPushArtifact        func(dataType, title, payload string)
 	InitialThemeID        string
 	ThemeBundle         appconfig.UIThemeBundle
 	OnReloadThemeBundle func() appconfig.UIThemeBundle
@@ -116,8 +118,10 @@ type Frame struct {
 	meowState      *meow.State
 	miniState      *minibuffer.State
 	customize      *buffer.CustomizeState
+	wsMgr          *workspace.Manager
 	thinkingMu     sync.RWMutex
 	thinkingOpened map[string]bool
+	activeArtifact *buffer.ArtifactSelection
 
 	// Deterministic RCU render snapshot + coalesced off-lock reload lane + 120Hz frame pacer.
 	snapStore      *async.SnapshotStore[frameSnapshot]
@@ -143,6 +147,7 @@ type Frame struct {
 	onApplyFeatures       func(spec string)
 	onWebIslandAction     func(islandID, event string) bool
 	onWebIslandVisibility func(activeIslandID string)
+	onPushArtifact        func(dataType, title, payload string)
 	invalidate            func()
 }
 
@@ -171,6 +176,7 @@ func New(cfg Config) *Frame {
 		meowState:           meow.New(),
 		miniState:           minibuffer.New(),
 		customize:           buffer.NewCustomizeState(cfg.AppConfig, cfg.Prefs),
+		wsMgr:               workspace.NewManager([]buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets}),
 		thinkingOpened:      make(map[string]bool),
 		onReloadThemeBundle: cfg.OnReloadThemeBundle,
 		onGlassChanged:      cfg.OnGlassChanged,
@@ -183,6 +189,7 @@ func New(cfg Config) *Frame {
 		onApplyFeatures:       cfg.OnApplyFeatures,
 		onWebIslandAction:     cfg.OnWebIslandAction,
 		onWebIslandVisibility: cfg.OnWebIslandVisibility,
+		onPushArtifact:        cfg.OnPushArtifact,
 		invalidate:            inv,
 	}
 	preferred := strings.TrimSpace(cfg.InitialThemeID)
@@ -235,38 +242,6 @@ func (f *Frame) requestFrame() {
 	if f.invalidate != nil {
 		f.invalidate()
 	}
-}
-
-// SelectBuffer focuses an Emacs buffer (adding it to sort-tab if not open)
-// and closes any open Minibuffer completion list.
-func (f *Frame) SelectBuffer(id buffer.ID) {
-	wasMini := f.miniState.IsCompletionActive()
-	f.miniState.Close()
-	f.meowState.ClearKeypad()
-	f.mu.Lock()
-	wasWeb := f.activeFeatureID == "feature:webisland" || f.activePluginID != ""
-	f.activeBuffer = id
-	f.activeFeatureID = ""
-	f.activeExtID = ""
-	f.activePluginID = ""
-	f.tableCursor = 0
-	found := false
-	for _, t := range f.openTabs {
-		if t == id {
-			found = true
-			break
-		}
-	}
-	if !found {
-		f.openTabs = append(f.openTabs, id)
-	}
-	f.publishSnapshotLocked()
-	f.mu.Unlock()
-	f.notifyWebIslandVisibility("")
-	if wasWeb || wasMini {
-		f.refocusFrame.Store(true)
-	}
-	f.requestFrame()
 }
 
 // IsLightTheme reports whether the currently active theme pack is a light palette.
@@ -715,6 +690,7 @@ func (f *Frame) View(c *ui.Context) {
 		WebHost:             f.WebHost,
 		ModelCfg:            f.AppCfg.ModelCfg,
 		ActiveModel:         modelLbl,
+		ActiveArtifact:      f.currentArtifact(),
 		TableCursor:         cursor,
 		MessagesLog:         msgs,
 		AvailableThemes:     availThemes,
@@ -760,6 +736,8 @@ func (f *Frame) View(c *ui.Context) {
 			f.thinkingMu.Unlock()
 			f.invalidate()
 		},
+		OnOpenArtifact:  f.openArtifactStage,
+		OnCloseArtifact: f.closeArtifactStage,
 	}
 
 	mapCtx := mapper.Context{
@@ -808,20 +786,30 @@ func (f *Frame) View(c *ui.Context) {
 	}
 	frameEl.Background(frameBg).Children(func() {
 		if showChrome {
+			popLbl := string(snap.Workspaces.Active.PopupBuffer)
+			if popLbl == "" {
+				popLbl = string(snap.Workspaces.Active.LastPopup)
+			}
 			tabs.Render(c, tabs.Props{
-				OpenTabs:        openTabs,
-				ActiveBuffer:    activeBuf,
-				ActiveFeatureID: activeTabKey,
-				FeatureBuffers:  featBufs,
-				Theme:           th,
-				Glass:           mods.Glass,
-				GlassOpacity:    chromeOp,
-				OnSelectBuffer:  f.SelectBuffer,
-				OnSelectFeature: f.SelectFeature,
-				OnNewSession:    f.newSession,
-				OnOpenHelm:      f.OpenHelm,
-				OnOpenThemes:    f.OpenThemeSwitch,
-				OnOpenSettings:  f.OpenSettings,
+				Workspaces:        f.buildWorkspaceTabs(snap.Workspaces),
+				OpenTabs:          openTabs,
+				ActiveBuffer:      activeBuf,
+				ActiveFeatureID:   activeTabKey,
+				FeatureBuffers:    featBufs,
+				PopupLabel:        popLbl,
+				PopupVisible:      snap.Workspaces.Active.PopupVisible,
+				Theme:             th,
+				Glass:             mods.Glass,
+				GlassOpacity:      chromeOp,
+				OnSelectWorkspace: func(id string) { f.SwitchWorkspace(id) },
+				OnNewWorkspace:    func() { f.CreateWorkspace("", "") },
+				OnTogglePopup:     f.TogglePopup,
+				OnSelectBuffer:    f.SelectBuffer,
+				OnSelectFeature:   f.SelectFeature,
+				OnNewSession:      f.newSession,
+				OnOpenHelm:        f.OpenHelm,
+				OnOpenThemes:      f.OpenThemeSwitch,
+				OnOpenSettings:    f.OpenSettings,
 			})
 		} else if tb := c.TitleBar(); tb.Height > 0 {
 			ui.Row(c.Key("zen-titlebar-drag")).Height(tb.Height).Background(ui.Transparent).DragWindow()
@@ -859,12 +847,13 @@ func (f *Frame) View(c *ui.Context) {
 
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
-				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx)
+				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, f.buildPopupProps(snap.Workspaces))
 			}
 			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
 		})
 		if showChrome {
 			st := f.buildModelineStatus(snap, modelLbl, sessLbl)
+			st.WorkspaceName = snap.Workspaces.Active.Name
 			st.Glass = mods.Glass
 			st.GlassOpacity = chromeOp
 			st.PendingGates = pendingGateCount

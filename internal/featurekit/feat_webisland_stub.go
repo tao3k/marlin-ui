@@ -28,12 +28,16 @@ type WebViewFactory func(islandID, html, preloadJS string, tier async.TrustTier)
 // BuiltinWorkflowStudioIslandID is exported for build-tag parity when WebView islands are pruned.
 const BuiltinWorkflowStudioIslandID = "workflow-graph"
 
+// BuiltinArtifactStageIslandID is exported for build-tag parity when WebView islands are pruned.
+const BuiltinArtifactStageIslandID = "artifact-stage"
+
 func SetWebViewFactory(WebViewFactory)            {}
 func SetWebViewInvalidate(func())                 {}
 func RegisterUserIslands(map[string]string)       {}
 func PrewarmWebIsland(string)                     {}
 func SyncWebIslandTheme(kit.Palette, float32)     {}
 func DispatchWebIslandAction(string, string) bool { return false }
+func PushArtifactStagePayload(string, string, string) {}
 func NotifyWebIslandVisibility(string)            {}
 func CheckWorkflowBridgeRPC() error               { return async.ErrUntrustedRPCForbidden }
 func RecoverWebIsland(string)                     {}

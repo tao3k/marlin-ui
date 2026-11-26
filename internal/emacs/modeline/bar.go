@@ -44,6 +44,7 @@ type Status struct {
 	Keypad        string
 	BufferName    string
 	MajorMode     string
+	WorkspaceName string
 	WorkspacePath string
 	RemoteHost    string
 	ActivityLabel string
@@ -82,8 +83,14 @@ func Render(c *ui.Context, st Status) {
 		ui.Box(c).Width(3).FillHeight().Background(barColor)
 
 		ui.Row(c).Grow(1).MinWidth(0).Padding(0, 14).Gap(10).AlignItems(ui.Center).Clip().Children(func() {
-			// Segment 2: circular modal state indicator.
+			// Segment 2: circular modal state indicator + active perspective workspace pill.
 			renderModalBadge(c, modalLabel, barColor, th)
+			if st.WorkspaceName != "" {
+				ui.Row(c.Key("dm-ws-pill")).Padding(2, 7).Radius(theme.RadiusPill).
+					Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.58)).Children(func() {
+					ui.Text(c, "["+st.WorkspaceName+"]").Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).NoWrap()
+				})
+			}
 
 			switch st.Preset {
 			case PresetHelm:

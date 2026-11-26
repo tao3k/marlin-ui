@@ -51,6 +51,10 @@ type WebViewFactory func(islandID, html, preloadJS string, tier async.TrustTier)
 // first-party host RPC (default-deny per HybridWebViewFocusLifecycle.qnt).
 const BuiltinWorkflowStudioIslandID = "workflow-graph"
 
+// BuiltinArtifactStageIslandID is Marlin's Layer-3 Tier-2 Untrusted sandboxed
+// WebView stage for Vercel AI SDK `data-*` Generative UI artifacts.
+const BuiltinArtifactStageIslandID = "artifact-stage"
+
 var (
 	webIslandMu       sync.Mutex
 	webViewFactory    WebViewFactory
@@ -61,6 +65,7 @@ var (
 	webViewPending    = map[string]bool{}
 	webViewUseSeq     uint64
 	userIslandHTMLs   = map[string]string{}
+	lastArtifactScript string
 	webIslandOpacity  = kit.DefaultGlassOpacity
 	webIslandPalette  = kit.Palette{
 		Canvas:  ui.Hex("#1e222a"),
@@ -244,6 +249,26 @@ func DispatchWebIslandAction(islandID, event string) bool {
 	return true
 }
 
+// PushArtifactStagePayload pushes a Vercel AI SDK `data-*` Generative UI
+// artifact into the sandboxed Layer-3 Artifact Stage WebIsland via its
+// coalescing FencedLane, lazily booting the island if not yet mounted.
+func PushArtifactStagePayload(dataType, title, rawPayload string) {
+	script := kit.ArtifactStageLoadScript(dataType, title, rawPayload)
+	webIslandMu.Lock()
+	lastArtifactScript = script
+	inst := webViewCache[BuiltinArtifactStageIslandID]
+	var lane *async.FencedLane[string, struct{}]
+	if inst != nil {
+		lane = inst.evalLane
+	}
+	webIslandMu.Unlock()
+	if lane != nil {
+		lane.Submit(script)
+		return
+	}
+	_ = WebIslandHost().Resolve(BuiltinArtifactStageIslandID)
+}
+
 // RecoverWebIsland evicts a crashed WebContent process cleanly and schedules
 // non-blocking recovery on the next frame without stalling GPU rendering.
 func RecoverWebIsland(islandID string) {
@@ -325,6 +350,9 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 	} else if islandID == BuiltinWorkflowStudioIslandID {
 		tier = async.TrustTier0FirstParty
 		html = kit.WorkflowStudioHTML(pal)
+	} else if islandID == BuiltinArtifactStageIslandID {
+		tier = async.TrustTier2Untrusted
+		html = kit.ArtifactStageHTML(pal)
 	} else {
 		webIslandMu.Lock()
 		delete(webViewPending, islandID)
@@ -409,12 +437,19 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		latestPal := webIslandPalette
 		latestOp := webIslandOpacity
 		cached := webViewCache[islandID]
+		artScript := ""
+		if islandID == BuiltinArtifactStageIslandID {
+			artScript = lastArtifactScript
+		}
 		webIslandMu.Unlock()
 
 		webViewPermits.Complete(permitID)
 		if err == nil && cached != nil {
 			if cached.evalLane != nil {
 				cached.evalLane.Submit(kit.WebIslandThemeScript(latestPal, latestOp))
+				if artScript != "" {
+					cached.evalLane.Submit(artScript)
+				}
 			}
 			if inv != nil {
 				inv()

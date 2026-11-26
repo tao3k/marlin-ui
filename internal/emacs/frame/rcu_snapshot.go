@@ -22,6 +22,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
+	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 )
 
 // frameSnapshot is an immutable, defensively cloned RCU view of Frame state
@@ -44,6 +45,7 @@ type frameSnapshot struct {
 	ActivePluginID  string
 	MountedPlugins  []marketplace.ManagedPackage
 	OpenTabs        []buffer.ID
+	Workspaces      workspace.Snapshot
 	TableCursor     int
 	PackageFilter   string
 	ModelLabel      string
@@ -95,6 +97,10 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 	for k, v := range f.tomlHydras {
 		hydras[k] = v
 	}
+	var wsSnap workspace.Snapshot
+	if f.wsMgr != nil {
+		wsSnap = f.wsMgr.Snapshot()
+	}
 	return frameSnapshot{
 		Theme:           f.Theme,
 		MyGoTheme:       f.Theme.ToMyGoTheme(),
@@ -112,6 +118,7 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		ActivePluginID:  f.activePluginID,
 		MountedPlugins:  append([]marketplace.ManagedPackage(nil), f.mountedPlugins...),
 		OpenTabs:        append([]buffer.ID(nil), f.openTabs...),
+		Workspaces:      wsSnap,
 		TableCursor:     f.tableCursor,
 		PackageFilter:   f.packageFilter,
 		ModelLabel:      f.modelLabel,

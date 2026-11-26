@@ -355,6 +355,7 @@ func main() {
 			WebHost:               featurekit.WebIslandHost(),
 			OnWebIslandAction:     featurekit.DispatchWebIslandAction,
 			OnWebIslandVisibility: featurekit.NotifyWebIslandVisibility,
+			OnPushArtifact:        featurekit.PushArtifactStagePayload,
 			InitialThemeID:        cfg.ThemeID,
 			ThemeBundle:         themeBundle,
 			OnReloadThemeBundle: func() appconfig.UIThemeBundle {

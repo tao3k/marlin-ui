@@ -24,9 +24,7 @@ func TestConversationCollapsibleThinkingFoldedByDefaultAndMarkdownRender(t *test
 	})
 	tr := adaptive.Desktop.Transcript
 	tr.AppendUser("Explain the 3-layer UI architecture")
-	tr.BeginAssistantTurn(1)
-	tr.ApplyCheckpoint(1, "ev-1", "<think>First inspect Layer 1 Rust gRPC and Layer 2 MyGo GPU.</think>\n## Three Layers\n\n- **Layer 1**: Rust gRPC\n- **Layer 2**: Pure-Go MyGo")
-	tr.CompleteTurn(1, "COMPLETED")
+	tr.AppendThinking("Inspect architecture", "Check Layer 1 Rust gRPC and Layer 3 WebIsland.", true)
 	tr.UpsertToolCall(mygoshell.ToolCallCardView{
 		CallID:    "call-1",
 		ToolName:  "workspace_search",
@@ -35,6 +33,9 @@ func TestConversationCollapsibleThinkingFoldedByDefaultAndMarkdownRender(t *test
 		Summary:   "Matched 4 files in crates/",
 		ReceiptID: "rcpt-42",
 	}, true)
+	tr.BeginAssistantTurn(1)
+	tr.ApplyCheckpoint(1, "ev-1", "<think>First inspect Layer 1 Rust gRPC and Layer 2 MyGo GPU.</think>\n## Three Layers\n\nSee @cite:crates/ui_grpc.rs:L1896.\n\n```go\nfmt.Println(\"hello\")\n```\n\n```mermaid\ngraph LR\n  Rust-->MyGo\n```")
+	tr.CompleteTurn(1, "COMPLETED")
 
 	modelCfg, err := appconfig.ParseModelConfigTOML(`
 provider = "deepseek"
@@ -80,9 +81,33 @@ protocol = "anthropic"
 	if !tt.HasText("deepseek/deepseek-flash") {
 		t.Fatal("expected loaded TOML route deepseek/deepseek-flash in conversation header")
 	}
-	// Tool call card must appear with receipt badge.
-	if !tt.HasText("workspace_search") || !tt.HasText("receipt:rcpt-42") {
-		t.Fatal("expected structured tool call card with receipt badge")
+	// Contiguous Thinking + Tool steps collapse into a single Execution Trace stepper pill.
+	if !tt.HasText("Execution Trace") || !tt.HasText("1 receipt(s)") {
+		t.Fatal("expected grouped Execution Trace stepper pill with receipt summary")
+	}
+	// Luxury editorial CodeBlock header + inline @cite source pill strip must appear.
+	if !tt.HasText("GO") || !tt.HasText("[1] crates/ui_grpc.rs:L1896") {
+		t.Fatal("expected editorial CodeBlock language header and inline source citation pill")
+	}
+	// Vercel AI SDK Generative UI PartData card and Composer action strip must appear.
+	if !tt.HasText("AI SDK · data-mermaid") || !tt.HasText("Deep Think") {
+		t.Fatal("expected Generative UI data-mermaid card and Deep Think composer strip")
+	}
+
+	// Clicking Preview Stage opens the right-side Generative Artifact Split Stage.
+	if err := tt.Click("Preview Stage"); err != nil {
+		t.Fatalf("click Preview Stage: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Generative UI Artifact Preview") {
+		t.Fatal("expected right-side Generative Artifact Split Stage to open")
+	}
+	if err := tt.Click("Close"); err != nil {
+		t.Fatalf("click Close artifact stage: %v", err)
+	}
+	tt.Frame()
+	if tt.HasText("Generative UI Artifact Preview") {
+		t.Fatal("expected Close button to dismiss right-side Artifact Split Stage")
 	}
 
 	// Clicking the Thought Process header expands the reasoning body.
@@ -94,11 +119,35 @@ protocol = "anthropic"
 		t.Fatal("expected clicking Thought Process header to expand reasoning trace")
 	}
 
-	// Switch to *Models* buffer and verify all TOML routes render cleanly.
+	// Switch to *Models* -> governed by Doom right-side Popup Rule without disturbing *conversation*!
 	f.SelectBuffer(buffer.Models)
 	tt.Frame()
-	if !tt.HasText("deepseek-v4-pro") || !tt.HasText("deepseek-flash") {
-		t.Fatal("expected *Models* buffer to list both default and named TOML routes")
+	if !tt.HasText("POPUP · *Models*") || !tt.HasText("deepseek-v4-pro") || !tt.HasText("deepseek-flash") {
+		t.Fatal("expected *Models* to render inside non-destructive Doom Popup Drawer with TOML routes")
+	}
+	if !tt.HasText("Thought Process") {
+		t.Fatal("expected main *conversation* buffer to remain visible beside *Models* popup drawer")
+	}
+	// Dismiss popup cleanly and verify perspective workspace isolation.
+	if err := tt.Click("Dismiss"); err != nil {
+		t.Fatalf("click Dismiss popup: %v", err)
+	}
+	tt.Frame()
+	if tt.HasText("POPUP · *Models*") {
+		t.Fatal("expected Dismiss to close *Models* popup drawer cleanly")
+	}
+
+	// Create isolated second workspace "review" -> tabs & buffers stay isolated from "main".
+	f.CreateWorkspace("review", "/repo/marlin-ui")
+	f.SelectBuffer(buffer.Packages)
+	tt.Frame()
+	if !tt.HasText("2:review") || !tt.HasText("[review]") {
+		t.Fatal("expected active workspace pill 2:review in tab bar and [review] in modeline")
+	}
+	f.SwitchWorkspace("main")
+	tt.Frame()
+	if !tt.HasText("[main]") {
+		t.Fatal("expected switching back to main workspace to restore [main] perspective")
 	}
 }
 

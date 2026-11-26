@@ -87,7 +87,11 @@ var allowedEmacsInternalDeps = map[string]map[string]bool{
 		"internal/hostlink":    true,
 	},
 	"internal/emacs/window": {
-		"internal/emacs/theme":  true,
+		"internal/emacs/theme":     true,
+		"internal/emacs/buffer":    true,
+		"internal/emacs/workspace": true,
+	},
+	"internal/emacs/workspace": {
 		"internal/emacs/buffer": true,
 	},
 	"internal/emacs/frame": {
@@ -96,6 +100,7 @@ var allowedEmacsInternalDeps = map[string]map[string]bool{
 		"internal/emacs/hydra":      true,
 		"internal/emacs/tabs":       true,
 		"internal/emacs/window":     true,
+		"internal/emacs/workspace":  true,
 		"internal/emacs/buffer":     true,
 		"internal/emacs/modeline":   true,
 		"internal/emacs/minibuffer": true,

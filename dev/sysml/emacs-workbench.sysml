@@ -95,11 +95,21 @@ package MarlinEmacsWorkbench {
                        TS/JSON declarative widgets & custom sidebars, and lazy-loaded
                        Hybrid GPU + Sandboxed WebView islands (ui.webview BPMN Studio). */
             }
+
+            part <'MUI-EMACS-A11'> emacsWorkspace {
+                doc /* internal/emacs/workspace: Doom Emacs-inspired perspective
+                       workspace isolation (persp-mode / :ui workspaces) and
+                       declarative popup window rule engine (set-popup-rule!),
+                       mirrored 1:1 with scheme/ui-workspaces/. */
+            }
         }
 
         dependency frameUsesTheme from emacsFrame to emacsFrame::emacsTheme;
         dependency frameUsesMeow from emacsFrame to emacsFrame::emacsMeow;
         dependency frameUsesWidgets from emacsFrame to emacsFrame::emacsWidgets;
+        dependency frameUsesWorkspace from emacsFrame to emacsFrame::emacsWorkspace;
+        dependency windowUsesWorkspace from emacsFrame::emacsWindow to emacsFrame::emacsWorkspace;
+        dependency workspaceUsesBuffer from emacsFrame::emacsWorkspace to emacsFrame::emacsBuffer;
         dependency frameUsesHydra from emacsFrame to emacsFrame::emacsHydra;
         dependency frameUsesTabs from emacsFrame to emacsFrame::emacsTabs;
         dependency frameUsesWindow from emacsFrame to emacsFrame::emacsWindow;

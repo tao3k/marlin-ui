@@ -79,33 +79,85 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		Theme:          buildConversationMarkdownTheme(th),
 		WrapCode:       true,
 		ShareSelection: true,
+		CodeBlock: func(ctx *ui.Context, b *markdown.CodeBlockView) {
+			renderEditorialCodeBlock(ctx, b, tr, th)
+		},
 	}
 
 	ui.Column(c.Key("conv-root")).Fill().AlignItems(ui.Stretch).Children(func() {
 		renderConversationHeaderBar(c, th, bc)
 
-		ui.Scroll(c.Key("conv-scroll")).Grow(1).Padding(20, 28).Children(func() {
-			ui.Column(c).MaxWidth(900).Gap(18).AlignItems(ui.Stretch).Children(func() {
-				for i := 0; i < n; i++ {
-					entry, ok := tr.Entry(i)
-					if !ok {
-						continue
+		// Windowed virtualized slice: cap per-frame layout work to the most recent
+		// 60 entries (expandable on demand) so 10k-turn histories keep 120Hz frame budgets.
+		const defaultVisibleTail = 60
+		startIdx := 0
+		if n > defaultVisibleTail {
+			showAll := bc.IsThinkingOpen != nil && bc.IsThinkingOpen("conv-show-all-history")
+			if !showAll {
+				startIdx = n - defaultVisibleTail
+			}
+		}
+
+		ui.Row(c.Key("conv-main-split")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			ui.Scroll(c.Key("conv-scroll")).Grow(3).MinWidth(0).Padding(20, 28).Children(func() {
+				ui.Column(c).MaxWidth(860).Gap(18).AlignItems(ui.Stretch).Children(func() {
+					if startIdx > 0 {
+						ui.Row(c.Key("conv-load-earlier")).Justify(ui.Center).Children(func() {
+							lbl := fmt.Sprintf("Show %d earlier turn(s)", startIdx)
+							if theme.ActionButton(c, "conv-show-earlier-btn", lbl, th.Info, false, th).Clicked() && bc.ToggleThinking != nil {
+								bc.ToggleThinking("conv-show-all-history")
+							}
+						})
 					}
-					switch entry.Role {
-					case mygoshell.RoleUser:
-						renderUserMessageCard(c, i, entry, th)
-					case mygoshell.RoleThinking:
-						renderStandaloneThinkingDrawer(c, i, entry, tr, th)
-					case mygoshell.RoleTool:
-						renderToolCallCard(c, i, entry, tr, th)
-					case mygoshell.RoleGate:
-						renderHumanGateCard(c, i, entry, bc, th)
-					default:
-						renderAssistantMessageCard(c, i, entry, tr, bc, mdOpts, th)
+					for i := startIdx; i < n; {
+						entry, ok := tr.Entry(i)
+						if !ok {
+							i++
+							continue
+						}
+						// Group contiguous Thinking + Tool steps into one high-craft Execution Trace stepper.
+						if entry.Role == mygoshell.RoleThinking || entry.Role == mygoshell.RoleTool {
+							groupStart := i
+							var group []mygoshell.TranscriptEntry
+							for i < n {
+								e, ok := tr.Entry(i)
+								if !ok || (e.Role != mygoshell.RoleThinking && e.Role != mygoshell.RoleTool) {
+									break
+								}
+								group = append(group, e)
+								i++
+							}
+							if len(group) >= 2 {
+								renderExecutionTraceGroup(c, groupStart, group, tr, bc, th)
+							} else if len(group) == 1 {
+								if group[0].Role == mygoshell.RoleThinking {
+									renderStandaloneThinkingDrawer(c, groupStart, group[0], tr, th)
+								} else {
+									renderToolCallCard(c, groupStart, group[0], tr, th)
+								}
+							}
+							continue
+						}
+						switch entry.Role {
+						case mygoshell.RoleUser:
+							renderUserMessageCard(c, i, entry, th)
+						case mygoshell.RoleGate:
+							renderHumanGateCard(c, i, entry, bc, th)
+						default:
+							renderAssistantMessageCard(c, i, entry, tr, bc, mdOpts, th)
+						}
+						i++
 					}
-				}
+				})
 			})
+
+			if bc.ActiveArtifact != nil {
+				renderArtifactSplitStage(c, th, bc)
+			}
 		})
+
+		renderTransientStatusStrip(c, tr, bc, th)
+		renderConversationComposerBar(c, tr, bc, th)
 	})
 }
 
@@ -197,7 +249,8 @@ func renderAssistantMessageCard(
 	mdOpts *markdown.Options,
 	th theme.Theme,
 ) {
-	thinkingText, bodyText, thinkingStreaming := uistream.SplitThinkTags(entry.Text)
+	thinkingText, rawBodyText, thinkingStreaming := uistream.SplitThinkTags(entry.Text)
+	dataParts, bodyText := uistream.ExtractDataParts(rawBodyText)
 	isStubGateway := strings.Contains(bodyText, "[marlin-core] processed ") &&
 		strings.Contains(bodyText, "via durable ConversationJournal.")
 
@@ -240,6 +293,16 @@ func renderAssistantMessageCard(
 			} else {
 				markdown.View(c.Key(fmt.Sprintf("conv-md-%d", idx)), bodyText, mdOpts)
 			}
+		}
+
+		// Layer 2 -> Layer 3 Vercel AI SDK Generative UI Data Parts (data-mermaid, data-workflow, etc.).
+		for dIdx, dp := range dataParts {
+			renderGenerativeDataPartCard(c, fmt.Sprintf("conv-gen-%d-%d", idx, dIdx), dp, bc, th)
+		}
+
+		// Inline source citations pill strip (@cite:<path:line>).
+		if cites := extractInlineCitations(bodyText); len(cites) > 0 {
+			renderCitationPillStrip(c, fmt.Sprintf("conv-cites-%d", idx), cites, bc, th)
 		}
 
 		// Transparent notice when Rust host is running DeterministicLocalGateway.
@@ -472,6 +535,79 @@ func renderHumanGateCard(c *ui.Context, idx int, entry mygoshell.TranscriptEntry
 					bc.Adaptive.Desktop.OnGateDecision(gateID, false)
 				}
 			})
+		}
+	})
+}
+
+func renderGenerativeDataPartCard(c *ui.Context, key string, dp uistream.Part, bc *Context, th theme.Theme) {
+	rawPayload := strings.TrimSpace(string(dp.Data))
+	preview := rawPayload
+	if len(preview) > 220 {
+		preview = preview[:220] + "..."
+	}
+	ui.Column(c.Key(key)).Padding(10, 14).Gap(8).Radius(10).
+		Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.44, 0.72)).
+		BorderWidth(1).BorderColor(kit.WithAlpha(th.Accent, 0.36)).AlignItems(ui.Stretch).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			renderMetaPill(c, "AI SDK · "+dp.DataType, th.Accent, th)
+			ui.Text(c, "Generative UI Part").Font(kit.FontDisplay).FontSize(12.5).FontWeight(600).TextColor(th.Ink).NoWrap()
+			ui.Spacer(c)
+			if bc != nil && bc.OnOpenArtifact != nil {
+				if theme.ActionButton(c, key+"-preview-stage", "Preview Stage", th.Accent, true, th).Clicked() {
+					bc.OnOpenArtifact(dp.DataType, dp.DataType, rawPayload)
+				}
+			}
+			if bc != nil && bc.OnWidgetAction != nil {
+				if theme.ActionButton(c, key+"-open-canvas", "Open Canvas", th.Info, false, th).Clicked() {
+					bc.OnWidgetAction("feature:feature:webisland")
+				}
+			}
+		})
+		if strings.TrimSpace(preview) != "" {
+			ui.Text(c, preview).Font(theme.FontMono).FontSize(12).LineHeight(1.45).TextColor(th.InkMuted).MaxLines(5)
+		}
+	})
+}
+
+func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptController, bc *Context, th theme.Theme) {
+	deepThink := tr.DeepThinkEnabled()
+	inFlight := tr.InFlight()
+	usage := tr.ContextUsage()
+	tokText := "0 tok"
+	if usage.UsedTokens > 0 {
+		maxK := usage.MaxTokens / 1000
+		if maxK <= 0 {
+			maxK = 200
+		}
+		tokText = fmt.Sprintf("%d / %dk tok", usage.UsedTokens, maxK)
+	}
+
+	ui.Row(c.Key("conv-composer-bar")).Height(38).Padding(0, 24).Gap(8).AlignItems(ui.Center).
+		Background(theme.GlassTone(c, th.Bar, th, 0.34, 0.60)).
+		BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).Children(func() {
+		dtTone := th.InkMuted
+		if deepThink {
+			dtTone = th.Accent
+		}
+		if theme.ActionButton(c, "conv-deep-think", "Deep Think", dtTone, deepThink, th).Clicked() {
+			tr.SetDeepThink(!deepThink)
+		}
+		if tr.OnPickAttachment != nil {
+			if theme.ActionButton(c, "conv-attach-btn", "+ Attach", th.Info, false, th).Clicked() {
+				tr.OnPickAttachment()
+			}
+		}
+		if inFlight && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnCancelTurn != nil {
+			if theme.ActionButton(c, "conv-stop-turn", "■ Stop", th.Danger, true, th).Clicked() {
+				bc.Adaptive.Desktop.OnCancelTurn()
+			}
+		}
+		ui.Spacer(c)
+		ui.Text(c, tokText).Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).NoWrap()
+		if bc != nil && bc.OnWidgetAction != nil {
+			if theme.ActionLink(c, "conv-compose-insert", "Compose (i)", th.Info, th).Clicked() {
+				bc.OnWidgetAction("cmd:insert")
+			}
 		}
 	})
 }

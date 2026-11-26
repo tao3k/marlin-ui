@@ -760,6 +760,34 @@ func (f *Frame) renderEdgeSidebar(
 	})
 }
 
+func (f *Frame) currentArtifact() *buffer.ArtifactSelection {
+	f.thinkingMu.RLock()
+	art := f.activeArtifact
+	f.thinkingMu.RUnlock()
+	return art
+}
+
+func (f *Frame) openArtifactStage(dataType, title, payload string) {
+	f.thinkingMu.Lock()
+	f.activeArtifact = &buffer.ArtifactSelection{
+		DataType: dataType,
+		Title:    title,
+		Payload:  payload,
+	}
+	f.thinkingMu.Unlock()
+	if f.onPushArtifact != nil {
+		f.onPushArtifact(dataType, title, payload)
+	}
+	f.invalidate()
+}
+
+func (f *Frame) closeArtifactStage() {
+	f.thinkingMu.Lock()
+	f.activeArtifact = nil
+	f.thinkingMu.Unlock()
+	f.invalidate()
+}
+
 func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {
 	th := snap.Theme
 	activeBuf := snap.ActiveBuffer
