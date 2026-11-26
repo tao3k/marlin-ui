@@ -681,6 +681,7 @@ func (f *Frame) View(c *ui.Context) {
 		FeatureReg:          f.FeatureReg,
 		FeatureLedger:       f.FeatureLedger,
 		FeatureHost:         f.FeatureHost,
+		WebHost:             f.WebHost,
 		ActiveModel:         modelLbl,
 		TableCursor:         cursor,
 		MessagesLog:         msgs,

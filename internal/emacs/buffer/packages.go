@@ -239,6 +239,15 @@ func RenderMountedPlugin(c *ui.Context, th theme.Theme, pkg marketplace.ManagedP
 		})
 		ui.Box(c).Height(1).Background(kit.WithAlpha(th.Border, 0.35))
 
+		// When a Tier-2 Untrusted WebView plugin has a live sandboxed island view,
+		// mount it full-bleed inside the Emacs Window (zero redundant chrome).
+		if pkg.PluginEntry != nil && pkg.PluginEntry.Runtime == "webview-untrusted" && bc != nil && bc.WebHost != nil {
+			if nv := bc.WebHost.Resolve(pkg.ID); nv != nil {
+				ui.WebView(c.Key("mplug-wv-"+pkg.ID), nv).Grow(1).MinHeight(0)
+				return
+			}
+		}
+
 		cardBg := theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.54)
 		ui.Column(c).Grow(1).Padding(24, 28).Gap(14).Children(func() {
 			ui.Column(c.Key("mplug-card-"+pkg.ID)).Padding(18, 20).Gap(10).Radius(14).

@@ -705,6 +705,14 @@ func (f *Frame) renderEdgeSidebar(
 			OnClick: func() { f.SelectBuffer(buffer.Targets) },
 		},
 		kit.RailItem{
+			ID:      "packages",
+			Icon:    "sparkles",
+			Label:   "Packages (Marketplace · SPC p)",
+			Tone:    th.Success,
+			Active:  activeBuf == buffer.Packages && activeFeat == "",
+			OnClick: func() { f.SelectBuffer(buffer.Packages) },
+		},
+		kit.RailItem{
 			ID:      "settings",
 			Icon:    "settings",
 			Label:   "Settings",

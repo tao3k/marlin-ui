@@ -14,6 +14,7 @@ import (
 
 	"github.com/tao3k/marlin-mygo/control/marketplace"
 	"github.com/tao3k/marlin-mygo/engine/features"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 	"github.com/tao3k/marlin-mygo/runtime/widgets"
 
@@ -79,6 +80,7 @@ type Context struct {
 	FeatureReg    *features.Registry
 	FeatureLedger *features.GovernanceLedger
 	FeatureHost   *features.Host
+	WebHost       kit.WebIslandHost
 	ActiveModel   string
 	TableCursor   int
 	MessagesLog     []string
