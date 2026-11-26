@@ -84,6 +84,8 @@ type ConnectOption func(*connectOptions)
 
 type connectOptions struct {
 	enableDesktopMyGoAdapters bool
+	authTokenSource           func(context.Context) (string, error)
+	savedRemotes              []appconfig.SavedRemote
 	onRemoteAdded             func(appconfig.SavedRemote)
 	onSessionChanged          func(sessionID string)
 }
@@ -96,6 +98,25 @@ type connectOptions struct {
 func WithDesktopMyGoAdapters() ConnectOption {
 	return func(o *connectOptions) {
 		o.enableDesktopMyGoAdapters = true
+	}
+}
+
+// WithAuthTokenSource provides a dynamic per-RPC Authorization header resolver
+// (typically backed by OS Keychain OAuth credentials via OptionalAuthTokenSource)
+// for remote gRPC targets when no explicit static token override is given.
+func WithAuthTokenSource(fn func(context.Context) (string, error)) ConnectOption {
+	return func(o *connectOptions) {
+		o.authTokenSource = fn
+	}
+}
+
+// WithSavedRemotes pre-registers persisted non-secret remote endpoints into the
+// Federation TargetRegistry on startup.
+func WithSavedRemotes(remotes []appconfig.SavedRemote) ConnectOption {
+	return func(o *connectOptions) {
+		if len(remotes) > 0 {
+			o.savedRemotes = append([]appconfig.SavedRemote(nil), remotes...)
+		}
 	}
 }
 
@@ -181,14 +202,18 @@ func Connect(
 				KeyFile:  cfg.TLSKeyFile,
 			}
 		}
-		dialed, err := grpcwire.Dial(grpcwire.DialConfig{
+		dialCfg := grpcwire.DialConfig{
 			ID:          "remote-marlin-core",
 			DisplayName: "Remote Marlin Core",
 			Mode:        transport.ModeRemoteGRPC,
 			Address:     addr,
 			AuthToken:   cfg.BearerHeader(),
 			TLS:         tlsCfg,
-		})
+		}
+		if dialCfg.AuthToken == "" && copts.authTokenSource != nil {
+			dialCfg.AuthTokenSource = copts.authTokenSource
+		}
+		dialed, err := grpcwire.Dial(dialCfg)
 		if err != nil {
 			cancelLink()
 			coalescer.Close()
@@ -345,10 +370,14 @@ func Connect(
 	sr := &sessionRuntime{
 		activeSessionID:  cfg.SessionID,
 		openedSessions:   make(map[string]bool),
+		authTokenSource:  copts.authTokenSource,
 		saveNow:          saveNow,
 		scheduleSave:     scheduleSave,
 		onSessionChanged: copts.onSessionChanged,
 		onRemoteAdded:    copts.onRemoteAdded,
+	}
+	if len(copts.savedRemotes) > 0 {
+		registerSavedRemotes(linkCtx, cfg, copts.savedRemotes, targets, federation, sr, markDirty)
 	}
 	recordTokens := func(txt string) {
 		if transcript == nil {

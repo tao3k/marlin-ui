@@ -113,6 +113,7 @@ func main() {
 	var (
 		prefsMu   sync.Mutex
 		win       *mygo.Window
+		tray      *mygo.Tray
 		link      *hostlink.Link
 		stopVoice func()
 	)
@@ -157,6 +158,9 @@ func main() {
 	})
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
 		savePrefs()
+		if tray != nil {
+			tray.Destroy()
+		}
 		if stopVoice != nil {
 			stopVoice()
 		}
@@ -172,6 +176,33 @@ func main() {
 				win.Invalidate()
 			}
 		}
+		focusWindow := func() {
+			mygo.App.Focus()
+			if win != nil {
+				win.Show()
+				win.Focus()
+			}
+		}
+
+		// Attach OS Keychain Vault Auth BEFORE dialing remote gRPC so signed-in
+		// accounts supply fresh OAuth Bearer headers automatically.
+		var applyFeatures func(string)
+		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
+			Config: cfg,
+			Prefs:  prefs,
+			OnApplyFeatures: func(spec string) {
+				if applyFeatures != nil {
+					applyFeatures(spec)
+				}
+			},
+			OnSavePrefs: func(vals map[string]any) {
+				prefsMu.Lock()
+				appconfig.ApplySettingsValues(&prefs, vals)
+				prefsMu.Unlock()
+				savePrefs()
+			},
+			Invalidate: invalidate,
+		})
 
 		var connErr error
 		link, connErr = hostlink.Connect(
@@ -181,6 +212,8 @@ func main() {
 			desktopTargetKind(),
 			invalidate,
 			hostlink.WithDesktopMyGoAdapters(),
+			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
+			hostlink.WithSavedRemotes(prefs.SavedRemotes),
 			hostlink.WithOnSessionChanged(func(_ string) { savePrefs() }),
 			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
 				prefsMu.Lock()
@@ -193,21 +226,10 @@ func main() {
 			log.Fatalf("marlin-desktop host connection failed: %v", connErr)
 		}
 		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
-		hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
-			Config: cfg,
-			Prefs:  prefs,
-			OnApplyFeatures: func(spec string) {
-				reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
-				adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
-			},
-			OnSavePrefs: func(vals map[string]any) {
-				prefsMu.Lock()
-				appconfig.ApplySettingsValues(&prefs, vals)
-				prefsMu.Unlock()
-				savePrefs()
-			},
-			Invalidate: invalidate,
-		})
+		applyFeatures = func(spec string) {
+			reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
+			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+		}
 
 		// Persist theme cycles triggered from the in-app chrome as well as OS menu.
 		prevCycle := adaptive.Desktop.OnCycleTheme
@@ -251,6 +273,7 @@ func main() {
 		stopVoice = wireDesktopVoice(ctx, tr, invalidate)
 
 		mygo.App.SetMenu(buildDesktopMenu(adaptive, savePrefs, invalidate))
+		tray = setupDesktopTray(adaptive, focusWindow, invalidate)
 
 		title := fmt.Sprintf("Marlin — %s (%s)", link.Mode, link.Endpoint)
 		win = mygo.NewWindow(mygo.WindowOptions{

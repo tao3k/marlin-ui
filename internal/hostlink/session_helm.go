@@ -29,6 +29,7 @@ type sessionRuntime struct {
 	nextSeq          atomic.Uint64
 	openedSessions   map[string]bool
 	extraClosers     []func()
+	authTokenSource  func(context.Context) (string, error)
 	sendPromptRaw    func(displayPrompt, wirePrompt string, refs []composer.AttachmentRef)
 	turnCtrl         *grpcwire.TurnStreamController
 	composerBridge   *grpcwire.ComposerBridge
@@ -242,14 +243,18 @@ func wireSessionAndHelm(
 			}
 		}
 		auth := appconfig.Config{AuthToken: bearerToken}.BearerHeader()
-		dialed, err := grpcwire.Dial(grpcwire.DialConfig{
+		dialCfg := grpcwire.DialConfig{
 			ID:          id,
 			DisplayName: label,
 			Mode:        transport.ModeRemoteGRPC,
 			Address:     addr,
 			AuthToken:   auth,
 			TLS:         tlsCfg,
-		})
+		}
+		if dialCfg.AuthToken == "" && sr.authTokenSource != nil {
+			dialCfg.AuthTokenSource = sr.authTokenSource
+		}
+		dialed, err := grpcwire.Dial(dialCfg)
 		if err != nil {
 			return fmt.Errorf("dial remote %s: %w", addr, err)
 		}
@@ -313,4 +318,66 @@ func ensureSessionEntry(app *mygoshell.WorkbenchApp, sessionID, title string) {
 		SessionID: sessionID,
 		Title:     title,
 	})
+}
+
+func registerSavedRemotes(
+	linkCtx context.Context,
+	cfg appconfig.Config,
+	remotes []appconfig.SavedRemote,
+	targets *transport.TargetRegistry,
+	federation *transport.FederationSupervisor,
+	sr *sessionRuntime,
+	markDirty func(),
+) {
+	if targets == nil || len(remotes) == 0 {
+		return
+	}
+	existing := make(map[string]bool)
+	for _, m := range targets.List() {
+		existing[m.ID] = true
+	}
+	var tlsCfg *grpcwire.TLSConfig
+	if cfg.TLSCAFile != "" || cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
+		tlsCfg = &grpcwire.TLSConfig{
+			CAFile:   cfg.TLSCAFile,
+			CertFile: cfg.TLSCertFile,
+			KeyFile:  cfg.TLSKeyFile,
+		}
+	}
+	added := false
+	for _, rem := range remotes {
+		id := strings.TrimSpace(rem.ID)
+		addr := strings.TrimSpace(rem.Endpoint)
+		if id == "" || addr == "" || existing[id] {
+			continue
+		}
+		label := strings.TrimSpace(rem.DisplayName)
+		if label == "" {
+			label = id
+		}
+		dialCfg := grpcwire.DialConfig{
+			ID:          id,
+			DisplayName: label,
+			Mode:        transport.ModeRemoteGRPC,
+			Address:     addr,
+			TLS:         tlsCfg,
+		}
+		if sr.authTokenSource != nil {
+			dialCfg.AuthTokenSource = sr.authTokenSource
+		}
+		dialed, err := grpcwire.Dial(dialCfg)
+		if err != nil {
+			continue
+		}
+		sr.addCloser(func() { _ = dialed.Close() })
+		_ = targets.Register(dialed)
+		existing[id] = true
+		added = true
+	}
+	if added && federation != nil {
+		go func() {
+			federation.ProbeAll(linkCtx, 2*time.Second)
+			markDirty()
+		}()
+	}
 }

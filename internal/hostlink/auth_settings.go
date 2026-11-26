@@ -79,6 +79,7 @@ func AttachAuthAndSettings(
 	_ = mgr.RegisterProvider(auth.GitHubOAuthProvider(ghClientID))
 	_ = mgr.RegisterProvider(auth.GoogleOAuthProvider(googleClientID))
 	_ = mgr.RegisterProvider(auth.EmailOTPProvider())
+	_, _ = mgr.RestoreFromVault(ctx)
 
 	authCtrl := mygoshell.NewAuthController(mgr)
 	authCtrl.VaultInfo = vaultInfo
@@ -132,4 +133,21 @@ func AttachAuthAndSettings(
 	})
 
 	return authCtrl
+}
+
+// OptionalAuthTokenSource bridges a Tier-0 AuthController's OS Keychain Vault
+// into grpcwire.DialConfig.AuthTokenSource. When an account is signed in, each
+// remote gRPC RPC receives a freshly refreshed Bearer header; when signed out,
+// it returns ("", nil) so mTLS-only or unauthenticated loopback hosts still dial.
+func OptionalAuthTokenSource(authCtrl *mygoshell.AuthController) func(context.Context) (string, error) {
+	if authCtrl == nil || authCtrl.Manager == nil {
+		return nil
+	}
+	mgr := authCtrl.Manager
+	return func(ctx context.Context) (string, error) {
+		if _, ok := mgr.Snapshot().ActiveProfile(); !ok {
+			return "", nil
+		}
+		return mgr.AuthorizationHeader(ctx)
+	}
 }

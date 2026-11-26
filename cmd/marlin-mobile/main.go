@@ -121,6 +121,24 @@ func main() {
 			}
 		}
 
+		var applyFeatures func(string)
+		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
+			Config: cfg,
+			Prefs:  prefs,
+			OnApplyFeatures: func(spec string) {
+				if applyFeatures != nil {
+					applyFeatures(spec)
+				}
+			},
+			OnSavePrefs: func(vals map[string]any) {
+				prefsMu.Lock()
+				appconfig.ApplySettingsValues(&prefs, vals)
+				prefsMu.Unlock()
+				savePrefs()
+			},
+			Invalidate: invalidate,
+		})
+
 		var err error
 		link, err = hostlink.Connect(
 			ctx,
@@ -128,6 +146,8 @@ func main() {
 			adaptive,
 			targetKind,
 			invalidate,
+			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
+			hostlink.WithSavedRemotes(prefs.SavedRemotes),
 			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
 				prefsMu.Lock()
 				prefs.UpsertRemote(r)
@@ -139,21 +159,10 @@ func main() {
 			log.Fatalf("marlin-mobile host connection failed: %v", err)
 		}
 		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
-		hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
-			Config: cfg,
-			Prefs:  prefs,
-			OnApplyFeatures: func(spec string) {
-				reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
-				adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
-			},
-			OnSavePrefs: func(vals map[string]any) {
-				prefsMu.Lock()
-				appconfig.ApplySettingsValues(&prefs, vals)
-				prefsMu.Unlock()
-				savePrefs()
-			},
-			Invalidate: invalidate,
-		})
+		applyFeatures = func(spec string) {
+			reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
+			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+		}
 		adaptive.Mobile.TargetLabel = fmt.Sprintf("%s · %s", spec.Name, link.Endpoint)
 
 		win = mygo.NewWindow(mygo.WindowOptions{
