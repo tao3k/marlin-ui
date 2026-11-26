@@ -18,7 +18,9 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -26,7 +28,9 @@ import (
 	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
+	"github.com/tao3k/marlin-mygo/runtime/async"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
+	"github.com/tao3k/marlin-mygo/runtime/widgets"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/frame"
@@ -56,7 +60,7 @@ func main() {
 	flag.StringVar(&cfg.TLSCertFile, "cert", cfg.TLSCertFile, "optional mTLS client certificate PEM file")
 	flag.StringVar(&cfg.TLSKeyFile, "key", cfg.TLSKeyFile, "optional mTLS client private key PEM file")
 	flag.StringVar(&cfg.SessionID, "session", cfg.SessionID, "Marlin session ID")
-	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial Doom Emacs theme: doom-one | pi | doom-paper")
+	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial CSS theme: nord-bento | doom-one | doom-tokyo-night | doom-one-light (or ~/.config/marlin/ui/ pack)")
 	flag.StringVar(&cfg.FeaturesSpec, "features", cfg.FeaturesSpec, "opt-in UI feature profile: default | all | none | chatroom,compare,canvas")
 	flag.StringVar(&cfg.TursoPath, "turso", cfg.TursoPath, "Turso SQLite file path for supervised local Rust host")
 	flag.StringVar(&cfg.RecoveryFile, "recovery-file", cfg.RecoveryFile, "atomic fsync crash-recovery snapshot file")
@@ -77,8 +81,14 @@ func main() {
 	if err != nil {
 		log.Printf("prefs load warning (%s): %v", cfg.PrefsFile, err)
 	}
-	if !explicitFlags["theme"] && prefs.ThemeID != "" {
-		cfg.ThemeID = prefs.ThemeID
+	themeDir := appconfig.DefaultUIThemeDir()
+	themeBundle := appconfig.LoadUIThemeBundle(themeDir)
+	if !explicitFlags["theme"] {
+		if prefs.ThemeID != "" {
+			cfg.ThemeID = prefs.ThemeID
+		} else if themeBundle.Manifest.ActiveTheme != "" {
+			cfg.ThemeID = themeBundle.Manifest.ActiveTheme
+		}
 	}
 	if !explicitFlags["features"] && prefs.FeaturesSpec != "" {
 		cfg.FeaturesSpec = prefs.FeaturesSpec
@@ -101,6 +111,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	bgScope := async.NewStructuredScope(ctx)
 
 	// Headless controllers from marlin-mygo (Transcript, Helm, Projection, Auth, PromptGate, WindowTree).
 	adaptive := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
@@ -151,6 +162,12 @@ func main() {
 		}
 	})
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
+		cancel()
+		bgScope.CloseAndDrain()
+		if emacsWin != nil {
+			emacsWin.Close()
+		}
+		featurekit.ShutdownWebIslands()
 		prefsMu.Lock()
 		snap := prefs
 		prefsMu.Unlock()
@@ -254,15 +271,73 @@ func main() {
 		}
 		stopVoice = wireDesktopVoice(ctx, tr, invalidate)
 
+		var (
+			hasLastVibrancy bool
+			lastVibrancy    mygo.Vibrancy
+		)
+		applyWindowGlass := func(glassOn, isLight bool) {
+			if win == nil {
+				return
+			}
+			vibMode := "auto"
+			if emacsWin != nil {
+				vibMode = emacsWin.VibrancyMode()
+				pal, op := emacsWin.ActivePaletteAndOpacity()
+				featurekit.SyncWebIslandTheme(pal, op)
+			}
+			v := desktopVibrancy(glassOn, isLight, vibMode)
+			if !hasLastVibrancy || v != lastVibrancy {
+				hasLastVibrancy = true
+				lastVibrancy = v
+				win.SetVibrancy(v)
+				win.SetActiveAppearance(v != mygo.VibrancyNone)
+			}
+		}
+
+		featurekit.RegisterUserIslands(themeBundle.WebIslands)
 		emacsWin = frame.New(frame.Config{
-			Adaptive:        adaptive,
-			Link:            link,
-			AppConfig:       cfg,
-			Prefs:           prefs,
-			FeatureReg:      reg,
-			FeatureLedger:   ledger,
-			FeatureHost:     host,
-			InitialThemeID:  cfg.ThemeID,
+			Adaptive:            adaptive,
+			Link:                link,
+			AppConfig:           cfg,
+			Prefs:               prefs,
+			FeatureReg:          reg,
+			FeatureLedger:       ledger,
+			FeatureHost:         host,
+			WebHost:             featurekit.WebIslandHost(),
+			OnWebIslandAction:   featurekit.DispatchWebIslandAction,
+			InitialThemeID:      cfg.ThemeID,
+			ThemeBundle:         themeBundle,
+			OnReloadThemeBundle: func() appconfig.UIThemeBundle {
+				b := appconfig.LoadUIThemeBundle(themeDir)
+				featurekit.RegisterUserIslands(b.WebIslands)
+				return b
+			},
+			OnGlassChanged: func(on bool) {
+				isLight := false
+				if emacsWin != nil {
+					isLight = emacsWin.IsLightTheme()
+				}
+				applyWindowGlass(on, isLight)
+			},
+			OnThemeChanged: func(isLight bool) {
+				if emacsWin != nil {
+					applyWindowGlass(emacsWin.UIModules().Glass, isLight)
+				}
+			},
+			RoomStats: func() (int, int, int, int) {
+				st := featurekit.AgentRoomStats()
+				return st.TasksDone, st.TasksTotal, st.AgentsOnline, st.AgentsTotal
+			},
+			RoomTasks: func() []widgets.TaskItem {
+				raw := featurekit.AgentRoomTasks()
+				out := make([]widgets.TaskItem, 0, len(raw))
+				for _, r := range raw {
+					out = append(out, widgets.TaskItem{ID: r.ID, Title: r.Title, Status: r.Status, Owner: r.Owner})
+				}
+				return out
+			},
+			OnAddTask:       featurekit.AddAgentRoomTask,
+			OnCycleTask:     featurekit.CycleAgentRoomTask,
 			OnPrefsChanged:  savePrefs,
 			OnApplyFeatures: applyFeatures,
 			Invalidate:      invalidate,
@@ -271,15 +346,90 @@ func main() {
 		mygo.App.SetMenu(buildDesktopMenu(emacsWin, invalidate))
 		tray = setupDesktopTray(emacsWin, focusWindow, invalidate)
 
+		initGlass := emacsWin.UIModules().Glass
+		initVibrancy := desktopVibrancy(initGlass, emacsWin.IsLightTheme(), emacsWin.VibrancyMode())
 		title := fmt.Sprintf("Marlin — %s", link.Endpoint)
 		win = mygo.NewWindow(mygo.WindowOptions{
-			Title:    title,
-			Width:    1280,
-			Height:   820,
-			StateKey: "marlin-desktop-main",
-			Content:  ui.View(emacsWin.View),
+			Title:         title,
+			Width:         1280,
+			Height:        820,
+			TitleBarStyle: mygo.TitleBarHiddenInset,
+			Transparent:   true,
+			Vibrancy:      initVibrancy,
+			StateKey:      "marlin-desktop-main",
+			Content:       ui.View(emacsWin.View),
+		})
+		win.SetActiveAppearance(initGlass)
+		featurekit.SetWebViewInvalidate(invalidate)
+		featurekit.SetWebViewFactory(func(islandID string, html, preloadJS string, tier async.TrustTier) (featurekit.WebViewInstance, error) {
+			if win == nil {
+				return featurekit.WebViewInstance{}, fmt.Errorf("window unavailable")
+			}
+			pageOpts := mygo.PageOptions{
+				PreloadScript: preloadJS,
+				Untrusted:     tier != async.TrustTier0FirstParty,
+			}
+			if tier == async.TrustTier0FirstParty {
+				// Prevent macOS App Nap from freezing active first-party BPMN/Workflow canvases.
+				pageOpts.BackgroundThrottling = mygo.ThrottlingOff
+			}
+			wv, err := win.NewWebView(mygo.WebViewOptions{
+				Transparent: true,
+				Page:        pageOpts,
+			})
+			if err != nil {
+				return featurekit.WebViewInstance{}, err
+			}
+			wv.Page().OnRenderProcessGone(func(_ string) {
+				featurekit.RecoverWebIsland(islandID)
+			})
+			wv.Page().LoadHTML(html, "")
+			return featurekit.WebViewInstance{
+				View: wv,
+				Tier: tier,
+				Eval: func(js string) {
+					if !wv.IsDestroyed() {
+						_, _ = wv.Page().Eval(js)
+					}
+				},
+				ReloadHTML: func(nextHTML string) {
+					if !wv.IsDestroyed() {
+						wv.Page().LoadHTML(nextHTML, "")
+					}
+				},
+				Destroy: func() {
+					if !wv.IsDestroyed() {
+						wv.Destroy()
+					}
+				},
+			}, nil
 		})
 		win.Invalidate()
+
+		// Live auto-reload watcher for ~/.config/marlin/ui/ via off-lock FencedLane.
+		appconfig.WatchUIThemeDir(ctx, themeDir, 600*time.Millisecond, func() {
+			if emacsWin != nil {
+				emacsWin.ReloadThemesAsync()
+			}
+		})
+
+		// Demand-driven 1Hz live clock tick inside StructuredScope:
+		// automatically pauses when unfocused or viewing non-Dashboard buffers
+		// to eliminate macOS transparent-window idle GPU power residency.
+		bgScope.Go(func(loopCtx context.Context) {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-loopCtx.Done():
+					return
+				case <-ticker.C:
+					if emacsWin != nil && emacsWin.ShouldTickIdle() && win != nil {
+						win.Invalidate()
+					}
+				}
+			}
+		})
 	})
 
 	if err := mygo.App.Run(); err != nil {
@@ -290,6 +440,33 @@ func main() {
 	}
 	if link != nil {
 		link.Close()
+	}
+}
+
+// desktopVibrancy resolves the declarative TOML [surface].vibrancy material
+// ("auto", "hud", "under-window", "sidebar", "popover", "none") to a flat 1:1
+// OS frosted vibrancy material (NSVisualEffectView on macOS, Acrylic/Mica on
+// Windows 11) with zero lens magnification or edge warping.
+func desktopVibrancy(glassOn, isLight bool, mode string) mygo.Vibrancy {
+	if !glassOn {
+		return mygo.VibrancyNone
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "none":
+		return mygo.VibrancyNone
+	case "hud":
+		return mygo.VibrancyHUD
+	case "under-window":
+		return mygo.VibrancyUnderWindow
+	case "sidebar":
+		return mygo.VibrancySidebar
+	case "popover":
+		return mygo.VibrancyPopover
+	default:
+		if isLight {
+			return mygo.VibrancyUnderWindow
+		}
+		return mygo.VibrancyHUD
 	}
 }
 

@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/egoist/mygo v0.10.1-0.20261124135225-7232afc726f0
-	github.com/tao3k/marlin-mygo v0.0.0-20261126082233-a19da6d83451
+	github.com/tao3k/marlin-mygo v0.0.0-20261126141152-9f9dc2216ee5
 )
 
 require (

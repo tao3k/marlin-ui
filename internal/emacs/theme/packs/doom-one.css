@@ -1,0 +1,134 @@
+/* SPDX-FileCopyrightText: 2026 tao3k team and Contributors */
+/* SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later */
+
+:root {
+  --bg: #282c34;
+  --bar: #21242b;
+  --surface: #2d323c;
+  --hover: #343a46;
+  --border: #3f444a;
+  --border-subtle: #2f343e;
+
+  --tab-active-bg: #504945;
+  --tab-active-fg: #fbf1c7;
+  --tab-inactive-fg: #bdae93;
+  --tab-sep: #665c54;
+
+  --banner: #5b6268;
+  --fg: #bbc2cf;
+  --muted: #8c929c;
+
+  --accent: #c678dd;
+  --info: #51afef;
+  --success: #98be65;
+  --warning: #ecbe7b;
+  --danger: #ff6c6b;
+
+  --radius-small: 4px;
+  --radius-control: 8px;
+  --radius-card: 18px;
+}
+
+.tab {
+  padding: 3px 10px;
+  border-radius: var(--radius-small);
+  color: var(--tab-inactive-fg);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+.tab:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.tab.active {
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+  font-weight: 700;
+}
+
+.btn {
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.btn:hover {
+  background: var(--hover);
+}
+
+.btn.primary {
+  background: var(--hover);
+  font-weight: 700;
+}
+
+.input {
+  background: var(--bar);
+  border-radius: var(--radius-control);
+  border-width: 1px;
+  border-color: var(--border);
+  padding: 6px 10px;
+  color: var(--fg);
+  font-size: 13.5px;
+}
+
+.vertico-row {
+  border-radius: var(--radius-small);
+  padding: 0px 14px;
+  height: 30px;
+}
+
+.vertico-row:hover {
+  background: var(--hover);
+}
+
+.vertico-row.selected {
+  background: var(--surface);
+}
+
+.match-hit {
+  color: var(--warning);
+  background: rgba(236, 190, 123, 0.18);
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.hydra-key {
+  background: var(--surface);
+  border-radius: var(--radius-small);
+  padding: 2px 6px;
+  font-weight: 700;
+}
+
+.bento-card {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: 16px 18px;
+}
+
+.bento-card:hover {
+  background: var(--hover);
+}
+
+.bento-tile {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+}
+
+.bento-tile:hover {
+  background: var(--hover);
+}
+
+.bento-gauge-track {
+  background: var(--bar);
+  border-radius: 999px;
+}
+
+.bento-badge {
+  background: #eceff4;
+  color: #282c34;
+  border-radius: var(--radius-card);
+}

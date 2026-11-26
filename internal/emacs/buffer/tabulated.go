@@ -138,7 +138,7 @@ func renderModels(c *ui.Context, th theme.Theme, bc *Context) {
 			{Label: "PROVIDER", Width: 140},
 			{Label: "ROUTE"},
 		}, th)
-		activeModel := "gpt-marlin-local"
+		activeModel := "host-default"
 		if bc != nil && bc.ActiveModel != "" {
 			activeModel = bc.ActiveModel
 		}
@@ -178,7 +178,11 @@ func renderHelp(c *ui.Context, th theme.Theme) {
 		{"SPC SPC / SPC x / M-x / Cmd+K", "Open Vertico M-x commands"},
 		{"SPC b b / Cmd+B", "Switch Emacs buffer (*conversation*, *Sessions*, *Targets*, ...)"},
 		{"SPC s / Cmd+P", "Open 120Hz Helm live multi-source search"},
-		{"SPC t t", "Switch Doom Emacs theme profile (doom-one, pi, doom-paper)"},
+		{"SPC t t", "Switch CSS theme pack (nord-bento, doom-one, doom-tokyo-night, doom-one-light)"},
+		{"SPC t v", "Toggle hot-pluggable Liquid Glass GPU surface module"},
+		{"SPC t a", "Toggle hot-pluggable 120Hz Spring Motion module"},
+		{"SPC t z", "Toggle immersive Zen Mode (borderless Bento widget desktop)"},
+		{"SPC t r", "Reload ~/.config/marlin/ui/ themes, CSS & custom S-exp/TOML widgets"},
 		{"SPC h", "Open *Help* keybindings buffer"},
 		{"Cmd+,", "Open *Settings* buffer (Theme, Remote Targets, Account, Features)"},
 		{"C-n / C-p / Up / Down", "Move candidate selection"},

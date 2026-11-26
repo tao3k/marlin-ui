@@ -2,21 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
 
-// Package modeline implements the complete authentic Doom Modeline specification
-// (matching doom-modeline.el's 'dashboard, 'main, and 'helm modeline presets):
-//   - Left:  3px doom-modeline-bar + circular Meow modal state badge + workspace/buffer
-//     info (Doom blue bold) + buffer position/rows + remote host indicator
-//   - Right: active LLM route (LSP-style dot) + UTF-8 encoding + Doom blue bold
-//     major-mode / version + VCS-style host transport status
-//   - Seamless matte bar surface (#21242b) with zero harsh 1px outer borders.
+// Package modeline implements Marlin UI's declarative Doom Modeline
+// (mirroring doom-modeline.el's 'dashboard, 'main, and 'helm presets and
+// consuming live marlin.ui.v1 gRPC StatusItems & active ModelLabel).
+//
+// Right-side segments adapt dynamically to the active Window, Buffer, and
+// Workspace — never hardcoding stale fallback model names or cluttering the bar
+// with redundant status text.
 //
 // Declared in dev/sysml/emacs-workbench.sysml as MUI-EMACS-A07 (emacsModeline).
 package modeline
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/tao3k/marlin-mygo/pkg/schema"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/meow"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
@@ -45,28 +49,41 @@ type Status struct {
 	ActivityLabel string
 	ActivityColor ui.Color
 	ModelLabel    string
+	StatusItems   []schema.UIStatusItem // declarative marlin.ui.v1 status items when provided by Rust/Scheme
 	SessionID     string
 	RowCount      int
 	HelmTotal     int
 	PendingGates  int
+	ShowGateBadge bool
 	OnReviewGate  func()
 	VersionLabel  string
+	Glass         bool
+	GlassOpacity  float32
 	Theme         theme.Theme
 }
 
-// Render paints the authentic Doom Modeline bar directly above the Emacs Echo Area.
+// Render paints the clean, dynamic Doom Modeline directly above the Echo Area.
 func Render(c *ui.Context, st Status) {
 	th := st.Theme
-	barColor, modalLetter, modalLabel := modalSegmentSpec(st, th)
+	barColor, modalLabel := modalSegmentSpec(st, th)
 
-	ui.Row(c.Key("doom-modeline")).Height(theme.ModelineHeight).Background(th.Bar).
-		AlignItems(ui.Center).Children(func() {
+	bg := th.Bar
+	row := ui.Row(c.Key("doom-modeline")).Height(theme.ModelineHeight)
+	if st.Glass && c.Vibrancy() {
+		a := st.GlassOpacity
+		if a <= 0 {
+			a = 0.24
+		}
+		bg = kit.WithAlpha(th.Bar, a)
+		row.BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(ui.RGB(255, 255, 255), 0.08))
+	}
+	row.Background(bg).AlignItems(ui.Center).Clip().Children(func() {
 		// Segment 1: iconic 3px doom-modeline-bar.
 		ui.Box(c).Width(3).FillHeight().Background(barColor)
 
-		ui.Row(c).Grow(1).Padding(0, 12).Gap(10).AlignItems(ui.Center).Children(func() {
-			// Segment 2: circular modal state indicator (mirrors doom-modeline-modals).
-			renderModalBadge(c, modalLetter, modalLabel, barColor, th)
+		ui.Row(c).Grow(1).MinWidth(0).Padding(0, 14).Gap(10).AlignItems(ui.Center).Clip().Children(func() {
+			// Segment 2: circular modal state indicator.
+			renderModalBadge(c, modalLabel, barColor, th)
 
 			switch st.Preset {
 			case PresetHelm:
@@ -80,22 +97,22 @@ func Render(c *ui.Context, st Status) {
 	})
 }
 
-func renderModalBadge(c *ui.Context, letter, fullLabel string, tone ui.Color, th theme.Theme) {
+func renderModalBadge(c *ui.Context, fullLabel string, tone ui.Color, th theme.Theme) {
 	ui.Row(c.Key("dm-modal-badge")).Padding(2, 7).Radius(theme.RadiusPill).
-		Background(th.SurfaceElevated).Gap(5).AlignItems(ui.Center).Children(func() {
+		Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.64)).Gap(5).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(tone)
 		ui.Text(c, fullLabel).Font(theme.FontMono).FontSize(11.5).FontWeight(700).TextColor(tone).NoWrap()
-		_ = letter
 	})
 }
 
 func renderDashboardSegments(c *ui.Context, st Status, th theme.Theme) {
-	// Matches (doom-modeline-def-modeline 'dashboard '(bar modals buffer-default-directory-simple remote-host) '(major-mode process))
+	// Initial Dashboard / empty Conversation workspace preset:
+	// left = workspace path + optional remote host; right = concise online dot + real model + dynamic workspace context.
 	ws := st.WorkspacePath
 	if ws == "" {
 		ws = "~/marlin/" + st.SessionID + "/"
 	}
-	ui.Text(c, ws).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+	ui.Text(c, ws).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).MinWidth(0).Ellipsis("...").NoWrap().MaxLines(1)
 
 	if st.RemoteHost != "" {
 		ui.Text(c, "@"+st.RemoteHost).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.Accent).NoWrap()
@@ -103,17 +120,11 @@ func renderDashboardSegments(c *ui.Context, st Status, th theme.Theme) {
 
 	ui.Spacer(c)
 
-	renderRightModelAndHost(c, st, th)
-
-	ver := st.VersionLabel
-	if ver == "" {
-		ver = "MARLIN"
-	}
-	ui.Text(c, ver).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+	renderRightDeclarative(c, st, th, true)
 }
 
 func renderMainSegments(c *ui.Context, st Status, th theme.Theme) {
-	// Matches (doom-modeline-def-modeline 'main '(bar modals buffer-info remote-host buffer-position) '(lsp buffer-encoding major-mode vcs))
+	// Active buffer preset: left = buffer name + row count; right = concise online dot + real model + active MajorMode.
 	bufName := st.BufferName
 	if bufName == "" {
 		bufName = "*conversation*"
@@ -122,7 +133,7 @@ func renderMainSegments(c *ui.Context, st Status, th theme.Theme) {
 
 	pos := "All"
 	if st.RowCount > 0 {
-		pos = fmt.Sprintf("%d rows · Bot", st.RowCount)
+		pos = fmt.Sprintf("%d rows", st.RowCount)
 	}
 	ui.Text(c, pos).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
 
@@ -132,19 +143,16 @@ func renderMainSegments(c *ui.Context, st Status, th theme.Theme) {
 
 	ui.Spacer(c)
 
-	renderRightModelAndHost(c, st, th)
-
-	ui.Text(c, "UTF-8").Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
+	renderRightDeclarative(c, st, th, false)
 
 	modeName := st.MajorMode
 	if modeName == "" {
 		modeName = "Marlin"
 	}
-	ui.Text(c, modeName).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+	ui.Text(c, modeName).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(700).TextColor(th.Info).NoWrap()
 }
 
 func renderHelmSegments(c *ui.Context, st Status, th theme.Theme) {
-	// Matches (doom-modeline-def-modeline 'helm '(bar helm-buffer-id helm-number) '(helm-help))
 	title := "M-x"
 	if st.MiniMode == minibuffer.ModeHelm {
 		title = "HELM"
@@ -160,56 +168,75 @@ func renderHelmSegments(c *ui.Context, st Status, th theme.Theme) {
 
 	ui.Spacer(c)
 
-	renderRightModelAndHost(c, st, th)
 	ui.Text(c, "C-n/C-p move · RET open · C-g quit").Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
 }
 
-func renderRightModelAndHost(c *ui.Context, st Status, th theme.Theme) {
-	modelLabel := st.ModelLabel
-	if modelLabel == "" {
-		modelLabel = "gpt-marlin-local"
-	}
-	actLabel := st.ActivityLabel
-	if actLabel == "" {
-		actLabel = "Ready"
-	}
+func renderRightDeclarative(c *ui.Context, st Status, th theme.Theme, showDashboardMeta bool) {
 	actCol := st.ActivityColor
 	if actCol == (ui.Color{}) {
 		actCol = th.Success
 	}
 
-	// Subtle clickable gate badge only when a Tier-0 gate is pending (opens Emacs y-or-n-p in Minibuffer).
-	if st.PendingGates > 0 {
-		lbl := fmt.Sprintf("%d gate", st.PendingGates)
-		if st.PendingGates > 1 {
-			lbl = fmt.Sprintf("%d gates", st.PendingGates)
+	ui.Row(c).Gap(10).AlignItems(ui.Center).Shrink(0).Children(func() {
+		if st.PendingGates > 0 && st.ShowGateBadge {
+			lbl := fmt.Sprintf("%d gate", st.PendingGates)
+			if st.PendingGates > 1 {
+				lbl = fmt.Sprintf("%d gates", st.PendingGates)
+			}
+			if theme.ActionLink(c, "dm-gate-badge", lbl, th.Warning, th).Clicked() && st.OnReviewGate != nil {
+				st.OnReviewGate()
+			}
 		}
-		if theme.ActionLink(c, "dm-gate-badge", lbl, th.Warning, th).Clicked() && st.OnReviewGate != nil {
-			st.OnReviewGate()
-		}
-	}
 
-	// Active LLM route segment (analogous to doom-modeline-lsp).
-	ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Width(6).Height(6).Radius(theme.RadiusPill).Background(actCol)
-		ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.Ink).NoWrap()
+		// If marlin.ui.v1 gRPC supplied declarative StatusItems, render them directly.
+		if len(st.StatusItems) > 0 {
+			for i, item := range st.StatusItems {
+				lbl := strings.TrimSpace(item.Label)
+				if lbl == "" {
+					lbl = strings.TrimSpace(item.CompactLabel)
+				}
+				if lbl == "" {
+					continue
+				}
+				ui.Text(c.Key(fmt.Sprintf("dm-si-%d", i)), lbl).
+					Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(statusToneColor(item.Tone, th)).NoWrap()
+			}
+		}
+
+		// Concise Online dot + real active gRPC model label (zero fake fallback model names!).
+		modelLabel := strings.TrimSpace(st.ModelLabel)
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(actCol)
+			if modelLabel != "" {
+				ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(th.Ink).NoWrap()
+			} else if st.ActivityLabel != "" {
+				ui.Text(c, st.ActivityLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(actCol).NoWrap()
+			}
+		})
+
+		// Dynamic initial-workspace badge shown ONLY on Dashboard / initial empty Conversation.
+		if showDashboardMeta && strings.TrimSpace(st.VersionLabel) != "" {
+			ui.Text(c, st.VersionLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(700).TextColor(th.Info).NoWrap()
+		}
 	})
-	ui.Text(c, actLabel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(actCol).NoWrap()
-	ui.Text(c, st.Theme.Name).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
 }
 
-func modalSegmentSpec(st Status, th theme.Theme) (color ui.Color, letter, label string) {
+func statusToneColor(tone schema.UITone, th theme.Theme) ui.Color {
+	return th.ToMapperSkin().ToneColor(tone)
+}
+
+func modalSegmentSpec(st Status, th theme.Theme) (color ui.Color, label string) {
 	if st.Keypad != "" {
-		return th.Info, "K", "KEYPAD"
+		return th.Info, "KEYPAD"
 	}
 	if st.MiniMode == minibuffer.ModeHelm {
-		return th.Accent, "H", "HELM"
+		return th.Accent, "HELM"
 	}
 	if st.MiniMode != minibuffer.ModePrompt {
-		return th.Accent, "M", "M-x"
+		return th.Accent, "M-x"
 	}
 	if st.KeyMode == meow.ModeNormal {
-		return th.Warning, "N", "NORMAL"
+		return th.Warning, "NORMAL"
 	}
-	return th.Success, "I", "INSERT"
+	return th.Success, "INSERT"
 }

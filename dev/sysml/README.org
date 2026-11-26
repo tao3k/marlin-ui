@@ -44,10 +44,12 @@ contract:
 | =MUI-ARCH-R03= | =actual::hostlinkTransport= | =internal/hostlink/*_test.go= (zero dev tokens, Vault auth, live Rust gRPC E2E) |
 | =MUI-ARCH-R04= | =actual::goBoundaryGuard= | =internal/archguard/boundary_test.go= + =just check-go-boundary= (hard AST/import gate forbidding Go runtime backend logic) |
 | =MUI-EMACS-R01= | =actual::emacsFrame= | =internal/emacs/{theme,meow,tabs,window,buffer,modeline,minibuffer,frame}= + =just check-file-size= |
-| =MUI-EMACS-R02= | =actual::emacsFrame::emacsTheme= | =internal/emacs/theme/palette_test.go= (=doom-one=, =pi=, =doom-paper=, =Radius=0=) |
+| =MUI-EMACS-R02= | =actual::emacsFrame::emacsTheme= | =internal/emacs/theme/palette_test.go= (=nord-bento=, =doom-one=, =doom-tokyo-night=, =doom-one-light=, soft-rounded primitives) |
 | =MUI-EMACS-R03= | =actual::emacsFrame::emacsModeline=, =emacsMinibuffer= | =internal/emacs/frame/frame_test.go= (live =UIWorkbenchSnapshot= + gRPC =M-x=) |
 | =MUI-EMACS-R04= | =actual::emacsFrame::emacsMeow= | =internal/emacs/meow/state_test.go= + =internal/emacs/frame/frame_test.go= |
 | =MUI-EMACS-R05= | =actual::emacsFrame::emacsBuffer= | =internal/emacs/buffer/customize.go= verified in =frame_test.go= |
+| =MUI-EMACS-R06= | =actual::emacsFrame::emacsTheme= | =internal/appconfig/ui_themes_test.go= + =internal/emacs/theme/palette_test.go= + =internal/emacs/frame/frame_test.go= (governed =~/.config/marlin/ui/= + =SPC t r= hot-reload) |
+| =MUI-EMACS-R07= | =actual::emacsFrame::emacsWidgets= | =marlin-mygo/runtime/{kit,widgets}= + =internal/emacs/frame/frame_test.go= (GPU Bento =*Dashboard*=, TOML/S-exp widgets, =SPC t z= Zen Mode) |
 
 * Validate and render
 

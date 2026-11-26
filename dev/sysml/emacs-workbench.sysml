@@ -25,11 +25,12 @@ package MarlinEmacsWorkbench {
                    label, commands), and exposes ui.View to cmd/marlin-desktop. */
 
             part <'MUI-EMACS-A02'> emacsTheme {
-                doc /* internal/emacs/theme: Doom Emacs face palettes (doom-one,
-                       pi, doom-paper) matching doom-one-theme.el and sort-tab.el
-                       face colors, live schema.UITheme projection (FromUITheme),
-                       comfortable 13.5-14px monospace typography, and
-                       soft-rounded (Radius 4-6px) tactile editor primitives. */
+                doc /* internal/emacs/theme: embedded CSS theme packs
+                       (nord-bento default, doom-one, doom-tokyo-night,
+                       doom-one-light) compiled through marlin-mygo/runtime/style
+                       against MarlinStyleContract(), cascaded with governed
+                       user overrides (~/.config/marlin/ui/), live schema.UITheme
+                       projection, Orderless match highlighting, and tactile primitives. */
             }
 
             part <'MUI-EMACS-A03'> emacsMeow {
@@ -84,16 +85,29 @@ package MarlinEmacsWorkbench {
                        supporting nested prefix hydras (+buffers, +themes,
                        +session) and repeatable (Exit=false) vs exit heads. */
             }
+
+            part <'MUI-EMACS-A10'> emacsWidgets {
+                doc /* Consumer binding to upstream marlin-mygo/runtime/{style,kit,widgets}
+                       powering *Dashboard* (Tab 1) and the auto-hide floating left
+                       EdgeRail with fluid edge-to-edge tiling, flat macOS NSVisualEffectView
+                       frosted glass, native SF Symbols, GPU RingGauges & ThinkingOrb,
+                       W3C Design Tokens (tokens.json with oklch), @marlin/ui-kit
+                       TS/JSON declarative widgets & custom sidebars, and lazy-loaded
+                       Hybrid GPU + Sandboxed WebView islands (ui.webview BPMN Studio). */
+            }
         }
 
         dependency frameUsesTheme from emacsFrame to emacsFrame::emacsTheme;
         dependency frameUsesMeow from emacsFrame to emacsFrame::emacsMeow;
+        dependency frameUsesWidgets from emacsFrame to emacsFrame::emacsWidgets;
         dependency frameUsesHydra from emacsFrame to emacsFrame::emacsHydra;
         dependency frameUsesTabs from emacsFrame to emacsFrame::emacsTabs;
         dependency frameUsesWindow from emacsFrame to emacsFrame::emacsWindow;
         dependency frameUsesModeline from emacsFrame to emacsFrame::emacsModeline;
         dependency frameUsesMinibuffer from emacsFrame to emacsFrame::emacsMinibuffer;
         dependency windowUsesBuffer from emacsFrame::emacsWindow to emacsFrame::emacsBuffer;
+        dependency bufferUsesWidgets from emacsFrame::emacsBuffer to emacsFrame::emacsWidgets;
+        dependency widgetsUseTheme from emacsFrame::emacsWidgets to emacsFrame::emacsTheme;
         dependency tabsUsesTheme from emacsFrame::emacsTabs to emacsFrame::emacsTheme;
         dependency modelineUsesTheme from emacsFrame::emacsModeline to emacsFrame::emacsTheme;
         dependency minibufferUsesTheme from emacsFrame::emacsMinibuffer to emacsFrame::emacsTheme;
@@ -160,6 +174,29 @@ package MarlinEmacsWorkbench {
                    auth/OIDC, and compiled features live inside the *Settings*
                    Emacs customize buffer rather than modal web overlays. */
         }
+
+        requirement <'MUI-EMACS-R06'> governedStylesheetContract {
+            doc /* User UI theming lives strictly under ~/.config/marlin/ui/
+                   with a typed directory contract (manifest.toml with
+                   schema_version = marlin.ui.theme.v1, named theme packs under
+                   themes/<id>/{theme.toml, style.css}, and bounded override
+                   theme.css). Every stylesheet is admitted fail-closed through
+                   marlin-mygo/runtime/style against MarlinStyleContract()
+                   allowlisted semantic classes and visual properties, supporting
+                   live hot-reload via SPC t r / M-x reload-theme without
+                   corrupting the active frame on syntax or contract errors. */
+        }
+
+        requirement <'MUI-EMACS-R07'> extensibleBentoWidgetDesktop {
+            doc /* Tab 1 (*Dashboard*) renders an EWW-inspired Bento widget grid
+                   bound to live Marlin signals (tasks, agents, sessions, gates,
+                   host health, clock) while Tab 2 (*conversation*) preserves
+                   the Emacs conversation buffer. Users author custom desktop
+                   widgets in either TOML (widget.toml / dashboard.toml) or
+                   S-expression (layout.sexp / dashboard.sexp) under
+                   ~/.config/marlin/ui/, and may toggle borderless immersive
+                   Zen Mode via SPC t z / M-x zen-mode. */
+        }
     }
 
     allocation ownHierarchy allocate requirements::strictEmacsHierarchy to actual::emacsFrame;
@@ -168,4 +205,6 @@ package MarlinEmacsWorkbench {
     allocation ownGrpcCommands allocate requirements::liveGrpcProjection to actual::emacsFrame.emacsMinibuffer;
     allocation ownModalDeterminism allocate requirements::modalKeyAndMinibufferDeterminism to actual::emacsFrame.emacsMeow;
     allocation ownCustomizeBuffer allocate requirements::bufferOrientedSettings to actual::emacsFrame.emacsBuffer;
+    allocation ownStylesheetContract allocate requirements::governedStylesheetContract to actual::emacsFrame.emacsTheme;
+    allocation ownBentoWidgets allocate requirements::extensibleBentoWidgetDesktop to actual::emacsFrame.emacsWidgets;
 }

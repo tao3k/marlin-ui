@@ -35,7 +35,8 @@ enforced acyclic by =just check-go-boundary=:
 
 | Package | SysML Part | Responsibility |
 |---------+------------+----------------|
-| =internal/emacs/theme= | =MUI-EMACS-A02= | Doom Emacs face palettes (=doom-one=, =pi=, =doom-paper=), live =marlin.ui.v1= =UITheme= projection, flat =Radius=0= primitives |
+| =internal/emacs/theme= | =MUI-EMACS-A02= | Governed CSS theme packs (=nord-bento=, =doom-one=, =doom-tokyo-night=, =doom-one-light=), =~/.config/marlin/ui/= cascade, live =marlin.ui.v1= =UITheme= projection, soft-rounded primitives |
+| =marlin-mygo/runtime/{kit,widgets}= | =MUI-EMACS-A10= | Upstream GPU framework & EWW-inspired Bento widget engine: overflow-proof typography/layout primitives, iOS 26 Liquid Glass surfaces, SF Symbols, Kage GPU shaders, reactive =Signals=, dual TOML/S-expression parsers, =*Dashboard*= & immersive =zen-mode= |
 | =internal/emacs/meow= | =MUI-EMACS-A03= | Meow modal state (=INSERT=, =NORMAL=, =SPC= Keypad leader) and universal Emacs shortcuts |
 | =internal/emacs/tabs= | =MUI-EMACS-A04= | Centaur-Tabs bar (28px, 2px active top accent bar) |
 | =internal/emacs/window= | =MUI-EMACS-A05= | Full-bleed primary Emacs Window viewport + inline Tier-0 =GATE= approval strip |

@@ -6,10 +6,13 @@ package buffer
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/control/auth"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
@@ -29,8 +32,12 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 		ui.Column(c).AlignItems(ui.Stretch).Children(func() {
 			theme.TabulatedHeader(c, []theme.TableColumn{{Label: "CUSTOMIZE · APPEARANCE & SESSION"}}, th)
 
-			theme.FieldRow(c, "theme-profile", "doom-one / pi / doom-paper", th, func() {
-				for _, tp := range theme.Catalog() {
+			themes := bc.AvailableThemes
+			if len(themes) == 0 {
+				themes = theme.Catalog()
+			}
+			theme.FieldRow(c, "theme-profile", "nord-bento / doom-one / doom-tokyo-night / doom-one-light · ~/.config/marlin/ui/", th, func() {
+				for _, tp := range themes {
 					p := tp
 					active := p.ID == th.ID
 					tone := th.InkMuted
@@ -40,6 +47,69 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 					if theme.ActionButton(c, "set-th-"+p.ID, p.Name, tone, active, th).Clicked() && bc.OnSetTheme != nil {
 						bc.OnSetTheme(p.ID)
 					}
+				}
+			})
+			theme.FieldRow(c, "glass-surface", "optional Liquid Glass GPU material + Oklab aurora (SPC t v)", th, func() {
+				lbl := "Matte"
+				tone := th.InkMuted
+				if bc.Modules.Glass {
+					lbl = "Liquid Glass"
+					tone = th.Info
+				}
+				if theme.ActionButton(c, "set-glass-tog", lbl, tone, bc.Modules.Glass, th).Clicked() && bc.OnToggleGlass != nil {
+					bc.OnToggleGlass()
+				}
+			})
+			theme.FieldRow(c, "glass-opacity", "frosted glass transparency over OS vibrancy · tokens.json --glass-opacity (SPC t o)", th, func() {
+				op := bc.GlassOpacity
+				if op <= 0 {
+					op = kit.DefaultGlassOpacity
+				}
+				pct := int(math.Round(float64(op) * 100))
+				lbl := fmt.Sprintf("Custom (%d%%)", pct)
+				switch {
+				case op <= 0.26:
+					lbl = fmt.Sprintf("Clear (%d%%)", pct)
+				case op <= 0.42:
+					lbl = fmt.Sprintf("Balanced (%d%%)", pct)
+				case op <= 0.62:
+					lbl = fmt.Sprintf("Frosted (%d%%)", pct)
+				default:
+					lbl = fmt.Sprintf("Deep (%d%%)", pct)
+				}
+				tone := th.InkMuted
+				if bc.Modules.Glass {
+					tone = th.Info
+				}
+				if theme.ActionButton(c, "set-glass-opacity", lbl, tone, bc.Modules.Glass, th).Clicked() && bc.OnCycleGlassOpacity != nil {
+					bc.OnCycleGlassOpacity()
+				}
+			})
+			theme.FieldRow(c, "live-motion", "optional 120Hz spring gauges, hover lift & live clock (SPC t a)", th, func() {
+				lbl := "Static"
+				tone := th.InkMuted
+				if bc.Modules.Motion {
+					lbl = "120Hz Spring"
+					tone = th.Accent
+				}
+				if theme.ActionButton(c, "set-motion-tog", lbl, tone, bc.Modules.Motion, th).Clicked() && bc.OnToggleMotion != nil {
+					bc.OnToggleMotion()
+				}
+			})
+			theme.FieldRow(c, "zen-mode", "hide tabs, modeline & resting echo bar (SPC t z)", th, func() {
+				lbl := "Off"
+				tone := th.InkMuted
+				if bc.ZenMode {
+					lbl = "Active"
+					tone = th.Success
+				}
+				if theme.ActionButton(c, "set-zen-tog", lbl, tone, bc.ZenMode, th).Clicked() && bc.OnToggleZenMode != nil {
+					bc.OnToggleZenMode()
+				}
+			})
+			theme.FieldRow(c, "stylesheets", "~/.config/marlin/ui/{manifest.toml, theme.css, dashboard.sexp|toml, widgets/<id>/}", th, func() {
+				if theme.ActionButton(c, "set-reload-themes", "Reload UI & Widgets (SPC t r)", th.Accent, false, th).Clicked() && bc.OnReloadThemes != nil {
+					bc.OnReloadThemes()
 				}
 			})
 			theme.FieldRow(c, "active-session", "", th, func() {

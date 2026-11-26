@@ -7,6 +7,8 @@ package hydra
 import (
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/runtime/style"
+
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
@@ -19,12 +21,13 @@ func RenderPopup(c *ui.Context, body Body, th theme.Theme, onExit func()) {
 		return
 	}
 
-	ui.Column(c.Key("hydra-popup-"+body.ID)).Background(th.Bar).
-		BorderWidth(1, 0, 0, 0).BorderColor(th.Border).
+	bg := theme.GlassTone(c, th.Bar, th, 0.54, 0.72)
+	ui.Column(c.Key("hydra-popup-"+body.ID)).Background(bg).
+		BorderWidth(1, 0, 0, 0).BorderColor(theme.GlassTone(c, th.Border, th, 0.45, 0.55)).
 		Padding(10, 16).Gap(10).AlignItems(ui.Stretch).Children(func() {
 		// Hydra header bar: prefix + title + quit hint.
 		ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Row(c).Padding(2, 8).Radius(theme.RadiusSmall).Background(th.SurfaceElevated).Children(func() {
+			ui.Row(c).Padding(2, 8).Radius(theme.RadiusSmall).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.64)).Children(func() {
 				ui.Text(c, body.Prefix+"-").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(700).TextColor(th.Accent).NoWrap()
 			})
 			ui.Text(c, body.Title).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
@@ -58,11 +61,11 @@ func RenderPopup(c *ui.Context, body Body, th theme.Theme, onExit func()) {
 }
 
 func renderHeadRow(c *ui.Context, key string, h Head, th theme.Theme) ui.Element {
-	row := ui.ButtonBase(c.Key("hhead-"+key)).Label(h.Label).
+	row := ui.ButtonBase(c.Key("hhead-"+key)).Label(h.Label).KeepFocus().FocusRing(false).
 		Height(28).Padding(0, 8).Gap(8).Radius(theme.RadiusSmall).
 		AlignItems(ui.Center).Justify(ui.Start)
 	if row.Hovered() {
-		row.Background(th.SurfaceHover)
+		row.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.30, 0.48))
 	}
 
 	keyCol := th.Accent // blue/magenta exit head
@@ -76,10 +79,27 @@ func renderHeadRow(c *ui.Context, key string, h Head, th theme.Theme) ui.Element
 		labelCol = th.Info
 	}
 
+	keyClasses := []string{"hydra-key"}
+	if !h.Exit && !h.IsPrefix {
+		keyClasses = append(keyClasses, "repeatable")
+	} else if h.IsPrefix {
+		keyClasses = append(keyClasses, "prefix")
+	}
+	kcs := th.Sheet.Resolve(keyClasses, style.StateNone)
+	kWeight := 700
+	if kcs.HasFontWeight {
+		kWeight = kcs.FontWeight
+	}
+	if kcs.HasColor {
+		keyCol = kcs.Color
+	}
+
 	row.Children(func() {
-		ui.Row(c).Width(42).Padding(2, 6).Radius(theme.RadiusSmall).Background(th.SurfaceElevated).
-			Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, h.Key).Font(theme.FontMono).FontSize(12).FontWeight(700).TextColor(keyCol).NoWrap()
+		badge := ui.Row(c).Width(42).Padding(2, 6).Radius(theme.RadiusSmall).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.64)).
+			Justify(ui.Center).AlignItems(ui.Center)
+		kcs.ApplyToElement(badge)
+		badge.Children(func() {
+			ui.Text(c, h.Key).Font(theme.FontMono).FontSize(12).FontWeight(kWeight).TextColor(keyCol).NoWrap()
 		})
 		ui.Text(c, "→").Font(theme.FontMono).FontSize(12).TextColor(th.TabSeparator).NoWrap()
 		ui.Text(c, h.Label).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(labelCol).Grow(1).NoWrap().MaxLines(1)

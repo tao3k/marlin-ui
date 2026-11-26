@@ -17,7 +17,75 @@ import (
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 )
 
-var compiled []features.FeatureModule
+var (
+	compiled          []features.FeatureModule
+	roomStatsProvider func() RoomStats
+	roomTasksProvider func() []RoomTask
+	roomTaskAdder     func(title string) error
+	roomTaskCycler    func(id string) error
+)
+
+// RoomTask is a lightweight projection of one collaborative Agent Room matter
+// so the Bento *Dashboard* can list, add, and toggle real tasks directly.
+type RoomTask struct {
+	ID     string
+	Title  string
+	Status string // "OPEN" | "IN_PROGRESS" | "BLOCKED" | "DONE"
+	Owner  string
+}
+
+// RoomStats carries live Agent Room task and participant counts projected into
+// the Bento *Dashboard* (zero-safe when chatroom is pruned via marlin_minimal).
+type RoomStats struct {
+	TasksDone    int
+	TasksTotal   int
+	AgentsOnline int
+	AgentsTotal  int
+}
+
+// SetRoomStatsProvider registers an optional feature metrics provider.
+func SetRoomStatsProvider(fn func() RoomStats) {
+	roomStatsProvider = fn
+}
+
+// SetRoomTaskBridge registers optional real task CRUD hooks from Agent Room.
+func SetRoomTaskBridge(list func() []RoomTask, add func(string) error, cycle func(string) error) {
+	roomTasksProvider = list
+	roomTaskAdder = add
+	roomTaskCycler = cycle
+}
+
+// AgentRoomStats returns live Agent Room task & agent telemetry.
+func AgentRoomStats() RoomStats {
+	if roomStatsProvider != nil {
+		return roomStatsProvider()
+	}
+	return RoomStats{}
+}
+
+// AgentRoomTasks returns live collaborative tasks from Agent Room (empty under marlin_minimal).
+func AgentRoomTasks() []RoomTask {
+	if roomTasksProvider != nil {
+		return roomTasksProvider()
+	}
+	return nil
+}
+
+// AddAgentRoomTask creates a real task in the active Agent Room channel.
+func AddAgentRoomTask(title string) error {
+	if roomTaskAdder != nil {
+		return roomTaskAdder(title)
+	}
+	return nil
+}
+
+// CycleAgentRoomTask advances a task's real status (OPEN -> IN_PROGRESS -> DONE -> OPEN).
+func CycleAgentRoomTask(id string) error {
+	if roomTaskCycler != nil {
+		return roomTaskCycler(id)
+	}
+	return nil
+}
 
 // RegisterCompiled registers an opt-in FeatureModule linked via Go build tags.
 func RegisterCompiled(mod features.FeatureModule) {

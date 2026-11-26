@@ -12,7 +12,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
-func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items []Candidate) {
+func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items []Candidate, glass bool) {
 	s.mu.Lock()
 	sel := s.selected
 	s.mu.Unlock()
@@ -20,8 +20,12 @@ func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items 
 		sel = len(items) - 1
 	}
 	limit := min(len(items), 10)
-	ui.Column(c.Key("vertico-list")).Background(th.Bar).Padding(6, 8).Gap(2).
-		BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+	bg := th.Bar
+	if glass && c.Vibrancy() {
+		bg = theme.GlassTone(c, th.Bar, th, 0.52, 0.72)
+	}
+	ui.Column(c.Key("vertico-list")).Background(bg).Padding(6, 8).Gap(2).
+		BorderWidth(1, 0, 0, 0).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.40, 0.50)).AlignItems(ui.Stretch).Children(func() {
 		for i := 0; i < limit; i++ {
 			it := items[i]
 			if theme.VerticoRow(c, "vrow-"+it.ID, it.Name, it.Desc, query, 240, i == sel, th).Clicked() {

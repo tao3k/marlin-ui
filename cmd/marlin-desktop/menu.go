@@ -106,6 +106,10 @@ func buildDesktopMenu(fr *frame.Frame, invalidate func()) *mygo.Menu {
 			Label: "Buffers",
 			Submenu: []*mygo.MenuItem{
 				{
+					Label: "*Dashboard*",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.SelectBuffer(buffer.Dashboard); invalidate() },
+				},
+				{
 					Label: "*conversation*",
 					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.SelectBuffer(buffer.Conversation); invalidate() },
 				},
@@ -138,6 +142,22 @@ func buildDesktopMenu(fr *frame.Frame, invalidate func()) *mygo.Menu {
 					Label:       "Switch Theme (SPC t t)",
 					Accelerator: "CmdOrCtrl+Shift+T",
 					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.OpenThemeSwitch(); invalidate() },
+				},
+				{
+					Label: "Reload Theme CSS (SPC t r)",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ReloadThemes(); invalidate() },
+				},
+				{
+					Label: "Toggle Liquid Glass (SPC t v)",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleGlass(); invalidate() },
+				},
+				{
+					Label: "Toggle 120Hz Motion (SPC t a)",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleMotion(); invalidate() },
+				},
+				{
+					Label: "Toggle Zen Mode (SPC t z)",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleZenMode(); invalidate() },
 				},
 				mygo.Separator(),
 				{Role: mygo.RoleToggleFullScreen},

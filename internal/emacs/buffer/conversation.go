@@ -8,7 +8,9 @@ import (
 	"fmt"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
 
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
@@ -58,6 +60,7 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, roleText).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(roleTone).NoWrap()
 						if entry.Streaming {
+							kit.LoadingIndicator(c, 13, th.Info, false)
 							ui.Text(c, "working...").Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.Info).NoWrap()
 						}
 						if len(entry.Attachments) > 0 {
@@ -65,7 +68,16 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 								Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).NoWrap()
 						}
 					})
-					ui.Text(c, entry.Text).Font(theme.FontMono).FontSize(theme.FontSizeBody).LineHeight(1.5).TextColor(th.Ink)
+					if entry.Role == mygoshell.RoleAssistant {
+						mdOpts := &markdown.Options{WrapCode: true}
+						if entry.Streaming {
+							markdown.Stream(c.Key(fmt.Sprintf("conv-md-%d", i)), entry.Text, mdOpts)
+						} else {
+							markdown.View(c.Key(fmt.Sprintf("conv-md-%d", i)), entry.Text, mdOpts)
+						}
+					} else {
+						ui.Text(c, entry.Text).Font(theme.FontMono).FontSize(theme.FontSizeBody).LineHeight(1.5).TextColor(th.Ink)
+					}
 				})
 			}
 		})
@@ -116,7 +128,7 @@ func renderDoomDashboard(c *ui.Context, th theme.Theme, bc *Context) {
 					Height(30).Padding(0, 12).Gap(10).Radius(theme.RadiusControl).
 					AlignItems(ui.Center).Justify(ui.Start)
 				if row.Hovered() {
-					row.Background(th.SurfaceElevated)
+					row.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.52))
 				}
 				row.Children(func() {
 					ui.Text(c, item.icon).Font(theme.FontMono).FontSize(theme.FontSizeBody).TextColor(th.Info).Width(18).NoWrap()

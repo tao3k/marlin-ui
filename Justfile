@@ -77,6 +77,7 @@ check-file-size max_lines="1000":
 dev-desktop core="../.." tags="marlin_full":
     @BIN="{{core}}/target/debug/marlin-mygo-host"; \
     if [ ! -x "$BIN" ]; then BIN="{{core}}/target/release/marlin-app-server"; fi; \
+    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then export GOWORK="$(cd .. && pwd)/marlin-dev.work"; fi; \
     CGO_ENABLED=0 go run -tags "{{tags}}" ./cmd/marlin-desktop -app-server "$BIN"
 
 # DEV: Run live cross-process hostlink E2E test against a sibling marlin-agent-core Rust binary.

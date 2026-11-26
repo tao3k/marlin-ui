@@ -1,0 +1,323 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+# Default declarative SPC Doom Leader / Hydra keymap catalog for Marlin UI.
+# Users may customize or extend bindings in ~/.config/marlin/ui/keymaps.toml
+# and hot-reload live with SPC t r / M-x reload-theme.
+
+[[hydras]]
+prefix = "SPC"
+id = "leader"
+title = "Doom Leader / Hydra"
+
+[[heads]]
+prefix = "SPC"
+key = "SPC"
+label = "Execute command (M-x)"
+column = "Commands"
+exit = "true"
+action = "cmd:mx"
+
+[[heads]]
+prefix = "SPC"
+key = "x"
+label = "M-x command palette"
+column = "Commands"
+exit = "true"
+action = "cmd:mx"
+
+[[heads]]
+prefix = "SPC"
+key = "s"
+label = "Helm live search"
+column = "Commands"
+exit = "true"
+action = "cmd:helm"
+
+[[heads]]
+prefix = "SPC"
+key = "b"
+label = "+buffers"
+column = "Navigation"
+is_prefix = "true"
+action = "hydra:SPC b"
+
+[[heads]]
+prefix = "SPC"
+key = "t"
+label = "+themes & toggles"
+column = "Navigation"
+is_prefix = "true"
+action = "hydra:SPC t"
+
+[[heads]]
+prefix = "SPC"
+key = "m"
+label = "+marlin session"
+column = "Navigation"
+is_prefix = "true"
+action = "hydra:SPC m"
+
+[[heads]]
+prefix = "SPC"
+key = "i"
+label = "Compose message (Insert)"
+column = "System"
+exit = "true"
+action = "cmd:insert"
+
+[[heads]]
+prefix = "SPC"
+key = "h"
+label = "Documentation (*Help*)"
+column = "System"
+exit = "true"
+action = "buffer:*Help*"
+
+[[heads]]
+prefix = "SPC"
+key = ","
+label = "Private config (*Settings*)"
+column = "System"
+exit = "true"
+action = "buffer:*Settings*"
+
+[[hydras]]
+prefix = "SPC b"
+id = "buffers"
+title = "+buffers"
+
+[[heads]]
+prefix = "SPC b"
+key = "b"
+label = "Switch buffer (Vertico)"
+column = "Buffers"
+exit = "true"
+action = "cmd:switch-buffer"
+
+[[heads]]
+prefix = "SPC b"
+key = "d"
+label = "*Dashboard*"
+column = "Buffers"
+exit = "true"
+action = "buffer:*Dashboard*"
+
+[[heads]]
+prefix = "SPC b"
+key = "c"
+label = "*conversation*"
+column = "Buffers"
+exit = "true"
+action = "buffer:*conversation*"
+
+[[heads]]
+prefix = "SPC b"
+key = "s"
+label = "*Sessions*"
+column = "Buffers"
+exit = "true"
+action = "buffer:*Sessions*"
+
+[[heads]]
+prefix = "SPC b"
+key = "t"
+label = "*Targets*"
+column = "Runtime"
+exit = "true"
+action = "buffer:*Targets*"
+
+[[heads]]
+prefix = "SPC b"
+key = "p"
+label = "*Processes*"
+column = "Runtime"
+exit = "true"
+action = "buffer:*Processes*"
+
+[[heads]]
+prefix = "SPC b"
+key = "m"
+label = "*Models*"
+column = "Runtime"
+exit = "true"
+action = "buffer:*Models*"
+
+[[heads]]
+prefix = "SPC b"
+key = "l"
+label = "*Messages*"
+column = "Diagnostics"
+exit = "true"
+action = "buffer:*Messages*"
+
+[[heads]]
+prefix = "SPC b"
+key = "h"
+label = "*Help*"
+column = "Diagnostics"
+exit = "true"
+action = "buffer:*Help*"
+
+[[heads]]
+prefix = "SPC b"
+key = "q"
+label = "Quit hydra"
+column = "Diagnostics"
+exit = "true"
+action = ""
+
+[[hydras]]
+prefix = "SPC t"
+id = "themes"
+title = "+themes & toggles"
+
+[[heads]]
+prefix = "SPC t"
+key = "t"
+label = "Switch theme (Vertico)"
+column = "Themes"
+exit = "true"
+action = "cmd:switch-theme"
+
+[[heads]]
+prefix = "SPC t"
+key = "n"
+label = "Cycle next theme (repeat)"
+column = "Themes"
+exit = "false"
+action = "cmd:cycle-theme"
+
+[[heads]]
+prefix = "SPC t"
+key = "r"
+label = "Reload ~/.config/marlin/ui/"
+column = "Themes"
+exit = "true"
+action = "cmd:reload-theme"
+
+[[heads]]
+prefix = "SPC t"
+key = "1"
+label = "nord-bento"
+column = "Presets"
+exit = "false"
+action = "theme:nord-bento"
+
+[[heads]]
+prefix = "SPC t"
+key = "2"
+label = "doom-one"
+column = "Presets"
+exit = "false"
+action = "theme:doom-one"
+
+[[heads]]
+prefix = "SPC t"
+key = "3"
+label = "doom-tokyo-night"
+column = "Presets"
+exit = "false"
+action = "theme:doom-tokyo-night"
+
+[[heads]]
+prefix = "SPC t"
+key = "4"
+label = "doom-one-light"
+column = "Presets"
+exit = "false"
+action = "theme:doom-one-light"
+
+[[heads]]
+prefix = "SPC t"
+key = "v"
+label = "Toggle Liquid Glass"
+column = "Modules"
+exit = "false"
+action = "cmd:toggle-glass"
+
+[[heads]]
+prefix = "SPC t"
+key = "o"
+label = "Cycle Glass Opacity"
+column = "Modules"
+exit = "false"
+action = "cmd:cycle-glass-opacity"
+
+[[heads]]
+prefix = "SPC t"
+key = "a"
+label = "Toggle 120Hz Motion"
+column = "Modules"
+exit = "false"
+action = "cmd:toggle-motion"
+
+[[heads]]
+prefix = "SPC t"
+key = "z"
+label = "Toggle Zen Mode"
+column = "Modules"
+exit = "true"
+action = "cmd:zen-mode"
+
+[[heads]]
+prefix = "SPC t"
+key = "g"
+label = "Open *Targets*"
+column = "Modules"
+exit = "true"
+action = "buffer:*Targets*"
+
+[[heads]]
+prefix = "SPC t"
+key = "q"
+label = "Done"
+column = "Modules"
+exit = "true"
+action = ""
+
+[[hydras]]
+prefix = "SPC m"
+id = "session"
+title = "+marlin session"
+
+[[heads]]
+prefix = "SPC m"
+key = "n"
+label = "New session"
+column = "Session"
+exit = "true"
+action = "cmd:new-session"
+
+[[heads]]
+prefix = "SPC m"
+key = "i"
+label = "Enter INSERT prompt"
+column = "Session"
+exit = "true"
+action = "cmd:insert"
+
+[[heads]]
+prefix = "SPC m"
+key = "p"
+label = "Probe federation targets"
+column = "Federation"
+exit = "true"
+action = "cmd:probe-targets"
+
+[[heads]]
+prefix = "SPC m"
+key = ","
+label = "Open *Settings*"
+column = "Federation"
+exit = "true"
+action = "buffer:*Settings*"
+
+[[heads]]
+prefix = "SPC m"
+key = "q"
+label = "Quit hydra"
+column = "Federation"
+exit = "true"
+action = ""

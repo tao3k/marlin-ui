@@ -14,6 +14,7 @@ import (
 
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
+	"github.com/tao3k/marlin-mygo/runtime/widgets"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
@@ -24,6 +25,7 @@ import (
 type ID string
 
 const (
+	Dashboard    ID = "*Dashboard*"
 	Conversation ID = "*conversation*"
 	Sessions     ID = "*Sessions*"
 	Targets      ID = "*Targets*"
@@ -43,6 +45,7 @@ type Descriptor struct {
 // Catalog returns all built-in Emacs buffers in canonical order.
 func Catalog() []Descriptor {
 	return []Descriptor{
+		{ID: Dashboard, Description: "EWW Bento widget desktop dashboard"},
 		{ID: Conversation, Description: "Conversation buffer"},
 		{ID: Sessions, Description: "Recorded sessions table"},
 		{ID: Targets, Description: "Federation Rust gRPC targets table"},
@@ -75,11 +78,24 @@ type Context struct {
 	FeatureHost   *features.Host
 	ActiveModel   string
 	TableCursor   int
-	MessagesLog   []string
-	Customize     *CustomizeState
+	MessagesLog     []string
+	AvailableThemes []theme.Theme
+	DashboardNode   *widgets.Node
+	Signals         *widgets.Signals
+	WidgetRuntime   *widgets.Runtime
+	Modules         widgets.Modules
+	GlassOpacity    float32
+	ZenMode         bool
+	Customize       *CustomizeState
 
-	OnSelectBuffer     func(ID)
-	OnSetTheme         func(themeID string)
+	OnSelectBuffer      func(ID)
+	OnSetTheme          func(themeID string)
+	OnReloadThemes      func()
+	OnToggleGlass       func()
+	OnCycleGlassOpacity func()
+	OnToggleMotion      func()
+	OnToggleZenMode    func()
+	OnWidgetAction     func(action string)
 	OnOpenCommands     func()
 	OnOpenHelm         func()
 	OnOpenBufferSwitch func()
@@ -92,6 +108,8 @@ type Context struct {
 // Render dispatches rendering to the active buffer's major mode.
 func Render(c *ui.Context, id ID, th theme.Theme, bc *Context) {
 	switch id {
+	case Dashboard:
+		renderDashboard(c, th, bc)
 	case Sessions:
 		renderSessions(c, th, bc)
 	case Targets:

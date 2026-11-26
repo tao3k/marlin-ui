@@ -49,8 +49,8 @@ func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *myg
 		highlightQuery = strings.TrimSpace(right)
 	}
 
-	ui.Column(c.Key("helm-vertico-list")).Background(th.Bar).Padding(8, 12).Gap(8).
-		BorderWidth(1, 0, 0, 0).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+	ui.Column(c.Key("helm-vertico-list")).Background(theme.GlassTone(c, th.Bar, th, 0.52, 0.72)).Padding(8, 12).Gap(8).
+		BorderWidth(1, 0, 0, 0).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.40, 0.50)).AlignItems(ui.Stretch).Children(func() {
 		// 1. Source Filter Pills + Telemetry + Preview Toggle.
 		ui.Row(c.Key("helm-source-pills")).Gap(6).AlignItems(ui.Center).Children(func() {
 			allActive := activeFilter == ""
@@ -81,7 +81,7 @@ func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *myg
 			ui.Spacer(c)
 
 			if markedCount > 0 {
-				ui.Row(c).Padding(2, 8).Radius(theme.RadiusPill).Background(th.SurfaceElevated).Children(func() {
+				ui.Row(c).Padding(2, 8).Radius(theme.RadiusPill).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.44, 0.64)).Children(func() {
 					ui.Text(c, fmt.Sprintf("● %d marked", markedCount)).
 						Font(theme.FontMono).FontSize(11.5).FontWeight(700).TextColor(th.Warning).NoWrap()
 				})
@@ -145,10 +145,10 @@ func renderHelm(c *ui.Context, s *State, th theme.Theme, query string, helm *myg
 			// Right column: Follow-Mode Live Preview + Embark Action Strip.
 			if previewOpen && hasSel {
 				ui.Column(c.Key("helm-preview-col")).Grow(2).MinWidth(260).
-					Background(th.Canvas).Radius(theme.RadiusControl).
+					Background(theme.GlassTone(c, th.Canvas, th, 0.44, 0.64)).Radius(theme.RadiusControl).
 					Padding(12, 14).Gap(8).AlignItems(ui.Stretch).Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-						ui.Row(c).Padding(2, 7).Radius(theme.RadiusSmall).Background(th.SurfaceElevated).Children(func() {
+						ui.Row(c).Padding(2, 7).Radius(theme.RadiusSmall).Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.44, 0.64)).Children(func() {
 							ui.Text(c, selCand.SourceID).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).NoWrap()
 						})
 						ui.Text(c, prevTitle).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).

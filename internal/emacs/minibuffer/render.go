@@ -11,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/engine/search"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
@@ -21,8 +22,10 @@ import (
 // RenderProps wires the Emacs Minibuffer & Hydra popup area to its Frame providers.
 type RenderProps struct {
 	State       *State
-	Theme       theme.Theme
-	KeyMode     meow.Mode
+	Theme        theme.Theme
+	Glass        bool
+	GlassOpacity float32
+	KeyMode      meow.Mode
 	Keypad      string
 	ActiveHydra *hydra.Body
 	Helm        *mygoshell.HelmMinibufferController
@@ -47,7 +50,16 @@ func Render(c *ui.Context, p RenderProps) {
 	s := p.State
 	mode, val, sel, focusNow, echo := s.snapshot()
 
-	ui.Column(c.Key("doom-minibuffer")).Background(th.Canvas).AlignItems(ui.Stretch).Children(func() {
+	rowBg := th.Canvas
+	if p.Glass && c.Vibrancy() {
+		a := p.GlassOpacity
+		if a <= 0 {
+			a = 0.18
+		}
+		rowBg = kit.WithAlpha(th.Canvas, a)
+	}
+
+	ui.Column(c.Key("doom-minibuffer")).Background(ui.Transparent).AlignItems(ui.Stretch).Children(func() {
 		// 1. Expandable multi-column Doom Hydra / Which-Key drawer when SPC leader is active.
 		if p.Keypad != "" && p.ActiveHydra != nil {
 			hydra.RenderPopup(c, *p.ActiveHydra, th, p.OnExitHydra)
@@ -62,23 +74,23 @@ func Render(c *ui.Context, p RenderProps) {
 			if p.CommandCandidates != nil {
 				items = p.CommandCandidates(val)
 			}
-			renderVertico(c, s, th, val, items)
+			renderVertico(c, s, th, val, items, p.Glass)
 		case ModeBufferSwitch:
 			if p.BufferCandidates != nil {
 				items = p.BufferCandidates(val)
 			}
-			renderVertico(c, s, th, val, items)
+			renderVertico(c, s, th, val, items, p.Glass)
 		case ModeThemeSwitch:
 			if p.ThemeCandidates != nil {
 				items = p.ThemeCandidates(val)
 			}
-			renderVertico(c, s, th, val, items)
+			renderVertico(c, s, th, val, items, p.Glass)
 		}
 
 		// 3. Echo Area when SPC Keypad/Hydra is active.
 		if p.Keypad != "" {
 			ui.Row(c.Key("keypad-echo")).Height(theme.MinibufferHeight).Padding(0, 14).Gap(10).
-				AlignItems(ui.Center).Background(th.Canvas).Children(func() {
+				AlignItems(ui.Center).Background(rowBg).Children(func() {
 				ui.Text(c, p.Keypad+"-").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Accent).NoWrap()
 				ui.Text(c, meow.KeypadHints(p.Keypad)).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).Grow(1).NoWrap().MaxLines(1)
 			})
@@ -88,7 +100,7 @@ func Render(c *ui.Context, p RenderProps) {
 		// 3b. Authentic Emacs y-or-n-p approval prompt inside Minibuffer when requested.
 		if mode == ModeGateReview {
 			ui.Row(c.Key("mini-gate-yorn")).Height(theme.MinibufferHeight).Padding(0, 14).Gap(10).
-				AlignItems(ui.Center).Background(th.Canvas).Children(func() {
+				AlignItems(ui.Center).Background(rowBg).Children(func() {
 				ui.Text(c, "Approve (y or n):").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Warning).NoWrap()
 				msg := p.GatePrompt
 				if p.GateTitle != "" && msg != "" {
@@ -138,7 +150,7 @@ func Render(c *ui.Context, p RenderProps) {
 		}
 
 		ui.Row(c.Key("mini-editor-row")).Height(theme.MinibufferHeight).Padding(0, 14).Gap(6).
-			AlignItems(ui.Center).Background(th.Canvas).Children(func() {
+			AlignItems(ui.Center).Background(rowBg).Children(func() {
 			if mode == ModePrompt && p.KeyMode == meow.ModeNormal {
 				// Quiet authentic Emacs Echo Area; clicking enters INSERT mode immediately.
 				echoLabel := echo
@@ -147,11 +159,11 @@ func Render(c *ui.Context, p RenderProps) {
 					echoLabel = "SPC leader · i message"
 					echoCol = th.BannerInk
 				}
-				bar := ui.ButtonBase(c.Key("echo-enter-insert")).Label(echoLabel).
+				bar := ui.ButtonBase(c.Key("echo-enter-insert")).Label(echoLabel).KeepFocus().FocusRing(false).
 					Grow(1).Height(theme.MinibufferHeight - 4).Padding(0, 4).Radius(theme.RadiusSmall).
 					AlignItems(ui.Center).Justify(ui.Start)
 				if bar.Hovered() {
-					bar.Background(th.SurfaceElevated)
+					bar.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.52))
 				}
 				bar.Children(func() {
 					ui.Text(c, echoLabel).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(echoCol).NoWrap().MaxLines(1)

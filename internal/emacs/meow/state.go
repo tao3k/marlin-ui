@@ -89,9 +89,9 @@ func (s *State) ClearKeypad() {
 func KeypadHints(prefix string) string {
 	switch prefix {
 	case "SPC b":
-		return "b switch-buffer · c *conversation* · s *Sessions* · t *Targets* · C-g cancel"
+		return "b switch-buffer · d *Dashboard* · c *conversation* · s *Sessions* · t *Targets* · C-g cancel"
 	case "SPC t":
-		return "t switch-themes · 1 doom-one · 2 pi · 3 doom-paper · n cycle · C-g cancel"
+		return "t switch-themes · z zen-mode · r reload ui · 1 nord-bento · 2 doom-one · 3 tokyo · 4 light · C-g cancel"
 	case "SPC m":
 		return "n new-session · p probe-targets · , settings · i insert · C-g cancel"
 	default:

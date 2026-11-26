@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+# Default declarative M-x command catalog for Marlin UI.
+# Users may override or extend commands via ~/.config/marlin/ui/commands.toml
+# and hot-reload live with SPC t r / M-x reload-theme.
+
+[[commands]]
+name = "helm"
+desc = "Open interactive 120Hz Helm search (SPC s)"
+action = "cmd:helm"
+
+[[commands]]
+name = "switch-buffer"
+desc = "Switch active Emacs buffer (SPC b b)"
+action = "cmd:switch-buffer"
+
+[[commands]]
+name = "dashboard"
+desc = "Open *Dashboard* EWW Bento widget desktop (SPC b d)"
+action = "buffer:*Dashboard*"
+
+[[commands]]
+name = "toggle-glass"
+desc = "Hot-plug Liquid Glass GPU surface via marlin-mygo/features (SPC t v)"
+action = "cmd:toggle-glass"
+
+[[commands]]
+name = "cycle-glass-opacity"
+desc = "Cycle frosted glass opacity preset Clear/Balanced/Frosted/Deep (SPC t o)"
+action = "cmd:cycle-glass-opacity"
+
+[[commands]]
+name = "toggle-motion"
+desc = "Hot-plug 120Hz Spring Motion via marlin-mygo/features (SPC t a)"
+action = "cmd:toggle-motion"
+
+[[commands]]
+name = "zen-mode"
+desc = "Toggle immersive Zen Mode (hide tabs & modeline, SPC t z)"
+action = "cmd:zen-mode"
+
+[[commands]]
+name = "switch-themes"
+desc = "Switch CSS theme pack (SPC t t)"
+action = "cmd:switch-theme"
+
+[[commands]]
+name = "reload-theme"
+desc = "Reload ~/.config/marlin/ui/ themes, CSS, keymaps & widgets (SPC t r)"
+action = "cmd:reload-theme"
+
+[[commands]]
+name = "init-ui-config"
+desc = "Scaffold starter ~/.config/marlin/ui/{manifest.toml, tokens.json}"
+action = "cmd:init-ui-config"
+
+[[commands]]
+name = "sessions"
+desc = "Open *Sessions* recorded conversations"
+action = "buffer:*Sessions*"
+
+[[commands]]
+name = "targets"
+desc = "Open *Targets* federation gRPC hosts"
+action = "buffer:*Targets*"
+
+[[commands]]
+name = "models"
+desc = "Open *Models* configured model routes"
+action = "buffer:*Models*"
+
+[[commands]]
+name = "list-processes"
+desc = "Open *Processes* managed runtime processes"
+action = "buffer:*Processes*"
+
+[[commands]]
+name = "messages"
+desc = "Open *Messages* UI diagnostics log"
+action = "buffer:*Messages*"
+
+[[commands]]
+name = "help"
+desc = "Open *Help* Meow & Doom keybindings"
+action = "buffer:*Help*"
+
+[[commands]]
+name = "settings"
+desc = "Open *Settings* customize & hot-pluggable modules buffer"
+action = "buffer:*Settings*"
+
+[[commands]]
+name = "new-session"
+desc = "Create and switch to a fresh session"
+action = "cmd:new-session"
+
+[[commands]]
+name = "probe-targets"
+desc = "Probe all registered Rust federation targets"
+action = "cmd:probe-targets"
+
+[[commands]]
+name = "review-gate"
+desc = "Review pending approval gate in Minibuffer (y or n)"
+action = "cmd:review-gate"
+
+[[commands]]
+name = "open-workflow-canvas"
+desc = "Open *Workflow Canvas* Hybrid GPU + Sandboxed WebView BPMN Studio"
+action = "feature:webisland"

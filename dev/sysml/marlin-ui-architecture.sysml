@@ -43,14 +43,19 @@ package MarlinUIArchitecture {
             doc /* External supplier github.com/tao3k/marlin-mygo: provides
                    headless TranscriptController, 120Hz HelmSearch engine,
                    PromptGate queue, ProjectionController, AuthManager,
-                   WorkbenchController (marlin.ui.v1), and gRPC clients.
-                   Does not own marlin-ui desktop visual styling or layout. */
+                   WorkbenchController (marlin.ui.v1), declarative Scheme
+                   UIElement mapper (runtime/mapper), governed pure-Go CSS-subset
+                   stylesheet engine (runtime/style), framework-level GPU design
+                   kit (runtime/kit: overflow-safe primitives, iOS 26 Liquid Glass,
+                   SF Symbols, Kage GPU shaders, ui/chart), declarative Bento
+                   widget framework (runtime/widgets), and gRPC clients. */
         }
 
         part <'MUI-ARCH-A04'> appConfigBoundary {
             doc /* internal/appconfig: typed CLI config, build version ldflags,
-                   and atomic 0600 UserPrefs persistence. Zero dev token
-                   fallbacks and zero hardcoded sibling repository paths. */
+                   atomic 0600 UserPrefs persistence, and governed ~/.config/marlin/ui/
+                   stylesheet bundle loader (manifest.toml, themes/<id>/, theme.css).
+                   Zero dev token fallbacks and zero hardcoded sibling repository paths. */
         }
 
         part <'MUI-ARCH-A05'> featureKitBoundary {

@@ -71,8 +71,26 @@ func (b Body) GroupColumns() []ColumnGroup {
 
 // MatchKey checks whether any head in the Hydra body matches the current frame's keypress.
 func (b Body) MatchKey(c *ui.Context) (Head, bool) {
+	return b.MatchKeyInScope(c, ui.Element{})
+}
+
+// MatchKeyInScope checks whether any head in the Hydra body matches the current
+// frame's keypress, claiming keys on scope so no focused descendant button can
+// hijack Space/keys while a Hydra menu is active.
+func (b Body) MatchKeyInScope(c *ui.Context, scope ui.Element) (Head, bool) {
+	if c == nil || c.FocusTakesText() {
+		return Head{}, false
+	}
 	for _, h := range b.Heads {
-		if h.KeyCode != 0 && c.Shortcut(0, h.KeyCode) {
+		if h.KeyCode == 0 {
+			continue
+		}
+		scoped := false
+		if scope != (ui.Element{}) {
+			scoped = scope.Shortcut(0, h.KeyCode)
+		}
+		global := c.Shortcut(0, h.KeyCode)
+		if scoped || global {
 			return h, true
 		}
 	}
