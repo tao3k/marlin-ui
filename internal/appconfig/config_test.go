@@ -83,3 +83,27 @@ func TestPrefsAtomicRoundTripAndUpsertRemote(t *testing.T) {
 		t.Fatalf("unexpected BuildSummary: %q", sum)
 	}
 }
+
+func TestSettingsSchemaValidationAndApplyValues(t *testing.T) {
+	spec := appconfig.SettingsSchema()
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("SettingsSchema invalid: %v", err)
+	}
+	cfg := appconfig.DefaultConfig()
+	prefs := appconfig.UserPrefs{SidebarCollapsed: true, DefaultRemoteHost: "core.internal:50051"}
+	vals := appconfig.InitialSettingsValues(cfg, prefs)
+	if err := spec.ValidateValues(vals); err != nil {
+		t.Fatalf("InitialSettingsValues failed schema validation: %v", err)
+	}
+	vals["theme_id"] = "catppuccin"
+	vals["features_spec"] = "all"
+	vals["default_session"] = "marlin-prod"
+	vals["remote_host"] = "edge.marlin.dev:50051"
+	vals["real_session"] = false
+	vals["sidebar_collapsed"] = false
+	appconfig.ApplySettingsValues(&prefs, vals)
+	if prefs.ThemeID != "catppuccin" || prefs.FeaturesSpec != "all" || prefs.LastSessionID != "marlin-prod" ||
+		prefs.DefaultRemoteHost != "edge.marlin.dev:50051" || prefs.SidebarCollapsed || prefs.RealSession == nil || *prefs.RealSession {
+		t.Fatalf("unexpected applied prefs: %+v", prefs)
+	}
+}

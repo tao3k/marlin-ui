@@ -39,6 +39,22 @@ func buildDesktopMenu(
 				},
 				mygo.Separator(),
 				{
+					Label:       "Settings...",
+					Accelerator: "CmdOrCtrl+,",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
+						app.OpenSettings()
+						invalidate()
+					},
+				},
+				{
+					Label: "Account & Authorization...",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) {
+						app.OpenSettingsTab(mygoshell.SettingsTabAuth)
+						invalidate()
+					},
+				},
+				mygo.Separator(),
+				{
 					Label:       "Command Palette",
 					Accelerator: "CmdOrCtrl+K",
 					Click: func(_ *mygo.MenuItem, _ *mygo.Window) {

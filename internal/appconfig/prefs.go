@@ -22,11 +22,13 @@ type SavedRemote struct {
 // UserPrefs stores non-secret local UI preferences persisted atomically across
 // Desktop and Mobile launches.
 type UserPrefs struct {
-	ThemeID          string        `json:"theme_id,omitempty"`
-	FeaturesSpec     string        `json:"features_spec,omitempty"`
-	SidebarCollapsed bool          `json:"sidebar_collapsed,omitempty"`
-	LastSessionID    string        `json:"last_session_id,omitempty"`
-	SavedRemotes     []SavedRemote `json:"saved_remotes,omitempty"`
+	ThemeID           string        `json:"theme_id,omitempty"`
+	FeaturesSpec      string        `json:"features_spec,omitempty"`
+	SidebarCollapsed  bool          `json:"sidebar_collapsed,omitempty"`
+	LastSessionID     string        `json:"last_session_id,omitempty"`
+	DefaultRemoteHost string        `json:"default_remote_host,omitempty"`
+	RealSession       *bool         `json:"real_session,omitempty"`
+	SavedRemotes      []SavedRemote `json:"saved_remotes,omitempty"`
 }
 
 // LoadPrefs reads persisted UI preferences if present. Missing files return a

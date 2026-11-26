@@ -11,13 +11,17 @@ package main
 
 import (
 	"log"
+	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/control/auth"
 	"github.com/tao3k/marlin-mygo/engine/composer"
+	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
+	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 )
 
@@ -42,7 +46,44 @@ func main() {
 			winRef.Invalidate()
 		}
 	}
-	featurekit.Mount("all", adaptive, continuity.onDraftChanged, invalidate)
+	reg, ledger, host := featurekit.Mount("all", adaptive, continuity.onDraftChanged, invalidate)
+
+	// Bind Tier-0 Settings & ephemeral Web Auth Center so Web WASM shares the
+	// same bottom-left Settings & Authorization dock as Desktop and Mobile.
+	webMgr := auth.NewManager(auth.ManagerConfig{Vault: auth.NewMemoryVault()})
+	_ = webMgr.RegisterProvider(auth.GitHubOAuthProvider("marlin-web-github"))
+	_ = webMgr.RegisterProvider(auth.GoogleOAuthProvider("marlin-web-google"))
+	_ = webMgr.RegisterProvider(auth.EmailOTPProvider())
+	webAuth := mygoshell.NewAuthController(webMgr)
+	webAuth.VaultInfo = auth.VaultSecurityInfo{
+		BackendName: "Web Session Memory Vault",
+		CipherSuite: "AES-256-GCM",
+	}
+	webAuth.OnChanged = invalidate
+	adaptive.SetAuth(webAuth)
+
+	spec := appconfig.SettingsSchema()
+	formState := mygoshell.NewSchemaFormState(spec, map[string]any{
+		"theme_id":          "midnight",
+		"features_spec":     "all",
+		"default_session":   "marlin-web-main",
+		"remote_host":       "",
+		"real_session":      true,
+		"sidebar_collapsed": false,
+	})
+	adaptive.SetSettings(&spec, formState, func(vals map[string]any) {
+		if themeID, ok := vals["theme_id"].(string); ok && strings.TrimSpace(themeID) != "" {
+			adaptive.ApplyThemePreset(strings.TrimSpace(themeID))
+		}
+		if collapsed, ok := vals["sidebar_collapsed"].(bool); ok {
+			adaptive.Desktop.SidebarCollapsed = collapsed
+		}
+		if feat, ok := vals["features_spec"].(string); ok && strings.TrimSpace(feat) != "" {
+			reg.Activate(features.ParseFeatureSpec(strings.TrimSpace(feat)), ledger, host)
+			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+		}
+		invalidate()
+	})
 
 	adaptive.Desktop.Transcript.OnSubmitTurn = func(sub composer.TurnSubmission) {
 		refs := make([]composer.AttachmentRef, 0, len(sub.Attachments))

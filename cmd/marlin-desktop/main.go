@@ -21,6 +21,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/engine/composer"
+	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
@@ -80,6 +81,12 @@ func main() {
 	}
 	if !explicitFlags["session"] && prefs.LastSessionID != "" {
 		cfg.SessionID = prefs.LastSessionID
+	}
+	if !explicitFlags["host"] && cfg.HostAddr == "" && prefs.DefaultRemoteHost != "" {
+		cfg.HostAddr = prefs.DefaultRemoteHost
+	}
+	if !explicitFlags["real-session"] && prefs.RealSession != nil {
+		cfg.RealSession = *prefs.RealSession
 	}
 
 	mygo.App.SetName("Marlin")
@@ -185,7 +192,22 @@ func main() {
 		if connErr != nil {
 			log.Fatalf("marlin-desktop host connection failed: %v", connErr)
 		}
-		featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
+		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
+		hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
+			Config: cfg,
+			Prefs:  prefs,
+			OnApplyFeatures: func(spec string) {
+				reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
+				adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+			},
+			OnSavePrefs: func(vals map[string]any) {
+				prefsMu.Lock()
+				appconfig.ApplySettingsValues(&prefs, vals)
+				prefsMu.Unlock()
+				savePrefs()
+			},
+			Invalidate: invalidate,
+		})
 
 		// Persist theme cycles triggered from the in-app chrome as well as OS menu.
 		prevCycle := adaptive.Desktop.OnCycleTheme

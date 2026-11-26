@@ -144,6 +144,50 @@ func TestHostLinkMultiSessionHelmAndMultimodalSubmit(t *testing.T) {
 	}
 }
 
+func TestAttachAuthAndSettingsWiresBothDesktopAndMobile(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	as := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle:     "Marlin",
+		InitialThemeID: "midnight",
+	})
+	var appliedFeatures string
+	var savedPrefs map[string]any
+	authCtrl := hostlink.AttachAuthAndSettings(ctx, as, hostlink.AuthSettingsConfig{
+		Config:          appconfig.DefaultConfig(),
+		Prefs:           appconfig.UserPrefs{},
+		UseMemoryVault:  true,
+		OnApplyFeatures: func(spec string) { appliedFeatures = spec },
+		OnSavePrefs:     func(vals map[string]any) { savedPrefs = vals },
+	})
+	if authCtrl == nil || as.Desktop.Auth == nil || as.Mobile.Auth == nil {
+		t.Fatalf("expected AuthController bound to Desktop and Mobile")
+	}
+	if as.Desktop.SettingsSchema == nil || as.Desktop.SettingsState == nil || as.Mobile.SettingsSchema == nil {
+		t.Fatalf("expected BoundedSchema Settings bound to Desktop and Mobile")
+	}
+	as.Desktop.OpenSettings()
+	if !as.Desktop.IsSettingsOpen() || as.Desktop.ActiveSettingsTab() != mygoshell.SettingsTabGeneral {
+		t.Fatalf("expected Settings open on General tab")
+	}
+	as.Desktop.OpenSettingsTab(mygoshell.SettingsTabAuth)
+	if as.Desktop.ActiveSettingsTab() != mygoshell.SettingsTabAuth {
+		t.Fatalf("expected Settings switched to Auth tab")
+	}
+	as.Desktop.OnSaveSettings(map[string]any{
+		"theme_id":          "tokyo-night",
+		"features_spec":     "all",
+		"default_session":   "marlin-main",
+		"remote_host":       "remote.marlin.dev:50051",
+		"real_session":      true,
+		"sidebar_collapsed": true,
+	})
+	if appliedFeatures != "all" || savedPrefs == nil || !as.Desktop.IsSidebarCollapsed() {
+		t.Fatalf("expected live settings save applied (feat=%q, collapsed=%v, saved=%v)", appliedFeatures, as.Desktop.IsSidebarCollapsed(), savedPrefs != nil)
+	}
+}
+
 func TestHostLinkLiveRustAppServerGRPCConnection(t *testing.T) {
 	binPath := strings.TrimSpace(os.Getenv("MARLIN_APP_SERVER_BIN"))
 	if binPath == "" {
