@@ -7,6 +7,7 @@ package appconfig_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
@@ -24,14 +25,61 @@ func TestBearerHeaderNormalization(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigNeverHardcodesDevToken(t *testing.T) {
+	t.Setenv("MARLIN_TOKEN", "")
+	cfg := appconfig.DefaultConfig()
+	if cfg.AuthToken != "" {
+		t.Fatalf("expected empty default AuthToken when MARLIN_TOKEN unset, got %q", cfg.AuthToken)
+	}
+}
+
 func TestDiscoverAppServerBinaryExplicitExecutable(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "marlin-mygo-host")
+	bin := filepath.Join(dir, "marlin-app-server")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	got, src := appconfig.DiscoverAppServerBinary(bin)
 	if got != bin || src != "flag" {
 		t.Fatalf("expected (%q, flag), got (%q, %q)", bin, got, src)
+	}
+}
+
+func TestPrefsAtomicRoundTripAndUpsertRemote(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "nested", "ui-prefs.json")
+
+	// Missing file returns zero prefs without error.
+	empty, err := appconfig.LoadPrefs(p)
+	if err != nil {
+		t.Fatalf("LoadPrefs missing: %v", err)
+	}
+	if empty.ThemeID != "" || len(empty.SavedRemotes) != 0 {
+		t.Fatalf("expected empty prefs, got %+v", empty)
+	}
+
+	in := appconfig.UserPrefs{
+		ThemeID:          "tokyo-night",
+		FeaturesSpec:     "all",
+		SidebarCollapsed: true,
+		LastSessionID:    "marlin-work",
+	}
+	in.UpsertRemote(appconfig.SavedRemote{ID: "edge-1", DisplayName: "Edge GPU", Endpoint: "edge.internal:50051"})
+	in.UpsertRemote(appconfig.SavedRemote{ID: "edge-1", DisplayName: "Edge GPU Primary", Endpoint: "edge.internal:50051"})
+
+	if err := appconfig.SavePrefs(p, in); err != nil {
+		t.Fatalf("SavePrefs: %v", err)
+	}
+	out, err := appconfig.LoadPrefs(p)
+	if err != nil {
+		t.Fatalf("LoadPrefs: %v", err)
+	}
+	if out.ThemeID != "tokyo-night" || !out.SidebarCollapsed || out.LastSessionID != "marlin-work" {
+		t.Fatalf("unexpected prefs round-trip: %+v", out)
+	}
+	if len(out.SavedRemotes) != 1 || out.SavedRemotes[0].DisplayName != "Edge GPU Primary" {
+		t.Fatalf("expected single upserted remote, got %+v", out.SavedRemotes)
+	}
+	if sum := appconfig.BuildSummary("marlin-desktop"); !strings.Contains(sum, "marlin-desktop") {
+		t.Fatalf("unexpected BuildSummary: %q", sum)
 	}
 }

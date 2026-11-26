@@ -25,6 +25,7 @@ type Config struct {
 	FeaturesSpec   string
 	TursoPath      string
 	RecoveryFile   string
+	PrefsFile      string
 	Standalone     bool
 	RealSession    bool
 	MobilePlatform string // "ios" | "android"
@@ -38,18 +39,18 @@ func DefaultConfig() Config {
 	if recPath == "" && home != "" {
 		recPath = filepath.Join(home, ".config", "marlin", "recovery-state.json")
 	}
+	prefsPath := strings.TrimSpace(os.Getenv("MARLIN_PREFS_FILE"))
+	if prefsPath == "" && home != "" {
+		prefsPath = filepath.Join(home, ".config", "marlin", "ui-prefs.json")
+	}
 	turso := strings.TrimSpace(os.Getenv("MARLIN_TURSO_PATH"))
 	if turso == "" && home != "" {
 		turso = filepath.Join(home, ".local", "share", "marlin", "session.turso")
 	}
-	tok := strings.TrimSpace(os.Getenv("MARLIN_TOKEN"))
-	if tok == "" {
-		tok = "marlin-dev-token"
-	}
 	return Config{
 		AppServerBin:   strings.TrimSpace(os.Getenv("MARLIN_APP_SERVER_BIN")),
 		HostAddr:       strings.TrimSpace(os.Getenv("MARLIN_HOST")),
-		AuthToken:      tok,
+		AuthToken:      strings.TrimSpace(os.Getenv("MARLIN_TOKEN")),
 		TLSCAFile:      strings.TrimSpace(os.Getenv("MARLIN_TLS_CA")),
 		TLSCertFile:    strings.TrimSpace(os.Getenv("MARLIN_TLS_CERT")),
 		TLSKeyFile:     strings.TrimSpace(os.Getenv("MARLIN_TLS_KEY")),
@@ -58,6 +59,7 @@ func DefaultConfig() Config {
 		FeaturesSpec:   "default",
 		TursoPath:      turso,
 		RecoveryFile:   recPath,
+		PrefsFile:      prefsPath,
 		RealSession:    true,
 		MobilePlatform: "ios",
 	}

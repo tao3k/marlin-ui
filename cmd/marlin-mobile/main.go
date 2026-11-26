@@ -16,6 +16,7 @@ import (
 	"log"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -30,6 +31,8 @@ import (
 
 func main() {
 	cfg := appconfig.DefaultConfig()
+	showVersion := false
+	flag.BoolVar(&showVersion, "version", false, "print build version and exit")
 	flag.StringVar(&cfg.MobilePlatform, "platform", cfg.MobilePlatform, "mobile platform profile: ios | android")
 	flag.StringVar(&cfg.MobileDevice, "device", cfg.MobileDevice, "optional viewport preset: iphone16 | iphone-se | pixel9")
 	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial theme preset: midnight | paper | doom-one | tokyo-night | catppuccin")
@@ -42,8 +45,24 @@ func main() {
 	flag.StringVar(&cfg.TLSKeyFile, "key", cfg.TLSKeyFile, "optional mTLS client private key PEM file")
 	flag.StringVar(&cfg.SessionID, "session", "marlin-mobile", "Marlin session ID")
 	flag.StringVar(&cfg.RecoveryFile, "recovery-file", cfg.RecoveryFile, "atomic fsync crash-recovery snapshot file")
+	flag.StringVar(&cfg.PrefsFile, "prefs-file", cfg.PrefsFile, "atomic local UI preferences JSON file")
 	flag.BoolVar(&cfg.Standalone, "standalone", cfg.Standalone, "run standalone mobile preview without connecting to Rust host")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Println(appconfig.BuildSummary("marlin-mobile"))
+		return
+	}
+
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+	prefs, _ := appconfig.LoadPrefs(cfg.PrefsFile)
+	if !explicitFlags["theme"] && prefs.ThemeID != "" {
+		cfg.ThemeID = prefs.ThemeID
+	}
+
+	mygo.App.SetName("Marlin Mobile")
+	mygo.App.SetVersion(appconfig.Version)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -75,7 +94,24 @@ func main() {
 		},
 	})
 
-	var link *hostlink.Link
+	var (
+		prefsMu sync.Mutex
+		link    *hostlink.Link
+	)
+	savePrefs := func() {
+		prefsMu.Lock()
+		snap := prefs
+		prefsMu.Unlock()
+		_ = appconfig.SavePrefs(cfg.PrefsFile, snap)
+	}
+	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
+		savePrefs()
+		if link != nil {
+			link.SaveNow()
+			link.Close()
+		}
+	})
+
 	mygo.App.WhenReady(func() {
 		var win *mygo.Window
 		invalidate := func() {
@@ -85,7 +121,19 @@ func main() {
 		}
 
 		var err error
-		link, err = hostlink.Connect(ctx, cfg, adaptive, targetKind, invalidate)
+		link, err = hostlink.Connect(
+			ctx,
+			cfg,
+			adaptive,
+			targetKind,
+			invalidate,
+			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
+				prefsMu.Lock()
+				prefs.UpsertRemote(r)
+				prefsMu.Unlock()
+				savePrefs()
+			}),
+		)
 		if err != nil {
 			log.Fatalf("marlin-mobile host connection failed: %v", err)
 		}
@@ -108,6 +156,7 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+	savePrefs()
 	if link != nil {
 		link.Close()
 	}

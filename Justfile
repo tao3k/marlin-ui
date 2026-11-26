@@ -2,6 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
 
+version := `git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev`
+commit := `git rev-parse --short HEAD 2>/dev/null || echo local`
+build_date := `date -u +%Y-%m-%dT%H:%M:%SZ`
+ldflags := "-s -w -X github.com/tao3k/marlin-ui/internal/appconfig.Version=" + version + " -X github.com/tao3k/marlin-ui/internal/appconfig.Commit=" + commit + " -X github.com/tao3k/marlin-ui/internal/appconfig.BuildDate=" + build_date
+
 default:
     @just --list
 
@@ -13,17 +18,30 @@ test:
 # Build native Desktop release binary (default: core + chatroom; override tags with marlin_minimal or marlin_full).
 build-desktop tags="" out="./dist/marlin-desktop":
     mkdir -p $(dirname {{out}})
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -tags "{{tags}}" -o {{out}} ./cmd/marlin-desktop
+    CGO_ENABLED=0 go build -trimpath -ldflags="{{ldflags}}" -tags "{{tags}}" -o {{out}} ./cmd/marlin-desktop
+
+# Package a self-contained macOS Marlin.app bundle (optionally co-locating a signed marlin-app-server sidecar via app_server_bin=...).
+package-macos-app tags="marlin_full" out="./dist/Marlin.app" app_server_bin="":
+    rm -rf "{{out}}"
+    mkdir -p "{{out}}/Contents/MacOS" "{{out}}/Contents/Resources"
+    CGO_ENABLED=0 go build -trimpath -ldflags="{{ldflags}}" -tags "{{tags}}" -o "{{out}}/Contents/MacOS/marlin-desktop" ./cmd/marlin-desktop
+    sed "s/__VERSION__/{{version}}/g" packaging/macos/Info.plist.tmpl > "{{out}}/Contents/Info.plist"
+    @if [ -n "{{app_server_bin}}" ]; then \
+        cp "{{app_server_bin}}" "{{out}}/Contents/MacOS/marlin-app-server"; \
+        chmod 0755 "{{out}}/Contents/MacOS/marlin-app-server"; \
+        echo "Bundled sidecar marlin-app-server into {{out}}/Contents/MacOS/"; \
+    fi
+    @echo "Packaged macOS app bundle at {{out}}"
 
 # Build Mobile Companion target binary (iOS HIG / Android Material 3).
 build-mobile tags="" out="./dist/marlin-mobile":
     mkdir -p $(dirname {{out}})
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -tags "{{tags}}" -o {{out}} ./cmd/marlin-mobile
+    CGO_ENABLED=0 go build -trimpath -ldflags="{{ldflags}}" -tags "{{tags}}" -o {{out}} ./cmd/marlin-mobile
 
 # Build WebAssembly static bundle (dist/web/marlin-web.wasm + index.html + wasm_exec.js).
 build-web tags="" dir="./dist/web":
     mkdir -p {{dir}}
-    GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -tags "{{tags}}" -o {{dir}}/marlin-web.wasm ./cmd/marlin-web
+    GOOS=js GOARCH=wasm CGO_ENABLED=0 go build -trimpath -ldflags="{{ldflags}}" -tags "{{tags}}" -o {{dir}}/marlin-web.wasm ./cmd/marlin-web
     cp cmd/marlin-web/index.html {{dir}}/index.html
     cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" {{dir}}/wasm_exec.js 2>/dev/null || cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" {{dir}}/wasm_exec.js
 

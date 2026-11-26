@@ -43,12 +43,24 @@ jobs:
       - name: Build Desktop & Mobile Companion Binaries (CGO_ENABLED=0)
         run: |
           mkdir -p dist
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="${GITHUB_SHA::7}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X github.com/tao3k/marlin-ui/internal/appconfig.Version=${VERSION} -X github.com/tao3k/marlin-ui/internal/appconfig.Commit=${COMMIT} -X github.com/tao3k/marlin-ui/internal/appconfig.BuildDate=${BUILD_DATE}"
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
-            go build -trimpath -ldflags="-s -w" -tags marlin_full \
+            go build -trimpath -ldflags="${LDFLAGS}" -tags marlin_full \
             -o "dist/marlin-desktop-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" ./cmd/marlin-desktop
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
-            go build -trimpath -ldflags="-s -w" -tags marlin_full \
+            go build -trimpath -ldflags="${LDFLAGS}" -tags marlin_full \
             -o "dist/marlin-mobile-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" ./cmd/marlin-mobile
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            APP="dist/Marlin-${{ matrix.goos }}-${{ matrix.goarch }}.app"
+            mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+            cp "dist/marlin-desktop-${{ matrix.goos }}-${{ matrix.goarch }}" "${APP}/Contents/MacOS/marlin-desktop"
+            sed "s/__VERSION__/${VERSION}/g" packaging/macos/Info.plist.tmpl > "${APP}/Contents/Info.plist"
+            tar -czf "dist/Marlin-macOS-${{ matrix.goarch }}.app.tar.gz" -C dist "Marlin-${{ matrix.goos }}-${{ matrix.goarch }}.app"
+            rm -rf "${APP}"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}

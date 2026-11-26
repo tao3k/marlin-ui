@@ -84,6 +84,8 @@ type ConnectOption func(*connectOptions)
 
 type connectOptions struct {
 	enableDesktopMyGoAdapters bool
+	onRemoteAdded             func(appconfig.SavedRemote)
+	onSessionChanged          func(sessionID string)
 }
 
 // WithDesktopMyGoAdapters registers MyGo's native OS clipboard and desktop
@@ -94,6 +96,21 @@ type connectOptions struct {
 func WithDesktopMyGoAdapters() ConnectOption {
 	return func(o *connectOptions) {
 		o.enableDesktopMyGoAdapters = true
+	}
+}
+
+// WithOnRemoteAdded notifies the caller when the user adds a new remote gRPC
+// endpoint via the Federation Cockpit so non-secret endpoints can be persisted.
+func WithOnRemoteAdded(fn func(appconfig.SavedRemote)) ConnectOption {
+	return func(o *connectOptions) {
+		o.onRemoteAdded = fn
+	}
+}
+
+// WithOnSessionChanged notifies the caller whenever the active session changes.
+func WithOnSessionChanged(fn func(sessionID string)) ConnectOption {
+	return func(o *connectOptions) {
+		o.onSessionChanged = fn
 	}
 }
 
@@ -325,6 +342,14 @@ func Connect(
 		stopProj   func()
 		usedTokens atomic.Int64
 	)
+	sr := &sessionRuntime{
+		activeSessionID:  cfg.SessionID,
+		openedSessions:   make(map[string]bool),
+		saveNow:          saveNow,
+		scheduleSave:     scheduleSave,
+		onSessionChanged: copts.onSessionChanged,
+		onRemoteAdded:    copts.onRemoteAdded,
+	}
 	recordTokens := func(txt string) {
 		if transcript == nil {
 			return
@@ -400,38 +425,45 @@ func Connect(
 
 		turnCtrl := grpcwire.NewTurnStreamControllerWithProvider(switcher)
 		link.TurnCtrl = turnCtrl
+		sr.turnCtrl = turnCtrl
+		sr.composerBridge = grpcwire.NewComposerBridge(turnCtrl, nil)
 
 		var (
 			turnMu    sync.Mutex
-			sessionUp bool
-			lastTurn  uint64
+			lastTurn  = make(map[string]uint64)
 			activeRef *appv1.SessionTurnRef
 			subSeq    atomic.Uint64
 		)
-		app.OnSendPrompt = func(prompt string) {
-			if strings.TrimSpace(prompt) == "" {
+		sendLive := func(displayPrompt, wirePrompt string, refs []composer.AttachmentRef) {
+			if strings.TrimSpace(wirePrompt) == "" {
 				return
 			}
-			transcript.AppendUser(prompt)
-			recordTokens(prompt)
+			if len(refs) > 0 {
+				transcript.AppendUserWithAttachments(displayPrompt, refs)
+			} else {
+				transcript.AppendUser(displayPrompt)
+			}
+			recordTokens(wirePrompt)
 			markDirty()
+			sid := sr.currentSession()
+			curScope := "chat:" + sid
 			go func() {
 				turnMu.Lock()
-				if !sessionUp {
-					if _, err := turnCtrl.OpenSession(linkCtx, cfg.SessionID, true); err != nil {
-						_, _ = turnCtrl.OpenSession(linkCtx, cfg.SessionID, false)
+				if !sr.openedSessions[sid] {
+					if _, err := turnCtrl.OpenSession(linkCtx, sid, true); err != nil {
+						_, _ = turnCtrl.OpenSession(linkCtx, sid, false)
 					}
-					sessionUp = true
+					sr.openedSessions[sid] = true
 				}
-				after := lastTurn
+				after := lastTurn[sid]
 				subID := fmt.Sprintf("marlin-ui-sub-%d", subSeq.Add(1))
 				turnMu.Unlock()
 
-				ref, err := turnCtrl.StartTurn(linkCtx, cfg.SessionID, prompt, after, subID)
+				ref, err := turnCtrl.StartTurn(linkCtx, sid, wirePrompt, after, subID)
 				if err != nil {
 					if transcript.Resilience != nil {
 						transcript.Resilience.MarkOffline(err.Error())
-						_, _ = transcript.Resilience.Outbox.Enqueue(scope, "user", "", prompt)
+						_, _ = transcript.Resilience.Outbox.Enqueue(curScope, "user", "", wirePrompt)
 						if transcript.OnRetryOutbox != nil {
 							transcript.OnRetryOutbox()
 						}
@@ -455,7 +487,7 @@ func Connect(
 					MaxRetries:     8,
 					OnReconnect: func(attempt int, afterEventID string, rErr error) {
 						if transcript.Resilience != nil {
-							transcript.Resilience.MarkReconnecting(scope, attempt, afterEventID, rErr)
+							transcript.Resilience.MarkReconnecting(curScope, attempt, afterEventID, rErr)
 							markDirty()
 						}
 					},
@@ -463,7 +495,7 @@ func Connect(
 					if transcript.Resilience != nil {
 						transcript.Resilience.MarkOnline()
 						if upd.EventID != "" {
-							if dup, _ := transcript.Resilience.AdmitEvent(scope, upd.EventID, upd.TurnOrdinal, 0); dup {
+							if dup, _ := transcript.Resilience.AdmitEvent(curScope, upd.EventID, upd.TurnOrdinal, 0); dup {
 								return
 							}
 						}
@@ -487,14 +519,16 @@ func Connect(
 					markDirty()
 				} else if outcome == appv1.SessionTurnOutcome_SESSION_TURN_OUTCOME_COMPLETED {
 					turnMu.Lock()
-					if ref.GetOrdinal() > lastTurn {
-						lastTurn = ref.GetOrdinal()
+					if ref.GetOrdinal() > lastTurn[sid] {
+						lastTurn[sid] = ref.GetOrdinal()
 					}
 					activeRef = nil
 					turnMu.Unlock()
 				}
 			}()
 		}
+		sr.sendPromptRaw = sendLive
+		app.OnSendPrompt = func(prompt string) { sendLive(prompt, prompt, nil) }
 		app.OnCancelTurn = func() {
 			turnMu.Lock()
 			ref := activeRef
@@ -509,19 +543,25 @@ func Connect(
 		}
 	} else {
 		var demoTurn atomic.Uint64
-		app.OnSendPrompt = func(prompt string) {
-			if strings.TrimSpace(prompt) == "" {
+		sendPreview := func(displayPrompt, wirePrompt string, refs []composer.AttachmentRef) {
+			if strings.TrimSpace(wirePrompt) == "" {
 				return
 			}
-			transcript.AppendUser(prompt)
+			if len(refs) > 0 {
+				transcript.AppendUserWithAttachments(displayPrompt, refs)
+			} else {
+				transcript.AppendUser(displayPrompt)
+			}
 			ord := demoTurn.Add(1)
 			transcript.BeginAssistantTurn(ord)
-			reply := fmt.Sprintf("[standalone preview] Received %q — start marlin-app-server or pass -host <addr> to connect live gRPC.", prompt)
+			reply := fmt.Sprintf("[standalone preview · %s] Received %q — start marlin-app-server or pass -host <addr> to connect live gRPC.", sr.currentSession(), wirePrompt)
 			transcript.ApplyCheckpoint(ord, fmt.Sprintf("preview-%d", ord), reply)
 			transcript.CompleteTurn(ord, "PREVIEW_OK")
-			recordTokens(prompt + reply)
+			recordTokens(wirePrompt + reply)
 			markDirty()
 		}
+		sr.sendPromptRaw = sendPreview
+		app.OnSendPrompt = func(prompt string) { sendPreview(prompt, prompt, nil) }
 	}
 
 	if adaptive.Mobile != nil {
@@ -531,13 +571,7 @@ func Connect(
 			}
 		}
 	}
-	if transcript != nil {
-		transcript.OnSubmitTurn = func(sub composer.TurnSubmission) {
-			if app.OnSendPrompt != nil {
-				app.OnSendPrompt(sub.Prompt)
-			}
-		}
-	}
+	wireSessionAndHelm(linkCtx, cfg, adaptive, targets, federation, switcher, sr, markDirty)
 
 	// 5. Start ContinuityCoordinator for exponential-backoff reconnect & idempotent outbox draining.
 	if transcript != nil && transcript.Resilience != nil {
@@ -586,6 +620,7 @@ func Connect(
 		if closeTarget != nil {
 			closeTarget()
 		}
+		sr.closeExtras()
 		coalescer.Close()
 	}
 

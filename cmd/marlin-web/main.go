@@ -32,6 +32,8 @@ func main() {
 	adaptive.Desktop.Sessions = []mygoshell.SessionSummaryView{
 		{SessionID: "marlin-web-main", Title: "Web Session", TurnCount: 0},
 	}
+	_ = adaptive.Desktop.EnableEmacsWindowKeymap()
+	mygoshell.BindDefaultHelmSources(adaptive.Desktop, nil)
 
 	continuity := initWebContinuity(adaptive)
 	var winRef *mygo.Window

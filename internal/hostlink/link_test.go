@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tao3k/marlin-mygo/engine/composer"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
@@ -59,6 +60,87 @@ func TestHostLinkStandaloneContinuityAndDraftRecovery(t *testing.T) {
 	as2.Desktop.OnSendPrompt("Hello Marlin UI")
 	if as2.Desktop.Transcript.Len() < 2 {
 		t.Fatalf("expected user + preview turn appended, len=%d", as2.Desktop.Transcript.Len())
+	}
+}
+
+func TestHostLinkMultiSessionHelmAndMultimodalSubmit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cfg := appconfig.Config{
+		SessionID:    "marlin-alpha",
+		ThemeID:      "midnight",
+		RecoveryFile: filepath.Join(t.TempDir(), "multi-session-recovery.json"),
+		Standalone:   true,
+	}
+	as := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{BrandTitle: "Marlin UI"})
+	var switched []string
+	link, err := hostlink.Connect(
+		ctx,
+		cfg,
+		as,
+		schema.TargetDesktopMacOS,
+		nil,
+		hostlink.WithOnSessionChanged(func(sid string) { switched = append(switched, sid) }),
+	)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer link.Close()
+
+	// 1. Draft isolation across session creation & switching.
+	as.Desktop.Transcript.SetComposerText("Draft in alpha session")
+	if as.Desktop.OnNewSession == nil {
+		t.Fatalf("expected OnNewSession wired")
+	}
+	as.Desktop.OnNewSession()
+	betaID := as.Desktop.ActiveSessionID
+	if betaID == "" || betaID == "marlin-alpha" {
+		t.Fatalf("expected new session ID, got %q", betaID)
+	}
+	as.Desktop.Transcript.SetComposerText("Draft in beta session")
+	as.Desktop.OnSelectSession("marlin-alpha")
+	if got := as.Desktop.Transcript.ComposerText(); got != "Draft in alpha session" {
+		t.Fatalf("expected restored alpha draft, got %q", got)
+	}
+	as.Desktop.OnSelectSession(betaID)
+	if got := as.Desktop.Transcript.ComposerText(); got != "Draft in beta session" {
+		t.Fatalf("expected restored beta draft, got %q", got)
+	}
+	if len(switched) < 3 {
+		t.Fatalf("expected session-change callbacks, got %v", switched)
+	}
+
+	// 2. Live multi-source Helm search streams sessions.
+	if as.Desktop.HelmSearch == nil || as.Desktop.HelmSearch.Engine == nil {
+		t.Fatalf("expected HelmSearch initialized")
+	}
+	as.Desktop.HelmSearch.SetQuery("alpha")
+	totalHits, _, _, _ := as.Desktop.HelmSearch.Engine.Stats()
+	if totalHits == 0 {
+		t.Fatalf("expected HelmSearch to admit live session candidate for query 'alpha'")
+	}
+
+	// 3. Multimodal composer submission preserves attachments.
+	before := as.Desktop.Transcript.Len()
+	as.Desktop.Transcript.OnSubmitTurn(composer.TurnSubmission{
+		Prompt: "Inspect attached log",
+		Attachments: []composer.StagedAttachment{
+			{
+				Ref: composer.AttachmentRef{
+					ID:       "att-1",
+					Name:     "trace.log",
+					MIMEType: "text/plain",
+					ByteSize: 128,
+				},
+			},
+		},
+	})
+	if as.Desktop.Transcript.Len() < before+2 {
+		t.Fatalf("expected user+assistant rows after multimodal submit, got %d", as.Desktop.Transcript.Len())
+	}
+	if entry, ok := as.Desktop.Transcript.Entry(before); !ok || len(entry.Attachments) != 1 || entry.Attachments[0].Name != "trace.log" {
+		t.Fatalf("expected attachment preserved on transcript entry, got %+v", entry.Attachments)
 	}
 }
 
