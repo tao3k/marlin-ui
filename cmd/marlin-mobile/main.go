@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -28,12 +29,16 @@ import (
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
+	"github.com/tao3k/marlin-ui/internal/mobile"
+	"github.com/tao3k/marlin-ui/internal/mobile/android"
+	"github.com/tao3k/marlin-ui/internal/mobile/ios"
 )
 
 func main() {
 	cfg := appconfig.DefaultConfig()
 	showVersion := false
 	flag.BoolVar(&showVersion, "version", false, "print build version and exit")
+	flag.StringVar(&cfg.ConfigFile, "config", cfg.ConfigFile, "Marlin model & host TOML config file (e.g. ./example.toml or ~/.config/marlin/config.toml)")
 	flag.StringVar(&cfg.MobilePlatform, "platform", cfg.MobilePlatform, "mobile platform profile: ios | android")
 	flag.StringVar(&cfg.MobileDevice, "device", cfg.MobileDevice, "optional viewport preset: iphone16 | iphone-se | pixel9")
 	flag.StringVar(&cfg.ThemeID, "theme", cfg.ThemeID, "initial theme preset: midnight | paper | doom-one | tokyo-night | catppuccin")
@@ -48,6 +53,7 @@ func main() {
 	flag.StringVar(&cfg.RecoveryFile, "recovery-file", cfg.RecoveryFile, "atomic fsync crash-recovery snapshot file")
 	flag.StringVar(&cfg.PrefsFile, "prefs-file", cfg.PrefsFile, "atomic local UI preferences JSON file")
 	flag.BoolVar(&cfg.Standalone, "standalone", cfg.Standalone, "run standalone mobile preview without connecting to Rust host")
+	flag.BoolVar(&cfg.RealSession, "real-session", cfg.RealSession, "enable durable ConversationJournal streaming on local Rust sidecar")
 	flag.Parse()
 
 	if showVersion {
@@ -57,9 +63,61 @@ func main() {
 
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+
+	appconfig.LoadDotEnv(cfg.ConfigFile)
+	cfg.ModelCfg = appconfig.LoadModelConfig(cfg.ConfigFile)
+	if cfg.ModelCfg.Warning != "" {
+		log.Printf("model config warning: %s", cfg.ModelCfg.Warning)
+	} else if cfg.ModelCfg.Loaded {
+		cfg.ConfigFile = cfg.ModelCfg.SourcePath
+		if !explicitFlags["host"] && cfg.HostAddr == "" && cfg.ModelCfg.Host.Addr != "" {
+			cfg.HostAddr = cfg.ModelCfg.Host.Addr
+		}
+		if !explicitFlags["app-server"] && cfg.AppServerBin == "" && cfg.ModelCfg.Host.AppServerBin != "" {
+			cfg.AppServerBin = cfg.ModelCfg.Host.AppServerBin
+		}
+		if !explicitFlags["session"] && cfg.ModelCfg.Session.Session != "" {
+			cfg.SessionID = cfg.ModelCfg.Session.Session
+		}
+		if !explicitFlags["real-session"] && cfg.ModelCfg.Host.RealSession != nil {
+			cfg.RealSession = *cfg.ModelCfg.Host.RealSession
+		}
+		log.Printf("loaded model config %s (%s): %s", cfg.ModelCfg.SourcePath, cfg.ModelCfg.SourceOrigin, cfg.ModelCfg.SummaryLabel())
+	}
+
+	// On native iOS / Android devices, allow environment injection (e.g. from Xcode / simctl).
+	if !explicitFlags["host"] && cfg.HostAddr == "" {
+		if v := strings.TrimSpace(os.Getenv("MARLIN_HOST")); v != "" {
+			cfg.HostAddr = v
+		}
+	}
+	if !explicitFlags["token"] && cfg.AuthToken == "" {
+		if v := strings.TrimSpace(os.Getenv("MARLIN_TOKEN")); v != "" {
+			cfg.AuthToken = v
+		}
+	}
+	if !explicitFlags["session"] {
+		if v := strings.TrimSpace(os.Getenv("MARLIN_SESSION")); v != "" {
+			cfg.SessionID = v
+		}
+	}
+	if runtime.GOOS == "ios" || runtime.GOOS == "android" {
+		// Native mobile OS sandboxes never spawn a local macOS/Linux sidecar binary.
+		cfg.AppServerBin = ""
+		if cfg.HostAddr == "" {
+			cfg.Standalone = true
+		}
+	}
+
 	prefs, _ := appconfig.LoadPrefs(cfg.PrefsFile)
-	if !explicitFlags["theme"] && prefs.ThemeID != "" {
-		cfg.ThemeID = prefs.ThemeID
+	themeDir := appconfig.DefaultUIThemeDir()
+	themeBundle := appconfig.LoadUIThemeBundle(themeDir)
+	if !explicitFlags["theme"] {
+		if prefs.ThemeID != "" {
+			cfg.ThemeID = prefs.ThemeID
+		} else if themeBundle.Manifest.ActiveTheme != "" {
+			cfg.ThemeID = themeBundle.Manifest.ActiveTheme
+		}
 	}
 
 	mygo.App.SetName("Marlin Mobile")
@@ -114,10 +172,19 @@ func main() {
 	})
 
 	mygo.App.WhenReady(func() {
-		var win *mygo.Window
+		var (
+			win     *mygo.Window
+			tabWins []*mygo.Window
+			tabBar  *mygo.Tabs
+		)
 		invalidate := func() {
 			if win != nil {
 				win.Invalidate()
+			}
+			for _, w := range tabWins {
+				if w != nil {
+					w.Invalidate()
+				}
 			}
 		}
 
@@ -165,16 +232,109 @@ func main() {
 		}
 		adaptive.Mobile.TargetLabel = fmt.Sprintf("%s · %s", spec.Name, link.Endpoint)
 
-		win = mygo.NewWindow(mygo.WindowOptions{
-			Title:     fmt.Sprintf("Marlin Mobile — %s", spec.Name),
-			Width:     spec.LogicalWidth,
-			Height:    spec.LogicalHeight,
-			MinWidth:  spec.LogicalWidth,
-			MinHeight: spec.LogicalHeight,
-			MaxWidth:  spec.LogicalWidth,
-			MaxHeight: spec.LogicalHeight,
-			Content:   ui.View(adaptive.View),
+		// On iOS (both native GOOS=ios Swift UIKit host and macOS Apple HIG dev preview),
+		// mount Marlin's flagship Desktop-parity Liquid Glass iOS 26 shell under internal/mobile/ios.
+		if plat == mygoshell.MobilePlatformIOS {
+			isNativeIOS := runtime.GOOS == "ios"
+			iosShell := ios.New(ios.Config{
+				Adaptive:       adaptive,
+				Link:           link,
+				AppConfig:      cfg,
+				Prefs:          prefs,
+				ThemeBundle:    themeBundle,
+				InitialThemeID: cfg.ThemeID,
+				NativeTabBar:   isNativeIOS,
+				OnPrefsChanged: func(next appconfig.UserPrefs) {
+					prefsMu.Lock()
+					prefs = next
+					prefsMu.Unlock()
+					savePrefs()
+				},
+				OnBadgeChanged: func(tabIdx int, badge string) {
+					if tabBar != nil {
+						tabBar.SetBadge(tabIdx, badge)
+					}
+				},
+				Invalidate: invalidate,
+			})
+
+			if isNativeIOS {
+				// Native Swift UITabBarController + SF Symbols (automatic iOS 26 Liquid Glass tab bar!).
+				items := make([]mygo.TabItem, 0, len(mobile.Tabs))
+				for _, ts := range mobile.Tabs {
+					tw := mygo.NewWindow(mygo.WindowOptions{
+						Title:   ts.Title,
+						Hidden:  true,
+						Content: ui.View(iosShell.TabView(ts.Tab)),
+					})
+					tabWins = append(tabWins, tw)
+					items = append(items, mygo.TabItem{
+						Title:  ts.Title,
+						Symbol: ts.Symbol,
+						Window: tw,
+					})
+				}
+				if tb, tbErr := mygo.NewTabs(items...); tbErr == nil {
+					tabBar = tb
+					tb.OnSelect(func(idx int) {
+						if idx >= 0 && idx < len(mobile.Tabs) {
+							iosShell.SelectTab(mobile.Tabs[idx].Tab)
+						}
+					})
+					invalidate()
+					return
+				}
+			}
+
+			// macOS Apple HIG iPhone 16 Pro dev window with native macOS 26 NSGlassEffectView
+			// regular frosted Liquid Glass (blurs busy background terminals cleanly).
+			win = mygo.NewWindow(mygo.WindowOptions{
+				Title:         fmt.Sprintf("Marlin iOS — %s", spec.Name),
+				Width:         spec.LogicalWidth,
+				Height:        spec.LogicalHeight,
+				MinWidth:      spec.LogicalWidth,
+				MinHeight:     spec.LogicalHeight,
+				MaxWidth:      spec.LogicalWidth,
+				MaxHeight:     spec.LogicalHeight,
+				TitleBarStyle: mygo.TitleBarHiddenInset,
+				Transparent:   true,
+				Vibrancy:      mygo.VibrancyGlass,
+				Content:       ui.View(iosShell.View),
+			})
+			win.SetActiveAppearance(true)
+			win.Invalidate()
+			return
+		}
+
+		// Android Material 3 companion shell under internal/mobile/android.
+		androidShell := android.New(android.Config{
+			Adaptive:       adaptive,
+			Link:           link,
+			AppConfig:      cfg,
+			Prefs:          prefs,
+			ThemeBundle:    themeBundle,
+			InitialThemeID: cfg.ThemeID,
+			OnPrefsChanged: func(next appconfig.UserPrefs) {
+				prefsMu.Lock()
+				prefs = next
+				prefsMu.Unlock()
+				savePrefs()
+			},
+			Invalidate: invalidate,
 		})
+		winOpts := mygo.WindowOptions{
+			Title:   fmt.Sprintf("Marlin Android — %s", spec.Name),
+			Width:   spec.LogicalWidth,
+			Height:  spec.LogicalHeight,
+			Content: ui.View(androidShell.View),
+		}
+		if runtime.GOOS != "ios" && runtime.GOOS != "android" {
+			winOpts.MinWidth = spec.LogicalWidth
+			winOpts.MinHeight = spec.LogicalHeight
+			winOpts.MaxWidth = spec.LogicalWidth
+			winOpts.MaxHeight = spec.LogicalHeight
+		}
+		win = mygo.NewWindow(winOpts)
 		win.Invalidate()
 	})
 

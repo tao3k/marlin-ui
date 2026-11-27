@@ -13,6 +13,7 @@ package tabs
 import (
 	"fmt"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/runtime/kit"
@@ -73,11 +74,11 @@ func Render(c *ui.Context, p Props) {
 	var borderBottom ui.Color
 	hasBottomBorder := false
 	if p.Glass && c.Vibrancy() {
-		a := p.GlassOpacity
-		if a <= 0 {
-			a = 0.18
+		if p.GlassOpacity > 0 {
+			barBg = kit.WithAlpha(th.Bar, p.GlassOpacity)
+		} else {
+			barBg = ui.Transparent
 		}
-		barBg = kit.WithAlpha(th.Bar, a)
 		borderBottom = kit.WithAlpha(ui.RGB(255, 255, 255), 0.08)
 		hasBottomBorder = true
 	}
@@ -181,8 +182,9 @@ func Render(c *ui.Context, p Props) {
 }
 
 func renderTab(c *ui.Context, key, label string, active bool, th theme.Theme) ui.Element {
-	btn := kit.ActionControl(ui.ButtonBase(c.Key(key)).Label(label).
-		Padding(3, 10).Radius(theme.RadiusSmall).AlignItems(ui.Center).Justify(ui.Center))
+	btn := kit.ActionControl(ui.Button(c.Key(key), "").Label(label).
+		Padding(4, 11).Radius(theme.RadiusSmall+2).AlignItems(ui.Center).Justify(ui.Center).
+		Background(ui.Transparent).Border(0, ui.Transparent))
 
 	classes := []string{"tab"}
 	if active {
@@ -199,21 +201,28 @@ func renderTab(c *ui.Context, key, label string, active bool, th theme.Theme) ui
 
 	bg := ui.Transparent
 	ink := th.TabInactiveFg
-	weight := 400
+	weight := 500
 	fontSize := theme.FontSizeUI
 	if active {
-		bg = theme.GlassTone(c, th.TabActiveBg, th, 0.42, 0.66)
 		ink = th.TabActiveFg
-		weight = 700
+		weight = 600
 		if c.Vibrancy() {
-			btn.Border(1, kit.WithAlpha(th.Ink, 0.14))
+			lensTint := kit.WithAlpha(ui.RGB(255, 255, 255), 0.12)
+			rim := kit.WithAlpha(ui.RGB(255, 255, 255), 0.20)
+			if th.IsLight {
+				lensTint = kit.WithAlpha(ui.RGB(0, 0, 0), 0.06)
+				rim = kit.WithAlpha(ui.RGB(0, 0, 0), 0.10)
+			}
+			btn.Material(glass.Glass{Style: glass.Clear, Tint: lensTint, Interactive: true})
+			btn.Border(1, rim)
+		} else {
+			bg = th.TabActiveBg
+			btn.Background(bg).Border(1, kit.WithAlpha(th.Accent, 0.30))
 		}
 	} else if btn.Hovered() {
-		bg = theme.GlassTone(c, th.SurfaceHover, th, 0.28, 0.46)
+		bg = theme.GlassTone(c, th.SurfaceHover, th, 0.30, 0.48)
 		ink = th.Ink
-	}
-	if cs.HasBackground {
-		bg = cs.Background
+		btn.Background(bg)
 	}
 	if cs.HasColor {
 		ink = cs.Color
@@ -224,13 +233,9 @@ func renderTab(c *ui.Context, key, label string, active bool, th theme.Theme) ui
 	if cs.HasFontSize {
 		fontSize = cs.FontSize
 	}
-	btn.Background(bg)
-	cs.ApplyToElement(btn)
-	if !cs.HasBackground {
-		btn.Background(bg)
-	}
 	btn.Children(func() {
-		ui.Text(c, label).Font(kit.FontDisplay).FontSize(fontSize).FontWeight(weight).TextColor(ink).NoWrap()
+		ui.Text(c, label).Font(kit.FontDisplay).FontSize(fontSize).FontWeight(weight).TextColor(ink).
+			SingleLine().Ellipsis("…").MinWidth(0).Clip()
 	})
 	return btn
 }

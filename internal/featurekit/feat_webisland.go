@@ -68,18 +68,18 @@ var (
 	lastArtifactScript string
 	webIslandOpacity  = kit.DefaultGlassOpacity
 	webIslandPalette  = kit.Palette{
-		Canvas:  ui.Hex("#1e222a"),
-		Bar:     ui.Hex("#191d24"),
-		Surface: ui.Hex("#2b303c"),
-		Hover:   ui.Hex("#353c4b"),
-		Border:  ui.Hex("#3d4556"),
-		Ink:     ui.Hex("#e5e9f0"),
-		Muted:   ui.Hex("#8c96a8"),
-		Accent:  ui.Hex("#d48ab8"),
-		Info:    ui.Hex("#88c0d0"),
-		Success: ui.Hex("#a3be8c"),
-		Warning: ui.Hex("#ebcb8b"),
-		Danger:  ui.Hex("#e06c75"),
+		Canvas:  ui.Hex("#282c34"),
+		Bar:     ui.Hex("#21242b"),
+		Surface: ui.Hex("#2d333f"),
+		Hover:   ui.Hex("#363d4c"),
+		Border:  ui.Hex("#424959"),
+		Ink:     ui.Hex("#d5dce6"),
+		Muted:   ui.Hex("#8b94a6"),
+		Accent:  ui.Hex("#51afef"),
+		Info:    ui.Hex("#46d9ff"),
+		Success: ui.Hex("#98be65"),
+		Warning: ui.Hex("#ecbe7b"),
+		Danger:  ui.Hex("#ff6c6b"),
 	}
 )
 
@@ -352,7 +352,7 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		html = kit.WorkflowStudioHTML(pal)
 	} else if islandID == BuiltinArtifactStageIslandID {
 		tier = async.TrustTier2Untrusted
-		html = kit.ArtifactStageHTML(pal)
+		html = appleGeistArtifactStageHTML(pal)
 	} else {
 		webIslandMu.Lock()
 		delete(webViewPending, islandID)

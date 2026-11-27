@@ -23,8 +23,8 @@ func SettingsSchema() schema.BoundedSchema {
 				Label:      "Theme Preset",
 				Kind:       schema.FieldEnum,
 				Required:   true,
-				EnumValues: []string{"nord-bento", "doom-one", "doom-tokyo-night", "doom-one-light"},
-				Default:    "nord-bento",
+				EnumValues: []string{"doom-one", "doom-tokyo-night", "nord-bento", "doom-one-light"},
+				Default:    "doom-one",
 			},
 			{
 				Key:        "features_spec",
@@ -71,9 +71,11 @@ func SettingsSchema() schema.BoundedSchema {
 func InitialSettingsValues(cfg Config, prefs UserPrefs) map[string]any {
 	theme := strings.TrimSpace(cfg.ThemeID)
 	switch theme {
-	case "nord-bento", "doom-one", "doom-tokyo-night", "doom-one-light":
+	case "doom-one", "doom-tokyo-night", "nord-bento", "doom-one-light":
+	case "tokyo-night", "tokyo":
+		theme = "doom-tokyo-night"
 	default:
-		theme = "nord-bento"
+		theme = "doom-one"
 	}
 	feat := normalizeFeaturesPreset(cfg.FeaturesSpec)
 	sess := strings.TrimSpace(cfg.SessionID)

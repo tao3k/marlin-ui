@@ -273,11 +273,15 @@ func (f *Frame) Close() {
 }
 
 func effectiveSurfaceFromSnap(snap frameSnapshot) (glassOp, chromeOp, viewportOp float32, vibrancy string) {
+	defaults := appconfig.DefaultSurfaceConfig()
 	root := snap.SurfaceCfg
 	pack := snap.ThemeSurfaces[snap.Theme.ID]
 	runtimeOp := snap.UIModules.GlassOpacity
 
 	glassOp = kit.ResolveGlassOpacity(kit.SurfaceOptions{}, snap.Theme.Sheet)
+	if defaults.GlassOpacity != nil {
+		glassOp = *defaults.GlassOpacity
+	}
 	if pack.GlassOpacity != nil {
 		glassOp = *pack.GlassOpacity
 	}
@@ -288,7 +292,9 @@ func effectiveSurfaceFromSnap(snap frameSnapshot) (glassOp, chromeOp, viewportOp
 		glassOp = runtimeOp
 	}
 
-	chromeOp = 0.18
+	if defaults.ChromeOpacity != nil {
+		chromeOp = *defaults.ChromeOpacity
+	}
 	if pack.ChromeOpacity != nil {
 		chromeOp = *pack.ChromeOpacity
 	}
@@ -296,15 +302,20 @@ func effectiveSurfaceFromSnap(snap frameSnapshot) (glassOp, chromeOp, viewportOp
 		chromeOp = *root.ChromeOpacity
 	}
 
-	viewportOp = max(glassOp*0.62, 0.16)
+	if defaults.ViewportOpacity != nil {
+		viewportOp = *defaults.ViewportOpacity
+	}
 	if pack.ViewportOpacity != nil {
 		viewportOp = *pack.ViewportOpacity
 	}
 	if root.ViewportOpacity != nil {
 		viewportOp = *root.ViewportOpacity
 	}
+	if runtimeOp > 0 {
+		viewportOp = runtimeOp
+	}
 
-	vibrancy = "auto"
+	vibrancy = defaults.Vibrancy
 	if pack.Vibrancy != "" {
 		vibrancy = pack.Vibrancy
 	}

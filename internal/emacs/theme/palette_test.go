@@ -35,14 +35,20 @@ func TestDoomEmacsCSSThemePacksAndGRPCProjection(t *testing.T) {
 	if def := theme.ByID("unknown"); def.ID != theme.DefaultThemeID {
 		t.Fatalf("expected fallback to %q, got %q", theme.DefaultThemeID, def.ID)
 	}
-	if next := theme.Next("nord-bento"); next.ID != "doom-one" {
-		t.Fatalf("expected Next(nord-bento)=doom-one, got %q", next.ID)
+	if tokyo := theme.ByID("tokyo-night"); tokyo.ID != "doom-tokyo-night" || tokyo.Accent != ui.RGB(0x7a, 0xa2, 0xf7) {
+		t.Fatalf("expected tokyo-night alias to resolve Tokyo Night sapphire accent, got %+v", tokyo)
+	}
+	if doom := theme.DoomOne(); doom.Accent != ui.RGB(0x51, 0xaf, 0xef) {
+		t.Fatalf("expected authentic Doom One blue accent #51afef (no pink), got %+v", doom.Accent)
 	}
 	if next := theme.Next("doom-one"); next.ID != "doom-tokyo-night" {
 		t.Fatalf("expected Next(doom-one)=doom-tokyo-night, got %q", next.ID)
 	}
-	if next := theme.Next("doom-tokyo-night"); next.ID != "doom-one-light" || !next.IsLight {
-		t.Fatalf("expected Next(doom-tokyo-night)=doom-one-light (light), got %+v", next)
+	if next := theme.Next("doom-tokyo-night"); next.ID != "nord-bento" {
+		t.Fatalf("expected Next(doom-tokyo-night)=nord-bento, got %q", next.ID)
+	}
+	if next := theme.Next("nord-bento"); next.ID != "doom-one-light" || !next.IsLight {
+		t.Fatalf("expected Next(nord-bento)=doom-one-light (light), got %+v", next)
 	}
 	proj := theme.FromUITheme("grpc-doom", "grpc-doom", schema.DefaultUITheme())
 	if proj.ID != "grpc-doom" || proj.IsLight || proj.Sheet == nil {

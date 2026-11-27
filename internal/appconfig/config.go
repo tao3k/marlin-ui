@@ -19,6 +19,9 @@ type Config struct {
 	AppServerBin   string
 	HostAddr       string
 	AuthToken      string
+	CoveURL        string
+	CoveToken      string
+	CoveRoomID     string
 	TLSCAFile      string
 	TLSCertFile    string
 	TLSKeyFile     string
@@ -49,16 +52,23 @@ func DefaultConfig() Config {
 	if turso == "" && home != "" {
 		turso = filepath.Join(home, ".local", "share", "marlin", "session.turso")
 	}
+	coveRoom := strings.TrimSpace(os.Getenv("MARLIN_COVE_ROOM_ID"))
+	if coveRoom == "" {
+		coveRoom = "cove-main"
+	}
 	return Config{
 		ConfigFile:     strings.TrimSpace(os.Getenv("MARLIN_CONFIG")),
 		AppServerBin:   strings.TrimSpace(os.Getenv("MARLIN_APP_SERVER_BIN")),
 		HostAddr:       strings.TrimSpace(os.Getenv("MARLIN_HOST")),
 		AuthToken:      strings.TrimSpace(os.Getenv("MARLIN_TOKEN")),
+		CoveURL:        strings.TrimSpace(os.Getenv("MARLIN_COVE_URL")),
+		CoveToken:      strings.TrimSpace(os.Getenv("MARLIN_COVE_TOKEN")),
+		CoveRoomID:     coveRoom,
 		TLSCAFile:      strings.TrimSpace(os.Getenv("MARLIN_TLS_CA")),
 		TLSCertFile:    strings.TrimSpace(os.Getenv("MARLIN_TLS_CERT")),
 		TLSKeyFile:     strings.TrimSpace(os.Getenv("MARLIN_TLS_KEY")),
 		SessionID:      "marlin-main",
-		ThemeID:        "nord-bento",
+		ThemeID:        "doom-one",
 		FeaturesSpec:   "default",
 		TursoPath:      turso,
 		RecoveryFile:   recPath,

@@ -5,6 +5,15 @@
 version = 1
 
 [[annotations]]
-path = ["go.mod", "go.sum", "devenv.lock"]
+path = [
+  "go.mod",
+  "go.sum",
+  "devenv.lock",
+  "mygo.json",
+  "resources/icon.png",
+  "internal/emacs/theme/assets/marlin-emblem.png",
+  "sdk/marlin-ui-sdk/package.json",
+  "sdk/marlin-ui-sdk/tsconfig.json",
+]
 SPDX-FileCopyrightText = "2026 tao3k team and Contributors"
 SPDX-License-Identifier = "Apache-2.0 AND LGPL-2.1-or-later"

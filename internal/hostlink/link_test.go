@@ -235,4 +235,98 @@ func TestHostLinkLiveRustAppServerGRPCConnection(t *testing.T) {
 	if !gotReply {
 		t.Fatalf("timed out waiting for live Rust assistant reply over gRPC (entries=%d)", as.Desktop.Transcript.Len())
 	}
+
+	// Verify live model.select command round-trips over marlin.ui.v1 gRPC and updates UIWorkbenchSnapshot.ModelLabel.
+	if as.Desktop.OnCommandInvoke != nil {
+		as.Desktop.OnCommandInvoke("model.select deepseek-v4-pro")
+		modelDeadline := time.Now().Add(4 * time.Second)
+		gotModel := ""
+		for time.Now().Before(modelDeadline) {
+			if snap, ok := as.Desktop.Workbench.Snapshot(); ok && snap != nil && snap.ModelLabel == "deepseek-v4-pro" {
+				gotModel = snap.ModelLabel
+				break
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		if gotModel != "deepseek-v4-pro" {
+			t.Fatalf("expected live Rust UIWorkbenchSnapshot.ModelLabel='deepseek-v4-pro', got %q", gotModel)
+		}
+	}
+
+	// Verify live Rust HELM search (WorkspaceHelmSearchBridge) responds over ProjectionQueryService gRPC.
+	if as.Desktop.HelmSearch != nil && as.Desktop.HelmSearch.Engine != nil {
+		as.Desktop.HelmSearch.SetQuery("marlin")
+		helmDeadline := time.Now().Add(6 * time.Second)
+		gotHits := 0
+		for time.Now().Before(helmDeadline) {
+			total, _, _, _ := as.Desktop.HelmSearch.Engine.Stats()
+			if total > 0 {
+				gotHits = total
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if gotHits == 0 {
+			t.Fatalf("expected live Rust HELM search to return indexed workspace candidates")
+		}
+	}
+}
+
+func TestHostLinkResumesExistingTursoSessionCursorAcrossRestart(t *testing.T) {
+	binPath := strings.TrimSpace(os.Getenv("MARLIN_APP_SERVER_BIN"))
+	if binPath == "" {
+		t.Skip("set MARLIN_APP_SERVER_BIN to verify durable Turso session cursor resume")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	tmp := t.TempDir()
+	tursoPath := filepath.Join(tmp, "resume.turso")
+	cfg := appconfig.Config{
+		AppServerBin: binPath,
+		SessionID:    "marlin-mobile",
+		ThemeID:      "doom-one",
+		TursoPath:    tursoPath,
+		RecoveryFile: filepath.Join(tmp, "rec.json"),
+		RealSession:  true,
+	}
+
+	// Process 1: create session and commit Turn #1.
+	as1 := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{BrandTitle: "Marlin Mobile 1"})
+	link1, err := hostlink.Connect(ctx, cfg, as1, schema.TargetMobileIOS, nil)
+	if err != nil {
+		t.Fatalf("Connect #1: %v", err)
+	}
+	as1.Desktop.OnSendPrompt("turn one")
+	waitTurnReply := func(as *mygoshell.AdaptiveShell, label string) string {
+		dl := time.Now().Add(12 * time.Second)
+		for time.Now().Before(dl) {
+			for i := as.Desktop.Transcript.Len() - 1; i >= 0; i-- {
+				if e, ok := as.Desktop.Transcript.Entry(i); ok && e.Role == mygoshell.RoleAssistant && strings.TrimSpace(e.Text) != "" && !e.Streaming {
+					return e.Text
+				}
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s assistant reply (entries=%d)", label, as.Desktop.Transcript.Len())
+		return ""
+	}
+	_ = waitTurnReply(as1, "turn-1")
+	link1.Close()
+
+	// Process 2: fresh hostlink (in-memory lastTurn == 0) attaching to existing Turso session.
+	as2 := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{BrandTitle: "Marlin Mobile 2"})
+	link2, err := hostlink.Connect(ctx, cfg, as2, schema.TargetMobileIOS, nil)
+	if err != nil {
+		t.Fatalf("Connect #2: %v", err)
+	}
+	defer link2.Close()
+
+	as2.Desktop.OnSendPrompt("say ok")
+	reply2 := waitTurnReply(as2, "turn-2-after-restart")
+	if strings.TrimSpace(reply2) == "" {
+		t.Fatalf("expected non-empty reply after restart cursor resync")
+	}
+	t.Logf("restart Turn #2 reply: %q", reply2)
 }

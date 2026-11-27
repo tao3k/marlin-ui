@@ -17,4 +17,7 @@ go.work.sum
 .config/
 .data/
 .run/
+.mygo/
 .DS_Store
+.env
+.env.*

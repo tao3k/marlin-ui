@@ -70,7 +70,8 @@ func renderFilePreview(c *ui.Context, th theme.Theme, bc *Context) {
 				Background(kit.WithAlpha(th.Accent, 0.16)).Children(func() {
 				ui.Text(c, strings.ToUpper(lang)).Font(theme.FontMono).FontSize(10).FontWeight(700).TextColor(th.Accent).NoWrap()
 			})
-			ui.Text(c, ref).Font(theme.FontMono).FontSize(12).FontWeight(600).TextColor(th.Ink).Grow(1).NoWrap().MaxLines(1)
+			ui.Text(c, ref).Font(theme.FontMono).FontSize(12).FontWeight(600).TextColor(th.Ink).
+				Basis(0).Grow(1).SingleLine().Ellipsis("…").TruncateMiddle().MinWidth(0).Clip()
 			if bc.OnCiteInComposer != nil {
 				if theme.ActionButton(c, "preview-cite-btn", "+ @cite", th.Success, false, th).Clicked() {
 					bc.OnCiteInComposer(ref)

@@ -482,21 +482,27 @@ func Connect(
 		link.TurnCtrl = turnCtrl
 		sr.turnCtrl = turnCtrl
 		sr.composerBridge = grpcwire.NewComposerBridge(turnCtrl, nil)
+		AttachRoomResponder(link, cfg)
 
 		var (
 			turnMu    sync.Mutex
 			lastTurn  = make(map[string]uint64)
 			activeRef *appv1.SessionTurnRef
 			subSeq    atomic.Uint64
+			subPrefix = fmt.Sprintf("marlin-ui-%d-", time.Now().UnixNano())
 		)
 		sendLive := func(displayPrompt, wirePrompt string, refs []composer.AttachmentRef) {
 			if strings.TrimSpace(wirePrompt) == "" {
 				return
 			}
+			activeTr := app.Transcript
+			if activeTr == nil {
+				activeTr = transcript
+			}
 			if len(refs) > 0 {
-				transcript.AppendUserWithAttachments(displayPrompt, refs)
+				activeTr.AppendUserWithAttachments(displayPrompt, refs)
 			} else {
-				transcript.AppendUser(displayPrompt)
+				activeTr.AppendUser(displayPrompt)
 			}
 			recordTokens(wirePrompt)
 			markDirty()
@@ -507,33 +513,54 @@ func Connect(
 				if !sr.openedSessions[sid] {
 					if _, err := turnCtrl.OpenSession(linkCtx, sid, true); err != nil {
 						_, _ = turnCtrl.OpenSession(linkCtx, sid, false)
+						if sum, sErr := turnCtrl.GetSessionSummary(linkCtx, sid); sErr == nil && sum != nil {
+							if ord := sum.GetLatestTurn().GetOrdinal(); ord > lastTurn[sid] {
+								lastTurn[sid] = ord
+							}
+						}
 					}
 					sr.openedSessions[sid] = true
 				}
 				after := lastTurn[sid]
-				subID := fmt.Sprintf("marlin-ui-sub-%d", subSeq.Add(1))
+				subID := fmt.Sprintf("%s%d", subPrefix, subSeq.Add(1))
 				turnMu.Unlock()
 
 				ref, err := turnCtrl.StartTurn(linkCtx, sid, wirePrompt, after, subID)
+				if err != nil && strings.Contains(strings.ToLower(err.Error()), "cursor is stale") {
+					// Another process or a prior run committed turns to this durable Turso
+					// session: resync the authoritative cursor from Rust and retry once.
+					if sum, sErr := turnCtrl.GetSessionSummary(linkCtx, sid); sErr == nil && sum != nil {
+						fresh := sum.GetLatestTurn().GetOrdinal()
+						turnMu.Lock()
+						if fresh > lastTurn[sid] {
+							lastTurn[sid] = fresh
+						}
+						after = lastTurn[sid]
+						subID = fmt.Sprintf("%s%d", subPrefix, subSeq.Add(1))
+						turnMu.Unlock()
+						ref, err = turnCtrl.StartTurn(linkCtx, sid, wirePrompt, after, subID)
+					}
+				}
 				if err != nil {
-					if transcript.Resilience != nil {
-						transcript.Resilience.MarkOffline(err.Error())
-						_, _ = transcript.Resilience.Outbox.Enqueue(curScope, "user", "", wirePrompt)
-						if transcript.OnRetryOutbox != nil {
-							transcript.OnRetryOutbox()
+					log.Printf("hostlink: StartTurn(session=%s, after=%d) failed: %v", sid, after, err)
+					if activeTr.Resilience != nil {
+						activeTr.Resilience.MarkOffline(err.Error())
+						_, _ = activeTr.Resilience.Outbox.Enqueue(curScope, "user", "", wirePrompt)
+						if activeTr.OnRetryOutbox != nil {
+							activeTr.OnRetryOutbox()
 						}
 						scheduleSave()
 						markDirty()
 					}
 					return
 				}
-				if transcript.Resilience != nil {
-					transcript.Resilience.MarkOnline()
+				if activeTr.Resilience != nil {
+					activeTr.Resilience.MarkOnline()
 				}
 				turnMu.Lock()
 				activeRef = ref
 				turnMu.Unlock()
-				transcript.BeginAssistantTurn(ref.GetOrdinal())
+				activeTr.BeginAssistantTurn(ref.GetOrdinal())
 				markDirty()
 
 				_, outcome, watchErr := turnCtrl.WatchTurnResilient(linkCtx, ref, "", grpcwire.WatchRetryPolicy{
@@ -541,16 +568,16 @@ func Connect(
 					MaxBackoff:     2 * time.Second,
 					MaxRetries:     8,
 					OnReconnect: func(attempt int, afterEventID string, rErr error) {
-						if transcript.Resilience != nil {
-							transcript.Resilience.MarkReconnecting(curScope, attempt, afterEventID, rErr)
+						if activeTr.Resilience != nil {
+							activeTr.Resilience.MarkReconnecting(curScope, attempt, afterEventID, rErr)
 							markDirty()
 						}
 					},
 				}, func(upd grpcwire.TurnStreamUpdate) {
-					if transcript.Resilience != nil {
-						transcript.Resilience.MarkOnline()
+					if activeTr.Resilience != nil {
+						activeTr.Resilience.MarkOnline()
 						if upd.EventID != "" {
-							if dup, _ := transcript.Resilience.AdmitEvent(curScope, upd.EventID, upd.TurnOrdinal, 0); dup {
+							if dup, _ := activeTr.Resilience.AdmitEvent(curScope, upd.EventID, upd.TurnOrdinal, 0); dup {
 								return
 							}
 						}
@@ -558,29 +585,30 @@ func Connect(
 					if upd.ToolCall != nil {
 						card := mapToolCallEvent(upd.ToolCall)
 						folded := card.DenialMessage == "" && card.GateID == ""
-						transcript.UpsertToolCall(card, folded)
+						activeTr.UpsertToolCall(card, folded)
 						markDirty()
 					}
 					if upd.HumanGate != nil {
-						transcript.UpsertHumanGate(mapHumanGateEvent(upd.HumanGate))
+						activeTr.UpsertHumanGate(mapHumanGateEvent(upd.HumanGate))
 						markDirty()
 					}
 					if upd.TextDelta != "" {
-						transcript.ApplyCheckpoint(upd.TurnOrdinal, upd.EventID, upd.TextDelta)
+						activeTr.ApplyCheckpoint(upd.TurnOrdinal, upd.EventID, upd.TextDelta)
 						recordTokens(upd.TextDelta)
 						markDirty()
 					}
 					if upd.HasOutcome {
-						transcript.CompleteTurn(upd.TurnOrdinal, upd.Outcome.String())
+						activeTr.CompleteTurn(upd.TurnOrdinal, upd.Outcome.String())
 						markDirty()
 					}
 				})
 				if watchErr != nil {
-					if transcript.Resilience != nil {
-						transcript.Resilience.MarkOffline(watchErr.Error())
+					log.Printf("hostlink: WatchTurnResilient(session=%s, turn=%d) error: %v", sid, ref.GetOrdinal(), watchErr)
+					if activeTr.Resilience != nil {
+						activeTr.Resilience.MarkOffline(watchErr.Error())
 						scheduleSave()
 					}
-					transcript.CompleteTurn(ref.GetOrdinal(), "INTERRUPTED")
+					activeTr.CompleteTurn(ref.GetOrdinal(), "INTERRUPTED: "+watchErr.Error())
 					markDirty()
 				} else if outcome == appv1.SessionTurnOutcome_SESSION_TURN_OUTCOME_COMPLETED {
 					turnMu.Lock()
@@ -612,16 +640,20 @@ func Connect(
 			if strings.TrimSpace(wirePrompt) == "" {
 				return
 			}
+			activeTr := app.Transcript
+			if activeTr == nil {
+				activeTr = transcript
+			}
 			if len(refs) > 0 {
-				transcript.AppendUserWithAttachments(displayPrompt, refs)
+				activeTr.AppendUserWithAttachments(displayPrompt, refs)
 			} else {
-				transcript.AppendUser(displayPrompt)
+				activeTr.AppendUser(displayPrompt)
 			}
 			ord := demoTurn.Add(1)
-			transcript.BeginAssistantTurn(ord)
+			activeTr.BeginAssistantTurn(ord)
 			reply := fmt.Sprintf("[standalone preview · %s] Received %q — start marlin-app-server or pass -host <addr> to connect live gRPC.", sr.currentSession(), wirePrompt)
-			transcript.ApplyCheckpoint(ord, fmt.Sprintf("preview-%d", ord), reply)
-			transcript.CompleteTurn(ord, "PREVIEW_OK")
+			activeTr.ApplyCheckpoint(ord, fmt.Sprintf("preview-%d", ord), reply)
+			activeTr.CompleteTurn(ord, "PREVIEW_OK")
 			recordTokens(wirePrompt + reply)
 			markDirty()
 		}

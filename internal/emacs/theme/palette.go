@@ -44,8 +44,8 @@ const (
 	RadiusPill    float32 = 999
 )
 
-// DefaultThemeID selects Marlin UI's flagship Nord Bento CSS theme pack.
-const DefaultThemeID = "nord-bento"
+// DefaultThemeID selects Marlin UI's mainstream Doom One CSS theme pack.
+const DefaultThemeID = "doom-one"
 
 // MarlinStyleContract returns Marlin UI's fail-closed CSS-subset admission
 // contract declared in dev/sysml/emacs-workbench.sysml (MUI-EMACS-R06).
@@ -126,10 +126,10 @@ var (
 
 func initBuiltins() {
 	builtinOnce.Do(func() {
-		builtinNordBento = mustLoadBuiltin("nord-bento", "nord-bento", false, "packs/nord-bento.css")
-		builtinDoomOne = mustLoadBuiltin("doom-one", "doom-one", false, "packs/doom-one.css")
-		builtinTokyo = mustLoadBuiltin("doom-tokyo-night", "doom-tokyo-night", false, "packs/doom-tokyo-night.css")
-		builtinDoomLight = mustLoadBuiltin("doom-one-light", "doom-one-light", true, "packs/doom-one-light.css")
+		builtinDoomOne = mustLoadBuiltin("doom-one", "Doom One", false, "packs/doom-one.css")
+		builtinTokyo = mustLoadBuiltin("doom-tokyo-night", "Tokyo Night", false, "packs/doom-tokyo-night.css")
+		builtinNordBento = mustLoadBuiltin("nord-bento", "Nord Frost", false, "packs/nord-bento.css")
+		builtinDoomLight = mustLoadBuiltin("doom-one-light", "Doom One Light", true, "packs/doom-one-light.css")
 	})
 }
 
@@ -158,15 +158,15 @@ func fallbackPalette(isLight bool) Theme {
 			SurfaceHover:    ui.RGB(223, 226, 233),
 			Border:          ui.RGB(207, 212, 222),
 			BorderSubtle:    ui.RGB(228, 230, 236),
-			TabActiveBg:     ui.RGB(213, 201, 192),
-			TabActiveFg:     ui.RGB(40, 40, 40),
-			TabInactiveFg:   ui.RGB(102, 92, 84),
-			TabSeparator:    ui.RGB(189, 174, 147),
+			TabActiveBg:     ui.RGB(226, 230, 240),
+			TabActiveFg:     ui.RGB(40, 44, 52),
+			TabInactiveFg:   ui.RGB(105, 108, 119),
+			TabSeparator:    ui.RGB(207, 212, 222),
 			BannerInk:       ui.RGB(156, 160, 170),
 			Ink:             ui.RGB(56, 58, 66),
 			InkMuted:        ui.RGB(122, 127, 140),
-			Accent:          ui.RGB(166, 38, 164),
-			Info:            ui.RGB(64, 120, 242),
+			Accent:          ui.RGB(64, 120, 242),
+			Info:            ui.RGB(1, 132, 188),
 			Success:         ui.RGB(80, 161, 79),
 			Warning:         ui.RGB(193, 132, 1),
 			Danger:          ui.RGB(228, 86, 73),
@@ -174,23 +174,23 @@ func fallbackPalette(isLight bool) Theme {
 	}
 	return Theme{
 		ID:              "doom-one",
-		Name:            "doom-one",
+		Name:            "Doom One",
 		IsLight:         false,
 		Canvas:          ui.RGB(40, 44, 52),
 		Bar:             ui.RGB(33, 36, 43),
-		SurfaceElevated: ui.RGB(45, 50, 60),
-		SurfaceHover:    ui.RGB(52, 58, 70),
-		Border:          ui.RGB(63, 68, 74),
-		BorderSubtle:    ui.RGB(47, 52, 62),
-		TabActiveBg:     ui.RGB(80, 73, 69),
-		TabActiveFg:     ui.RGB(251, 241, 199),
-		TabInactiveFg:   ui.RGB(189, 174, 147),
-		TabSeparator:    ui.RGB(102, 92, 84),
-		BannerInk:       ui.RGB(91, 98, 104),
-		Ink:             ui.RGB(187, 194, 207),
-		InkMuted:        ui.RGB(140, 146, 156),
-		Accent:          ui.RGB(198, 120, 221),
-		Info:            ui.RGB(81, 175, 239),
+		SurfaceElevated: ui.RGB(45, 51, 63),
+		SurfaceHover:    ui.RGB(54, 61, 76),
+		Border:          ui.RGB(66, 73, 89),
+		BorderSubtle:    ui.RGB(47, 53, 66),
+		TabActiveBg:     ui.RGB(54, 61, 76),
+		TabActiveFg:     ui.RGB(236, 239, 244),
+		TabInactiveFg:   ui.RGB(140, 149, 166),
+		TabSeparator:    ui.RGB(66, 73, 89),
+		BannerInk:       ui.RGB(98, 107, 125),
+		Ink:             ui.RGB(213, 220, 230),
+		InkMuted:        ui.RGB(139, 148, 166),
+		Accent:          ui.RGB(81, 175, 239),
+		Info:            ui.RGB(70, 217, 255),
 		Success:         ui.RGB(152, 190, 101),
 		Warning:         ui.RGB(236, 190, 123),
 		Danger:          ui.RGB(255, 108, 107),
@@ -311,25 +311,30 @@ func DoomOneLight() Theme {
 	return builtinDoomLight
 }
 
-// Catalog returns Marlin UI's built-in CSS theme packs.
+// Catalog returns Marlin UI's built-in CSS theme packs with Doom One and Tokyo
+// Night leading the flagship dark collection.
 func Catalog() []Theme {
 	return []Theme{
-		NordBento(),
 		DoomOne(),
 		DoomTokyoNight(),
+		NordBento(),
 		DoomOneLight(),
 	}
 }
 
-// ByID resolves a built-in theme by ID (defaulting to nord-bento).
+// ByID resolves a built-in theme by ID or friendly alias (defaulting to doom-one).
 func ByID(id string) Theme {
 	norm := strings.ToLower(strings.TrimSpace(id))
+	switch norm {
+	case "tokyo-night", "tokyo", "tokyonight":
+		return DoomTokyoNight()
+	}
 	for _, th := range Catalog() {
 		if th.ID == norm {
 			return th
 		}
 	}
-	return NordBento()
+	return DoomOne()
 }
 
 // Next cycles deterministically to the next built-in theme profile.
@@ -402,20 +407,21 @@ func (th Theme) ToMyGoTheme() *ui.Theme {
 		t = ui.LightTheme()
 	}
 	t.Background = th.Canvas
-	t.Surface = th.Bar
+	t.Surface = th.SurfaceElevated
 	t.SurfaceHover = th.SurfaceHover
-	t.SurfacePressed = th.SurfaceElevated
+	t.SurfacePressed = th.Bar
 	t.Border = th.Border
 	t.Text = th.Ink
 	t.TextMuted = th.InkMuted
 	t.Accent = th.Accent
-	t.AccentHover = th.Info
-	t.AccentText = th.Canvas
+	t.AccentHover = th.Accent.Mix(ui.RGB(255, 255, 255), 0.14)
+	t.AccentPressed = th.Accent.Mix(ui.RGB(0, 0, 0), 0.14)
+	t.AccentText = ui.RGB(255, 255, 255)
 	t.Success = th.Success
 	t.Warning = th.Warning
 	t.Danger = th.Danger
-	t.Font = FontMono
-	t.FontSize = FontSizeBody
+	t.Font = kit.FontDisplay
+	t.FontSize = FontSizeUI
 	t.Radius = th.Sheet.VarPx("--radius-control", RadiusControl)
 	t.Spacing = 4
 	return t

@@ -4,29 +4,29 @@
 :root {
   --bg: #282c34;
   --bar: #21242b;
-  --surface: #2d323c;
-  --hover: #343a46;
-  --border: #3f444a;
-  --border-subtle: #2f343e;
+  --surface: #2d333f;
+  --hover: #363d4c;
+  --border: #424959;
+  --border-subtle: #2f3542;
 
-  --tab-active-bg: #504945;
-  --tab-active-fg: #fbf1c7;
-  --tab-inactive-fg: #bdae93;
-  --tab-sep: #665c54;
+  --tab-active-bg: #363d4c;
+  --tab-active-fg: #eceff4;
+  --tab-inactive-fg: #8c95a6;
+  --tab-sep: #424959;
 
-  --banner: #5b6268;
-  --fg: #bbc2cf;
-  --muted: #8c929c;
+  --banner: #626b7d;
+  --fg: #d5dce6;
+  --muted: #8b94a6;
 
-  --accent: #c678dd;
-  --info: #51afef;
+  --accent: #51afef;
+  --info: #46d9ff;
   --success: #98be65;
   --warning: #ecbe7b;
   --danger: #ff6c6b;
 
-  --radius-small: 4px;
-  --radius-control: 8px;
-  --radius-card: 18px;
+  --radius-small: 6px;
+  --radius-control: 10px;
+  --radius-card: 20px;
 }
 
 .tab {

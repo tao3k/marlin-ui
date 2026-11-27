@@ -5,28 +5,28 @@
   --bg: #1a1b26;
   --bar: #16161e;
   --surface: #24283b;
-  --hover: #292e42;
+  --hover: #2f3549;
   --border: #3b4261;
   --border-subtle: #24283b;
 
   --tab-active-bg: #292e42;
   --tab-active-fg: #c0caf5;
-  --tab-inactive-fg: #787c99;
+  --tab-inactive-fg: #7982a9;
   --tab-sep: #3b4261;
 
   --banner: #565f89;
   --fg: #c0caf5;
-  --muted: #787c99;
+  --muted: #828bb8;
 
-  --accent: #bb9af7;
-  --info: #7aa2f7;
+  --accent: #7aa2f7;
+  --info: #7dcfff;
   --success: #9ece6a;
   --warning: #e0af68;
   --danger: #f7768e;
 
-  --radius-small: 5px;
-  --radius-control: 9px;
-  --radius-card: 18px;
+  --radius-small: 6px;
+  --radius-control: 10px;
+  --radius-card: 20px;
 }
 
 .tab {

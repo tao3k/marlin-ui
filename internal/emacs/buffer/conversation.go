@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
@@ -172,9 +173,13 @@ func renderConversationHeaderBar(c *ui.Context, th theme.Theme, bc *Context) {
 		}
 	}
 
+	hdrBg := th.Bar
+	if c.Vibrancy() {
+		hdrBg = ui.Transparent
+	}
 	ui.Row(c.Key("conv-header-bar")).Height(36).Padding(0, 24).Gap(10).AlignItems(ui.Center).
-		Background(theme.GlassTone(c, th.Bar, th, 0.32, 0.56)).
-		BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
+		Background(hdrBg).
+		BorderWidth(0, 0, 1, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.55)).Children(func() {
 		ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(connTone)
 		ui.Text(c, modelLabel).Font(kit.FontDisplay).FontSize(13).FontWeight(600).TextColor(th.Ink).NoWrap()
 
@@ -253,7 +258,7 @@ func renderAssistantMessageCard(
 				ui.Text(c, "Marlin").Font(kit.FontDisplay).FontSize(12).FontWeight(700).TextColor(th.Accent).NoWrap()
 			})
 			if entry.Streaming {
-				kit.LoadingIndicator(c, 13, th.Info, false)
+				ui.Spinner(c).Size(13, 13)
 				statusLbl := "Streaming..."
 				if thinkingStreaming {
 					statusLbl = "Reasoning..."
@@ -264,17 +269,23 @@ func renderAssistantMessageCard(
 			}
 			ui.Spacer(c)
 			if !entry.Streaming && entry.TurnOrdinal > 0 && tr.OnRetryTurn != nil {
-				if theme.ActionLink(c, fmt.Sprintf("conv-retry-%d", idx), "Retry", th.InkMuted, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("conv-retry-%d", idx), Label: "Retry", Icon: theme.IconRetry, Variant: theme.BtnGhost, Size: theme.BtnSizeSM,
+				}, th).Clicked() {
 					tr.OnRetryTurn(entry.TurnOrdinal)
 				}
 			}
 			if !entry.Streaming && entry.TurnOrdinal > 0 && tr.OnForkTurn != nil {
-				if theme.ActionLink(c, fmt.Sprintf("conv-fork-%d", idx), "Fork", th.InkMuted, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("conv-fork-%d", idx), Label: "Fork", Icon: theme.IconFork, Variant: theme.BtnGhost, Size: theme.BtnSizeSM,
+				}, th).Clicked() {
 					tr.OnForkTurn(entry.TurnOrdinal)
 				}
 			}
 			if strings.TrimSpace(bodyText) != "" && tr.OnCopyCode != nil {
-				if theme.ActionLink(c, fmt.Sprintf("conv-copy-%d", idx), "Copy", th.InkMuted, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("conv-copy-%d", idx), Label: "Copy", Icon: theme.IconCopy, Variant: theme.BtnGhost, Size: theme.BtnSizeSM,
+				}, th).Clicked() {
 					tr.OnCopyCode(bodyText)
 				}
 			}
@@ -527,10 +538,14 @@ func renderHumanGateCard(c *ui.Context, idx int, entry mygoshell.TranscriptEntry
 		}
 		if !resolved && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnGateDecision != nil {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if theme.ActionButton(c, fmt.Sprintf("conv-gate-approve-%d", idx), "Approve", th.Success, true, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("conv-gate-approve-%d", idx), Label: "Approve", Icon: theme.IconApprove, Variant: theme.BtnGlassProminent, Tone: th.Success, Pill: true,
+				}, th).Clicked() {
 					bc.Adaptive.Desktop.OnGateDecision(gateID, true)
 				}
-				if theme.ActionButton(c, fmt.Sprintf("conv-gate-reject-%d", idx), "Reject", th.Danger, false, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("conv-gate-reject-%d", idx), Label: "Reject", Icon: theme.IconReject, Variant: theme.BtnDestructive, Tone: th.Danger, Pill: true,
+				}, th).Clicked() {
 					bc.Adaptive.Desktop.OnGateDecision(gateID, false)
 				}
 			})
@@ -593,13 +608,24 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 		bc.OnSubmitPrompt(text)
 	}
 
-	ui.Row(c.Key("conv-composer-dock")).Padding(10, 24, 12, 24).Justify(ui.Center).
-		Background(theme.GlassTone(c, th.Bar, th, 0.24, 0.44)).
-		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.70)).Children(func() {
-		ui.Column(c.Key("conv-composer-card")).Grow(1).MaxWidth(860).Padding(10, 14, 8, 14).Gap(8).Radius(14).
-			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.56, 0.84)).
-			BorderWidth(1).BorderColor(theme.GlassTone(c, th.Border, th, 0.50, 0.72)).
-			AlignItems(ui.Stretch).Children(func() {
+	dockBg := th.Bar
+	if c.Vibrancy() {
+		dockBg = ui.Transparent
+	}
+	ui.Row(c.Key("conv-composer-dock")).Padding(10, 24, 14, 24).Justify(ui.Center).
+		Background(dockBg).
+		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.45)).Children(func() {
+		compCard := ui.Column(c.Key("conv-composer-card")).Grow(1).MaxWidth(860).Padding(12, 16, 10, 16).Gap(9).Radius(18).
+			AlignItems(ui.Stretch)
+		if c.Vibrancy() {
+			compCard.Material(glass.Glass{
+				Style: glass.Regular,
+				Tint:  kit.WithAlpha(th.SurfaceElevated, 0.40),
+			}).Shadow(0, 8, 24, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.30))
+		} else {
+			compCard.Background(th.SurfaceElevated).Border(1, th.Border)
+		}
+		compCard.Children(func() {
 			if tr.Composer != nil {
 				if atts := tr.Composer.Snapshot().Attachments; len(atts) > 0 {
 					ui.Row(c.Key("conv-composer-atts")).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -627,11 +653,15 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 				}
 			}
 			ui.Row(c.Key("conv-composer-toolbar")).Gap(8).AlignItems(ui.Center).Children(func() {
+				dtVariant := theme.BtnGhost
 				dtTone := th.InkMuted
 				if deepThink {
+					dtVariant = theme.BtnTinted
 					dtTone = th.Accent
 				}
-				if theme.ActionButton(c, "conv-deep-think", "Deep Think", dtTone, deepThink, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: "conv-deep-think", Label: "Deep Think", Icon: theme.IconSparkles, IconFilled: deepThink, Variant: dtVariant, Size: theme.BtnSizeSM, Tone: dtTone, Pill: true,
+				}, th).Clicked() {
 					if bc != nil && bc.OnToggleDeepThink != nil {
 						bc.OnToggleDeepThink()
 					} else {
@@ -639,17 +669,23 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 					}
 				}
 				if bc != nil && bc.OnOpenHelm != nil {
-					if theme.ActionButton(c, "conv-cite-helm", "@ Cite", th.Info, false, th).Clicked() {
+					if theme.StyledButton(c, theme.ButtonSpec{
+						Key: "conv-cite-helm", Label: "Cite", Icon: theme.IconCite, Variant: theme.BtnGhost, Size: theme.BtnSizeSM, Tone: th.InkMuted, Pill: true,
+					}, th).Clicked() {
 						bc.OnOpenHelm()
 					}
 				}
 				if tr.OnPickAttachment != nil {
-					if theme.ActionButton(c, "conv-attach-btn", "+ Attach", th.Info, false, th).Clicked() {
+					if theme.StyledButton(c, theme.ButtonSpec{
+						Key: "conv-attach-btn", Label: "Attach", Icon: theme.IconAttach, Variant: theme.BtnGhost, Size: theme.BtnSizeSM, Tone: th.InkMuted, Pill: true,
+					}, th).Clicked() {
 						tr.OnPickAttachment()
 					}
 				}
 				if inFlight && bc != nil && bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnCancelTurn != nil {
-					if theme.ActionButton(c, "conv-stop-turn", "■ Stop", th.Danger, true, th).Clicked() {
+					if theme.StyledButton(c, theme.ButtonSpec{
+						Key: "conv-stop-turn", Label: "Stop", Icon: theme.IconStop, IconFilled: true, Variant: theme.BtnDestructive, Size: theme.BtnSizeSM, Tone: th.Danger, Pill: true,
+					}, th).Clicked() {
 						bc.Adaptive.Desktop.OnCancelTurn()
 					}
 				}
@@ -657,11 +693,13 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 				ui.Text(c, tokText).Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted).NoWrap()
 				if bc != nil && bc.ComposerDraft != nil && bc.OnSubmitPrompt != nil {
 					hasDraft := strings.TrimSpace(*bc.ComposerDraft) != ""
+					sendVariant := theme.BtnSolidIdle
 					sendTone := th.InkMuted
 					if hasDraft {
+						sendVariant = theme.BtnGlassProminent
 						sendTone = th.Accent
 					}
-					if theme.ActionButton(c, "conv-send-btn", "Send ↵", sendTone, hasDraft, th).Clicked() {
+					if theme.IconCircleButton(c, "conv-send-btn", "Send", theme.IconSend, 30, sendVariant, sendTone, false, th).Clicked() && hasDraft {
 						submitDraft()
 					}
 				} else if bc != nil && bc.OnWidgetAction != nil {
@@ -699,21 +737,29 @@ func renderEmptyConversationStage(c *ui.Context, tr *mygoshell.TranscriptControl
 	}
 
 	starters := []struct {
+		icon   string
+		tone   ui.Color
 		title  string
 		desc   string
 		prompt string
 	}{
 		{
+			icon:   "building.columns",
+			tone:   th.Accent,
 			title:  "Architecture Audit",
 			desc:   "Map crate, Scheme & UI boundaries",
 			prompt: "Summarize the current workspace architecture and highlight any open protocol or UI gaps.",
 		},
 		{
+			icon:   "checkmark.seal",
+			tone:   th.Success,
 			title:  "Deep Code Review",
 			desc:   "Inspect recent diffs & invariants",
 			prompt: "Review recent uncommitted changes across this repository and flag concurrency or contract risks.",
 		},
 		{
+			icon:   "magnifyingglass",
+			tone:   th.Info,
 			title:  "Live Helm Lookup",
 			desc:   "Search symbols via Rust index",
 			prompt: "",
@@ -724,35 +770,54 @@ func renderEmptyConversationStage(c *ui.Context, tr *mygoshell.TranscriptControl
 		renderConversationHeaderBar(c, th, bc)
 
 		ui.Column(c.Key("conv-empty-hero")).Grow(1).MinHeight(0).Padding(24, 32).
-			Justify(ui.Center).AlignItems(ui.Center).Gap(20).Children(func() {
-			ui.Column(c).AlignItems(ui.Center).Gap(8).Children(func() {
-				ui.Row(c).Padding(3, 10).Radius(theme.RadiusPill).Gap(6).AlignItems(ui.Center).
+			Justify(ui.Center).AlignItems(ui.Center).Gap(22).Children(func() {
+			ui.Column(c).AlignItems(ui.Center).Gap(10).Children(func() {
+				theme.MarlinEmblem(c, "conv-hero-marlin", 68, th)
+				ui.Row(c).Padding(4, 12).Radius(theme.RadiusPill).Gap(6).AlignItems(ui.Center).
 					Background(kit.WithAlpha(th.Accent, 0.14)).
 					BorderWidth(1).BorderColor(kit.WithAlpha(th.Accent, 0.30)).Children(func() {
 					ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(th.Success)
 					ui.Text(c, modelLabel).Font(theme.FontMono).FontSize(11.5).FontWeight(700).TextColor(th.Accent).NoWrap()
 				})
 				ui.Text(c, "What would you like to build with Marlin?").
-					Font(kit.FontDisplay).FontSize(22).FontWeight(700).TextColor(th.Ink).NoWrap()
+					Font(kit.FontDisplay).FontSize(22).FontWeight(700).LetterSpacing(-0.3).TextColor(th.Ink).NoWrap()
 				ui.Text(c, "Markdown streaming, folded reasoning traces, Rust Helm search, and Doom workspaces ready.").
 					Font(kit.FontDisplay).FontSize(13.5).TextColor(th.InkMuted).NoWrap()
 			})
 
-			ui.Row(c.Key("conv-starter-cards")).MaxWidth(820).Gap(12).AlignItems(ui.Stretch).Children(func() {
+			ui.Row(c.Key("conv-starter-cards")).MaxWidth(840).Gap(13).AlignItems(ui.Stretch).Children(func() {
 				for idx, st := range starters {
 					item := st
-					card := kit.ActionControl(ui.ButtonBase(c.Key(fmt.Sprintf("conv-starter-%d", idx))).Label(item.title).
-						Grow(1).Padding(14, 16).Radius(12).AlignItems(ui.Start).Justify(ui.Start))
-					if card.Hovered() {
-						card.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.48, 0.72))
+					card := kit.ActionControl(ui.Button(c.Key(fmt.Sprintf("conv-starter-%d", idx)), "").Label(item.title).
+						Basis(0).Grow(1).MinWidth(0).Padding(16, 16).Radius(18).Gap(10).
+						Column().AlignItems(ui.Start).Justify(ui.Start).Background(ui.Transparent).Border(0, ui.Transparent))
+					if c.Vibrancy() {
+						card.Material(glass.Glass{
+							Style:       glass.Regular,
+							Tint:        kit.WithAlpha(th.SurfaceElevated, 0.34),
+							Interactive: true,
+						}).Shadow(0, 6, 20, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.24))
 					} else {
-						card.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.62))
+						bg := th.SurfaceElevated
+						if card.Hovered() {
+							bg = th.SurfaceHover
+						}
+						card.Background(bg).Border(1, th.Border)
 					}
-					card.BorderWidth(1).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.50, 0.68))
 					card.Children(func() {
-						ui.Column(c).Gap(4).AlignItems(ui.Start).Children(func() {
-							ui.Text(c, item.title).Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(th.Ink).NoWrap()
-							ui.Text(c, item.desc).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).NoWrap()
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+							ui.Row(c).Width(30).Height(30).Radius(9).AlignItems(ui.Center).Justify(ui.Center).
+								Background(kit.WithAlpha(item.tone, 0.16)).
+								Border(1, kit.WithAlpha(item.tone, 0.28)).Children(func() {
+								theme.SFIcon(c, item.icon, 14, item.tone, false)
+							})
+							theme.SFIcon(c, "arrow.up.right", 10.5, th.InkMuted, false)
+						})
+						ui.Column(c).Gap(3).AlignItems(ui.Stretch).Children(func() {
+							ui.Text(c, item.title).Font(kit.FontDisplay).FontSize(13.5).FontWeight(600).TextColor(th.Ink).
+								SingleLine().Ellipsis("…").MinWidth(0).Clip()
+							ui.Text(c, item.desc).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).
+								SingleLine().Ellipsis("…").MinWidth(0).Clip()
 						})
 					})
 					if card.Clicked() {

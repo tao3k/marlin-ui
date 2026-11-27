@@ -8,7 +8,9 @@
 package featurekit
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	"github.com/tao3k/marlin-mygo/engine/features"
 	"github.com/tao3k/marlin-mygo/engine/notify"
@@ -18,12 +20,199 @@ import (
 )
 
 var (
-	compiled          []features.FeatureModule
-	roomStatsProvider func() RoomStats
-	roomTasksProvider func() []RoomTask
-	roomTaskAdder     func(title string) error
-	roomTaskCycler    func(id string) error
+	compiled           []features.FeatureModule
+	roomStatsProvider  func() RoomStats
+	roomTasksProvider  func() []RoomTask
+	roomTaskAdder      func(title string) error
+	roomTaskCycler     func(id string) error
+	roomBridge         RoomBridge
+	roomResponderMu    sync.RWMutex
+	roomAgentResponder RoomAgentResponder
+	roomInvalidateFn   func()
 )
+
+// RoomAgentRequest describes one multi-agent role turn triggered by an explicit
+// @mention in a shared channel or any message in a 1:1 Direct Bot channel.
+type RoomAgentRequest struct {
+	ChannelID     string
+	ChannelName   string
+	IsDM          bool
+	ThreadRootID  string
+	BotID         string
+	BotHandle     string
+	BotName       string
+	BotRole       string
+	UserPrompt    string
+	RecentContext string
+}
+
+// RoomAgentResponder executes one real AI role reply (typically via hostlink's
+// Rust marlin-app-server gRPC connection) and returns the assistant markdown reply.
+type RoomAgentResponder func(ctx context.Context, req RoomAgentRequest) (string, error)
+
+// SetRoomAgentResponder registers the live backend responder for Agent Room bots.
+func SetRoomAgentResponder(fn RoomAgentResponder) {
+	roomResponderMu.Lock()
+	roomAgentResponder = fn
+	roomResponderMu.Unlock()
+}
+
+func getRoomAgentResponder() RoomAgentResponder {
+	roomResponderMu.RLock()
+	defer roomResponderMu.RUnlock()
+	return roomAgentResponder
+}
+
+func notifyRoomInvalidated() {
+	roomResponderMu.RLock()
+	fn := roomInvalidateFn
+	roomResponderMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// RoomChannelView is a lightweight build-tag-free projection of one Agent Room channel.
+type RoomChannelView struct {
+	ID               string
+	Name             string
+	Topic            string
+	IsDM             bool
+	BotParticipantID string
+	UnreadCount      int
+}
+
+// RoomParticipantView projects one human or agent member in Agent Room.
+type RoomParticipantView struct {
+	ID              string
+	Handle          string
+	Name            string
+	Role            string
+	IsAgent         bool
+	HostNode        string
+	Presence        string // "online" | "thinking" | "working" | "waiting-gate" | "offline"
+	CanPost         bool
+	CanManageItems  bool
+	CanInvokeTools  bool
+	RequireGate     bool
+	CanApproveGates bool
+}
+
+// RoomReactionView projects one emoji/tag reaction counter on a room message.
+type RoomReactionView struct {
+	Tag     string
+	Count   int
+	Reacted bool
+}
+
+// RoomMessageView projects one Agent Room message (edge-to-edge grouped feed).
+type RoomMessageView struct {
+	ID              string
+	ChannelID       string
+	AuthorID        string
+	AuthorName      string
+	AuthorHandle    string
+	AuthorRole      string
+	AuthorPresence  string
+	IsAgent         bool
+	Body            string
+	Mentions        []string
+	Pinned          bool
+	GateID          string
+	TaintedExternal bool
+	Delivery        string
+	Timestamp       string
+	CreatedUnix     int64
+	ThreadCount     int
+	Reactions       []RoomReactionView
+}
+
+// RoomFullSnapshot is a build-tag-free snapshot of Agent Room for iOS & Desktop views.
+type RoomFullSnapshot struct {
+	Available       bool
+	ActiveChannelID string
+	ActiveThreadID  string
+	CurrentActorID  string
+	ThinkingBots    []string
+	Channels        []RoomChannelView
+	Participants    []RoomParticipantView
+	Messages        []RoomMessageView
+	PinnedMessages  []RoomMessageView
+	ThreadMessages  []RoomMessageView
+	Tasks           []RoomTask
+}
+
+// RoomBridge exposes tag-safe Agent Room operations for mobile and desktop shells.
+type RoomBridge struct {
+	Snapshot          func() RoomFullSnapshot
+	SelectChannel     func(channelID string) error
+	PostMessage       func(channelID, body, threadRootID string) error
+	PostGateEmbed     func(channelID, botID, body, gateID string) error
+	ToggleReaction    func(msgID, tag string) error
+	OpenThread        func(msgID string) error
+	CloseThread       func()
+}
+
+// PostAgentRoomGateEmbed posts a bot message linked to a Tier-0 PromptGate so
+// humans can approve or reject inline inside the Agent Room stream.
+func PostAgentRoomGateEmbed(channelID, botID, body, gateID string) error {
+	if roomBridge.PostGateEmbed != nil {
+		return roomBridge.PostGateEmbed(channelID, botID, body, gateID)
+	}
+	return nil
+}
+
+// SetRoomBridge registers the live Agent Room controller bridge (empty under marlin_minimal).
+func SetRoomBridge(b RoomBridge) {
+	roomBridge = b
+}
+
+// AgentRoomSnapshot returns the live Agent Room snapshot (Available=false under marlin_minimal).
+func AgentRoomSnapshot() RoomFullSnapshot {
+	if roomBridge.Snapshot != nil {
+		return roomBridge.Snapshot()
+	}
+	return RoomFullSnapshot{}
+}
+
+// SelectAgentRoomChannel switches the active Agent Room channel.
+func SelectAgentRoomChannel(channelID string) error {
+	if roomBridge.SelectChannel != nil {
+		return roomBridge.SelectChannel(channelID)
+	}
+	return nil
+}
+
+// PostAgentRoomMessage sends a message (or thread reply) in Agent Room.
+func PostAgentRoomMessage(channelID, body, threadRootID string) error {
+	if roomBridge.PostMessage != nil {
+		return roomBridge.PostMessage(channelID, body, threadRootID)
+	}
+	return nil
+}
+
+// ToggleAgentRoomReaction toggles a reaction tag on an Agent Room message.
+func ToggleAgentRoomReaction(msgID, tag string) error {
+	if roomBridge.ToggleReaction != nil {
+		return roomBridge.ToggleReaction(msgID, tag)
+	}
+	return nil
+}
+
+// OpenAgentRoomThread opens a reply thread drawer for msgID.
+func OpenAgentRoomThread(msgID string) error {
+	if roomBridge.OpenThread != nil {
+		return roomBridge.OpenThread(msgID)
+	}
+	return nil
+}
+
+// CloseAgentRoomThread closes the active reply thread drawer.
+func CloseAgentRoomThread() {
+	if roomBridge.CloseThread != nil {
+		roomBridge.CloseThread()
+	}
+}
 
 // RoomTask is a lightweight projection of one collaborative Agent Room matter
 // so the Bento *Dashboard* can list, add, and toggle real tasks directly.
@@ -103,6 +292,9 @@ func Mount(
 	onDraftChanged func(scopeID, text string),
 	invalidate func(),
 ) (*features.Registry, *features.GovernanceLedger, *features.Host) {
+	roomResponderMu.Lock()
+	roomInvalidateFn = invalidate
+	roomResponderMu.Unlock()
 	reg := features.NewRegistry()
 	ledger := features.NewGovernanceLedger(features.DefaultGovernancePolicy())
 

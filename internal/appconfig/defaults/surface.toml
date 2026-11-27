@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 tao3k team and Contributors
+#
+# SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
+
+# Default declarative Liquid Glass & OS vibrancy surface configuration for Marlin UI.
+# Uses ONE unified smoked-glass surface across the top tab bar, main viewport, modeline,
+# and echo area (zero alpha-banding seams) at Ghostty-style 75% opacity (0.75) over
+# macOS 26 native NSGlassEffectView ("glass-clear") so desktop colors softly glow through
+# while keeping every character razor-sharp.
+# Users may override any field in ./example.toml, ./marlin.toml, or ~/.config/marlin/ui/manifest.toml.
+
+[surface]
+glass = true
+motion = true
+vibrancy = "glass-clear"
+window_opacity = 0.75
+glass_opacity = 0.56
+chrome_opacity = 0.0

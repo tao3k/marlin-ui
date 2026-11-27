@@ -5,6 +5,7 @@
 package appconfig
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,54 @@ import (
 
 	"github.com/tao3k/marlin-mygo/runtime/style"
 )
+
+//go:embed defaults/surface.toml
+var defaultSurfaceTOMLFS embed.FS
+
+// DefaultSurfaceConfig loads Marlin UI's embedded declarative defaults/surface.toml
+// so glass opacity, chrome/viewport translucency, and OS vibrancy are owned by
+// TOML rather than hardcoded Go constants.
+func DefaultSurfaceConfig() SurfaceConfig {
+	raw, err := defaultSurfaceTOMLFS.ReadFile("defaults/surface.toml")
+	if err != nil {
+		panic(fmt.Sprintf("appconfig: missing embedded defaults/surface.toml: %v", err))
+	}
+	kv, err := parseFlatTOML(string(raw))
+	if err != nil {
+		panic(fmt.Sprintf("appconfig: invalid embedded defaults/surface.toml: %v", err))
+	}
+	var warnings []string
+	return parseSurfaceConfig(kv, "defaults/surface.toml", &warnings)
+}
+
+// MergeSurfaceConfig overlays non-empty fields from override onto base.
+func MergeSurfaceConfig(base, override SurfaceConfig) SurfaceConfig {
+	out := base
+	if override.Glass != nil {
+		v := *override.Glass
+		out.Glass = &v
+	}
+	if override.Motion != nil {
+		v := *override.Motion
+		out.Motion = &v
+	}
+	if strings.TrimSpace(override.Vibrancy) != "" {
+		out.Vibrancy = strings.TrimSpace(override.Vibrancy)
+	}
+	if override.GlassOpacity != nil {
+		v := *override.GlassOpacity
+		out.GlassOpacity = &v
+	}
+	if override.ChromeOpacity != nil {
+		v := *override.ChromeOpacity
+		out.ChromeOpacity = &v
+	}
+	if override.ViewportOpacity != nil {
+		v := *override.ViewportOpacity
+		out.ViewportOpacity = &v
+	}
+	return out
+}
 
 // UIThemeSchemaVersion pins the strict manifest schema for ~/.config/marlin/ui/.
 const UIThemeSchemaVersion = "marlin.ui.theme.v1"
@@ -429,13 +478,16 @@ func parseSurfaceConfig(kv map[string]string, file string, warnings *[]string) S
 	cfg.Motion = parseBoolOpt("motion")
 	cfg.GlassOpacity = parseFloatOpt("glass_opacity", 0.08, 0.92)
 	cfg.ChromeOpacity = parseFloatOpt("chrome_opacity", 0.0, 0.95)
-	cfg.ViewportOpacity = parseFloatOpt("viewport_opacity", 0.0, 0.95)
+	cfg.ViewportOpacity = parseFloatOpt("window_opacity", 0.0, 0.95)
+	if vp := parseFloatOpt("viewport_opacity", 0.0, 0.95); vp != nil {
+		cfg.ViewportOpacity = vp
+	}
 	if vib := strings.ToLower(strings.TrimSpace(kv["vibrancy"])); vib != "" {
 		switch vib {
-		case "auto", "hud", "under-window", "sidebar", "popover", "none":
+		case "auto", "glass", "glass-clear", "hud", "under-window", "sidebar", "popover", "none":
 			cfg.Vibrancy = vib
 		default:
-			*warnings = append(*warnings, fmt.Sprintf("%s: unsupported vibrancy %q (expected auto|hud|under-window|sidebar|popover|none)", file, vib))
+			*warnings = append(*warnings, fmt.Sprintf("%s: unsupported vibrancy %q (expected auto|glass|glass-clear|hud|under-window|sidebar|popover|none)", file, vib))
 		}
 	}
 	return cfg

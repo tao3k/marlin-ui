@@ -273,3 +273,82 @@ func TestQuintConcurrencyInvariantsAST(t *testing.T) {
 		}
 	}
 }
+
+// TestFrameAntiFlickerAndOverflowInvariantsAST mechanically enforces Frame-wide
+// visual stability guarantees across EVERY Emacs Window, Buffer, Popup, Split,
+// Modeline, Tab Bar, and Minibuffer under internal/emacs/*:
+//  1. MUI-UI-R01 (Zero Text-Overflow Collision): chaining .NoWrap() with
+//     .MaxLines(...) is forbidden because MyGo's NoWrap explicitly allows text
+//     to paint outside its bounding box onto adjacent columns. Single-line
+//     cells MUST use .SingleLine().Ellipsis("…").MinWidth(0).Clip().
+//  2. MUI-UI-R02 (Zero Synchronous Invalidation Storms): Frame.View,
+//     OpenMinibuffer, OpenHydra, and EnterInsert must route redraw requests
+//     through f.requestFrame() (inView-guarded + FramePacer-paced) instead of
+//     calling raw f.invalidate() directly.
+func TestFrameAntiFlickerAndOverflowInvariantsAST(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	fset := token.NewFileSet()
+	root := filepath.Join(repoRoot, "internal", "emacs")
+
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		relPath, _ := filepath.Rel(repoRoot, path)
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			t.Errorf("parse %s: %v", relPath, parseErr)
+			return nil
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					// MUI-UI-R01: forbid NoWrap().MaxLines(...) or MaxLines(...).NoWrap().
+					if sel.Sel.Name == "MaxLines" || sel.Sel.Name == "NoWrap" {
+						if prevCall, ok := sel.X.(*ast.CallExpr); ok {
+							if prevSel, ok := prevCall.Fun.(*ast.SelectorExpr); ok {
+								if (sel.Sel.Name == "MaxLines" && prevSel.Sel.Name == "NoWrap") ||
+									(sel.Sel.Name == "NoWrap" && prevSel.Sel.Name == "MaxLines") {
+									pos := fset.Position(call.Pos())
+									t.Errorf("MUI-UI-R01 violation in %s:%d: .%s().%s() overflows adjacent columns in MyGo (use .SingleLine().Ellipsis(\"…\").MinWidth(0).Clip())",
+										relPath, pos.Line, prevSel.Sel.Name, sel.Sel.Name)
+								}
+							}
+						}
+					}
+				}
+			}
+			// MUI-UI-R02: forbid raw f.invalidate() inside View / OpenMinibuffer / OpenHydra / EnterInsert.
+			if fn, ok := n.(*ast.FuncDecl); ok && fn.Recv != nil && fn.Body != nil {
+				switch fn.Name.Name {
+				case "View", "OpenMinibuffer", "OpenHydra", "EnterInsert":
+					ast.Inspect(fn.Body, func(inner ast.Node) bool {
+						if _, isLit := inner.(*ast.FuncLit); isLit {
+							return false
+						}
+						c, ok := inner.(*ast.CallExpr)
+						if !ok {
+							return true
+						}
+						sel, ok := c.Fun.(*ast.SelectorExpr)
+						if ok && sel.Sel.Name == "invalidate" {
+							pos := fset.Position(c.Pos())
+							t.Errorf("MUI-UI-R02 violation in %s:%d (%s): direct f.invalidate() causes redundant double-frame flicker; use f.requestFrame()",
+								relPath, pos.Line, fn.Name.Name)
+						}
+						return true
+					})
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk internal/emacs: %v", err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/engine/input"
+	"github.com/tao3k/marlin-mygo/engine/search"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
@@ -513,5 +514,161 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Deep Think") || !tt.HasText("@ Cite") {
 		t.Fatalf("expected empty *conversation* Hero Stage + docked Composer, got %q", strings.Join(tt.Texts(), " | "))
+	}
+}
+
+func TestHelmAndVerticoDrawerHeightRemainsFixedAndDeclarativeSurfaceTOMLApplies(t *testing.T) {
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-fixed-height"},
+	})
+
+	// 1. Default unified Liquid Glass translucency & macOS 26 glass-clear vibrancy come from defaults/surface.toml.
+	glassOp, chromeOp, viewportOp, vib := fr.EffectiveSurface(fr.Theme)
+	if vib != "glass-clear" || glassOp != 0.56 || chromeOp != 0.0 || viewportOp != 0.75 {
+		t.Fatalf("expected declarative TOML unified surface defaults (glass-clear, 0.56, 0.00, 0.75), got (%q, %.2f, %.2f, %.2f)", vib, glassOp, chromeOp, viewportOp)
+	}
+
+	// 2. Opening Helm keeps the exact same drawer Y anchor across many hits vs 0 hits (zero vertical bounce).
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	fr.OpenHelm()
+	tt.Frame()
+	rectAll, okAll := tt.Find("Follow Preview")
+	if !okAll {
+		t.Fatalf("expected Helm header visible, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	tt.Type("zzzz_no_matching_candidate_ever")
+	tt.Frame()
+	rectEmpty, okEmpty := tt.Find("Follow Preview")
+	if !okEmpty {
+		t.Fatalf("expected Helm header still visible on 0 hits")
+	}
+	if rectAll.Y != rectEmpty.Y {
+		t.Fatalf("Helm drawer bounced vertically when candidate count dropped to 0: y_many=%v y_empty=%v", rectAll.Y, rectEmpty.Y)
+	}
+
+	// 3. Opening Vertico M-x keeps the exact same drawer Y anchor across 10 hits vs 1 hit vs 0 hits.
+	fr.OpenCommands()
+	tt.Frame()
+	rectCmdMany, okMany := tt.Find("helm")
+	if !okMany {
+		t.Fatalf("expected M-x candidates visible")
+	}
+	tt.Type("zzzz_no_command_match")
+	tt.Frame()
+	rectCmdEmpty, okCmdEmpty := tt.Find("No matching candidates")
+	if !okCmdEmpty {
+		t.Fatalf("expected Vertico empty placeholder visible")
+	}
+	if diff := rectCmdMany.Y - rectCmdEmpty.Y; diff < -16 || diff > 16 {
+		t.Fatalf("Vertico drawer bounced vertically on 0 hits: y_many=%v y_empty=%v", rectCmdMany.Y, rectCmdEmpty.Y)
+	}
+}
+
+func TestHelmZeroBlankFlashDuringAsyncQueryTransition(t *testing.T) {
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-swr-helm"},
+	})
+
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	fr.OpenHelm()
+	gen1 := sh.Desktop.HelmSearch.Engine.Generation()
+	sh.Desktop.HelmSearch.Engine.IngestBatch(gen1, search.SourceMeta{
+		ID:       "rust-graph",
+		Label:    "Workspace Search",
+		Priority: 2,
+	}, []search.Candidate{
+		{
+			ID:       "rust:marlin-1",
+			SourceID: "rust-graph",
+			Title:    "marlin_search.rs",
+			Location: "crates/search/src/marlin_search.rs:L10",
+			Snippet:  "pub fn query_workspace() {}",
+		},
+	})
+	tt.Frame()
+	if !tt.HasText("marlin_search.rs") {
+		t.Fatalf("expected initial Helm hit rendered, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	prevRect, ok := tt.Find("Follow Preview")
+	if !ok {
+		t.Fatalf("expected Follow Preview control rendered")
+	}
+
+	// Simulate user typing a new character while async Rust RPC has not returned yet:
+	// tt.Type("m") delivers the TextInput event and settles the immediate post-keystroke
+	// frame; HelmEngine.BeginQuery wiped rust-graph, yet SWR MUST hold the committed
+	// frame steady with ZERO flash to blank/local-only and pause 1Hz idle ticks!
+	tt.Type("m")
+	if fr.ShouldTickIdle() {
+		t.Fatalf("expected 1Hz background clock tick paused while Helm completion is active")
+	}
+	if tt.HasText("No matching candidates") || tt.HasText("No candidate selected") {
+		t.Fatalf("Helm flashed blank/empty during in-flight async query! texts=%q", strings.Join(tt.Texts(), " | "))
+	}
+	if !tt.HasText("marlin_search.rs") {
+		t.Fatalf("expected SWR to keep previous candidate visible while syncing, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	midRect, ok := tt.Find("Follow Preview")
+	if !ok || midRect.Y != prevRect.Y {
+		t.Fatalf("expected 0px vertical shift during SWR transition: before=%v during=%v", prevRect.Y, midRect.Y)
+	}
+
+	// Now deliver the new generation's Rust hits (including a very long title that
+	// previously overflowed onto its right-side subtitle column) -> atomic single-frame swap!
+	gen2 := sh.Desktop.HelmSearch.Engine.Generation()
+	longTitle := "SPDX-FileCopyrightText: 2026 tao3k team and Contributors · README.org · extra_long_segment"
+	subText := "workspace.file · #blake3-256"
+	sh.Desktop.HelmSearch.Engine.IngestBatch(gen2, search.SourceMeta{
+		ID:       "rust-graph",
+		Label:    "Workspace Search",
+		Priority: 2,
+	}, []search.Candidate{
+		{
+			ID:       "rust:marlin-2",
+			SourceID: "rust-graph",
+			Title:    "marlin_next.rs",
+			Subtitle: subText,
+			Location: "crates/search/src/marlin_next.rs:L42",
+			Snippet:  "pub fn next_query() {}",
+		},
+		{
+			ID:       "rust:long-title",
+			SourceID: "rust-graph",
+			Title:    longTitle,
+			Subtitle: "long.sub.unique",
+			Location: "README.org:L1",
+			Snippet:  "# SPDX-FileCopyrightText: 2026 tao3k team and Contributors",
+		},
+	})
+	tt.Frame()
+	if !tt.HasText("marlin_next.rs") {
+		t.Fatalf("expected atomic swap to new generation candidate, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if tt.HasText("Rust gRPC") || tt.HasText("Offline · #") {
+		t.Fatalf("Helm header must stay clean without noisy Rust gRPC / Offline provenance pills")
+	}
+	shortSubRect, okShortSub := tt.Find(subText)
+	longSubRect, okLongSub := tt.Find("long.sub.unique")
+	if !okShortSub || !okLongSub {
+		t.Fatalf("expected both short and long candidate subtitles rendered")
+	}
+	if longSubRect.X != shortSubRect.X {
+		t.Fatalf("long candidate title shifted subtitle column: short.X=%.1f long.X=%.1f", shortSubRect.X, longSubRect.X)
+	}
+	afterRect, ok := tt.Find("Follow Preview")
+	if !ok || afterRect.Y != prevRect.Y {
+		t.Fatalf("expected 0px vertical shift after atomic swap: before=%v after=%v", prevRect.Y, afterRect.Y)
 	}
 }

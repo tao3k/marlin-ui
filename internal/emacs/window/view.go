@@ -135,15 +135,16 @@ func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *b
 				weight = 700
 			}
 			hdr := ui.Row(c.Key(fmt.Sprintf("doom-split-hdr-%d", paneIdx))).
-				Height(28).Padding(0, 12).Gap(8).AlignItems(ui.Center).
+				Height(28).MinWidth(0).Padding(0, 12).Gap(8).AlignItems(ui.Center).Clip().
 				Background(hdrBg).BorderWidth(0, 0, 1, 0).BorderColor(accentLine)
 			hdr.Children(func() {
-				ui.Box(c).Width(6).Height(6).Radius(theme.RadiusPill).Background(dotCol)
+				ui.Box(c).Width(6).Height(6).Shrink(0).Radius(theme.RadiusPill).Background(dotCol)
 				lbl := fmt.Sprintf("[%d] %s", paneIdx+1, buf)
 				btn := ui.ButtonBase(c.Key(fmt.Sprintf("doom-split-focus-%d", paneIdx))).
-					Label(lbl).Padding(2, 4).Radius(theme.RadiusSmall).AlignItems(ui.Center)
+					Label(lbl).MinWidth(0).Shrink(1).Padding(2, 4).Radius(theme.RadiusSmall).AlignItems(ui.Center).Clip()
 				btn.Children(func() {
-					ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(12).FontWeight(weight).TextColor(titleCol).NoWrap()
+					ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(12).FontWeight(weight).TextColor(titleCol).
+						SingleLine().Ellipsis("…").MinWidth(0).Clip()
 				})
 				if btn.Clicked() && split.OnFocusPane != nil {
 					split.OnFocusPane(paneIdx)
@@ -188,7 +189,7 @@ func renderSplitPanes(c *ui.Context, th theme.Theme, primaryBuf buffer.ID, bc *b
 
 func renderPopupDrawer(c *ui.Context, th theme.Theme, bc *buffer.Context, popup PopupProps, isRight bool) {
 	drawer := ui.Column(c.Key("doom-popup-drawer")).Grow(2).
-		Background(theme.GlassTone(c, th.Bar, th, 0.56, 0.84)).
+		Background(theme.GlassTone(c, th.Bar, th, 0.34, 0.58)).
 		AlignItems(ui.Stretch).Clip()
 	if isRight {
 		drawer.MinWidth(320).BorderWidth(0, 0, 0, 1).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.45, 0.70))
@@ -203,12 +204,13 @@ func renderPopupDrawer(c *ui.Context, th theme.Theme, bc *buffer.Context, popup 
 
 	drawer.Children(func() {
 		// Refined Doom Popup header strip: luminous accent dot, buffer title, side badge, Raise & Dismiss.
-		ui.Row(c.Key("doom-popup-hdr")).Height(34).Padding(0, 14).Gap(8).AlignItems(ui.Center).
+		ui.Row(c.Key("doom-popup-hdr")).Height(34).MinWidth(0).Padding(0, 14).Gap(8).AlignItems(ui.Center).Clip().
 			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.44, 0.72)).
 			BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
-			ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(th.Accent)
+			ui.Box(c).Width(7).Height(7).Shrink(0).Radius(theme.RadiusPill).Background(th.Accent)
 			ui.Text(c, fmt.Sprintf("POPUP · %s", popup.Buffer)).
-				Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Ink).NoWrap()
+				Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Ink).
+				SingleLine().Ellipsis("…").Shrink(1).MinWidth(0).Clip()
 			ui.Row(c).Padding(2, 7).Radius(theme.RadiusPill).
 				Background(theme.GlassTone(c, th.Bar, th, 0.45, 0.68)).Children(func() {
 				ui.Text(c, sideLabel).Font(theme.FontMono).FontSize(10.5).FontWeight(600).TextColor(th.Info).NoWrap()

@@ -74,11 +74,159 @@ check-file-size max_lines="1000":
 # --- Local DEV-ONLY helpers (never baked into Go release binaries) ---
 
 # DEV: Launch Desktop client connected to a sibling marlin-agent-core Rust binary.
-dev-desktop core="../.." tags="marlin_full":
-    @BIN="{{core}}/target/debug/marlin-mygo-host"; \
-    if [ ! -x "$BIN" ]; then BIN="{{core}}/target/release/marlin-app-server"; fi; \
-    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then export GOWORK="$(cd .. && pwd)/marlin-dev.work"; fi; \
-    CGO_ENABLED=0 go run -tags "{{tags}}" ./cmd/marlin-desktop -app-server "$BIN"
+# Accepts any marlin-desktop flags directly (e.g. `just dev-desktop -config ./example.toml`).
+# Override core root or build tags via CORE=... / TAGS=... environment variables.
+dev-desktop *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    core="${CORE:-../..}"
+    tags="${TAGS:-marlin_full}"
+    for envf in "$core/.env" "./.env"; do
+        if [ -f "$envf" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$envf"
+            set +a
+        fi
+    done
+    bin=""
+    for cand in \
+        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-mygo-host" \
+        "$core/target/release/marlin-app-server"; do
+        if [ -x "$cand" ]; then
+            bin="$cand"
+            break
+        fi
+    done
+    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
+        export GOWORK="$(cd .. && pwd)/marlin-dev.work"
+    fi
+    has_host_or_bin=0
+    for arg in {{args}}; do
+        case "$arg" in
+            -app-server|-app-server=*|-host|-host=*|-standalone|-standalone=*) has_host_or_bin=1 ;;
+        esac
+    done
+    extra=()
+    if [ "$has_host_or_bin" -eq 0 ] && [ -n "$bin" ]; then
+        extra+=(-app-server "$bin")
+    fi
+    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop ${extra[@]+"${extra[@]}"} {{args}}
+
+# DEV: Launch iOS Companion client in Apple HIG (393x852) dev shell connected to sibling Rust host.
+# Accepts any marlin-mobile flags directly (e.g. `just dev-ios -config ./example.toml -device iphone16`).
+dev-ios *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    core="${CORE:-../..}"
+    tags="${TAGS:-marlin_full}"
+    for envf in "$core/.env" "./.env"; do
+        if [ -f "$envf" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$envf"
+            set +a
+        fi
+    done
+    bin=""
+    for cand in \
+        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-mygo-host" \
+        "$core/target/release/marlin-app-server"; do
+        if [ -x "$cand" ]; then
+            bin="$cand"
+            break
+        fi
+    done
+    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
+        export GOWORK="$(cd .. && pwd)/marlin-dev.work"
+    fi
+    has_host_or_bin=0
+    for arg in {{args}}; do
+        case "$arg" in
+            -app-server|-app-server=*|-host|-host=*|-standalone|-standalone=*) has_host_or_bin=1 ;;
+        esac
+    done
+    extra=(-platform ios)
+    if [ "$has_host_or_bin" -eq 0 ] && [ -n "$bin" ]; then
+        extra+=(-app-server "$bin")
+    fi
+    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-mobile ${extra[@]+"${extra[@]}"} {{args}}
+
+# Build native iOS .app bundle via MyGo Swift/Metal host (`ios/simulator` or `ios` for physical device).
+build-ios platform="ios/simulator" out="./dist/ios" tags="marlin_full":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    unset NIX_CFLAGS_COMPILE NIX_LDFLAGS SDKROOT
+    sdk_name="iphonesimulator"
+    target="arm64-apple-ios17.0-simulator"
+    plat_name="iPhoneSimulator"
+    if [ "{{platform}}" = "ios" ] || [ "{{platform}}" = "iphoneos" ]; then
+        sdk_name="iphoneos"
+        target="arm64-apple-ios17.0"
+        plat_name="iPhoneOS"
+    fi
+    sdk_path="$(xcrun --sdk "$sdk_name" --show-sdk-path)"
+    clang_bin="$(xcrun --sdk "$sdk_name" --find clang)"
+    mygo_dir="$(go list -m -f '{{{{.Dir}}' github.com/egoist/mygo)"
+    host_dir="$mygo_dir/internal/mobile/ios"
+    work_dir=".mygo/ios-$sdk_name"
+    bundle="{{out}}/Marlin.app"
+    mkdir -p "$work_dir" "{{out}}"
+    rm -rf "$bundle"
+    mkdir -p "$bundle"
+    echo "[ios] compiling Go c-archive ($target, tags={{tags}})..."
+    GOOS=ios GOARCH=arm64 CGO_ENABLED=1 \
+        CC="$clang_bin -target $target -isysroot $sdk_path" \
+        go build -trimpath -tags "{{tags}}" -ldflags="{{ldflags}}" \
+        -buildmode=c-archive -o "$work_dir/libapp.a" ./cmd/marlin-mobile
+    echo "[ios] compiling MyGo Swift UIKit/Metal host..."
+    xcrun --sdk "$sdk_name" swiftc -parse-as-library -module-name MyGoHost \
+        -target "$target" -sdk "$sdk_path" \
+        -import-objc-header "$host_dir/MyGo.h" \
+        -wmo -c -o "$work_dir/host.o" \
+        "$host_dir"/Sources/MyGoHost/*.swift
+    echo "[ios] linking native $bundle/Marlin..."
+    xcrun --sdk "$sdk_name" swiftc -target "$target" -sdk "$sdk_path" \
+        "$work_dir/host.o" "$work_dir/libapp.a" \
+        -o "$bundle/Marlin" \
+        -Xlinker -dead_strip -lresolv \
+        -framework UIKit -framework WebKit -framework Metal -framework QuartzCore \
+        -framework CoreText -framework CoreGraphics -framework Security -framework CoreFoundation \
+        -framework UserNotifications -framework UniformTypeIdentifiers -framework Network -framework AVFoundation
+    sed -e "s/__VERSION__/{{version}}/g" -e "s/__PLATFORM__/$plat_name/g" \
+        packaging/ios/Info.plist.tmpl > "$bundle/Info.plist"
+    if [ -f "resources/icon.png" ]; then
+        cp "resources/icon.png" "$bundle/AppIcon.png"
+    fi
+    codesign --force --sign - "$bundle"
+    echo "[ios] OK: built native $plat_name bundle at $bundle"
+
+# DEV: Build and launch native Marlin.app inside Xcode iOS Simulator (`just dev-ios-sim [udid_or_booted]`).
+dev-ios-sim device="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-ios ios/simulator ./dist/ios
+    dev="{{device}}"
+    if [ -z "$dev" ]; then
+        dev="$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; d=json.load(sys.stdin).get("devices",{}); print(next((x["udid"] for arr in d.values() for x in arr if x.get("state")=="Booted"), ""))' 2>/dev/null || true)"
+    fi
+    if [ -z "$dev" ]; then
+        dev="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin).get("devices",{}); print(next((x["udid"] for arr in d.values() for x in arr if x.get("isAvailable") and "iPhone" in x.get("name","")), ""))' 2>/dev/null || true)"
+        if [ -z "$dev" ]; then
+            echo "No iOS Simulator runtime installed yet. Install one with:"
+            echo "  xcodebuild -downloadPlatform iOS"
+            echo "Meanwhile, your native iOS Simulator bundle is ready at: dist/ios/Marlin.app"
+            echo "Or launch the instant macOS Apple HIG iOS dev shell right now with:"
+            echo "  just dev-ios -config ./example.toml"
+            exit 1
+        fi
+        xcrun simctl boot "$dev"
+    fi
+    open -a Simulator
+    xcrun simctl install "$dev" ./dist/ios/Marlin.app
+    exec xcrun simctl launch --console "$dev" org.tao3k.marlin
 
 # DEV: Run live cross-process hostlink E2E test against a sibling marlin-agent-core Rust binary.
 dev-test-rust core="../..":

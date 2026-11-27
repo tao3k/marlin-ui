@@ -81,6 +81,7 @@ func main() {
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
 
+	appconfig.LoadDotEnv(cfg.ConfigFile)
 	cfg.ModelCfg = appconfig.LoadModelConfig(cfg.ConfigFile)
 	if cfg.ModelCfg.Warning != "" {
 		log.Printf("model config warning: %s", cfg.ModelCfg.Warning)
@@ -509,9 +510,8 @@ func main() {
 }
 
 // desktopVibrancy resolves the declarative TOML [surface].vibrancy material
-// ("auto", "hud", "under-window", "sidebar", "popover", "none") to a flat 1:1
-// OS frosted vibrancy material (NSVisualEffectView on macOS, Acrylic/Mica on
-// Windows 11) with zero lens magnification or edge warping.
+// ("glass-clear", "glass", "hud", "popover", "under-window", "sidebar", "auto", "none")
+// to native macOS 26 NSGlassEffectView Liquid Glass or NSVisualEffectView / Acrylic.
 func desktopVibrancy(glassOn, isLight bool, mode string) mygo.Vibrancy {
 	if !glassOn {
 		return mygo.VibrancyNone
@@ -519,6 +519,10 @@ func desktopVibrancy(glassOn, isLight bool, mode string) mygo.Vibrancy {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "none":
 		return mygo.VibrancyNone
+	case "glass-clear":
+		return mygo.VibrancyGlassClear
+	case "glass":
+		return mygo.VibrancyGlass
 	case "hud":
 		return mygo.VibrancyHUD
 	case "under-window":
@@ -529,9 +533,9 @@ func desktopVibrancy(glassOn, isLight bool, mode string) mygo.Vibrancy {
 		return mygo.VibrancyPopover
 	default:
 		if isLight {
-			return mygo.VibrancyUnderWindow
+			return mygo.VibrancyGlass
 		}
-		return mygo.VibrancyHUD
+		return mygo.VibrancyGlassClear
 	}
 }
 

@@ -34,12 +34,14 @@ func renderEditorialCodeBlock(c *ui.Context, b *markdown.CodeBlockView, tr *mygo
 			BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
 			ui.Text(c, strings.ToUpper(lang)).Font(theme.FontMono).FontSize(10.5).FontWeight(700).TextColor(th.Accent).NoWrap()
 			if b.Open {
-				kit.LoadingIndicator(c, 11, th.Info, false)
+				ui.Spinner(c).Size(11, 11)
 				ui.Text(c, "writing...").Font(theme.FontMono).FontSize(10.5).TextColor(th.Info).NoWrap()
 			}
 			ui.Spacer(c)
 			if tr != nil && tr.OnCopyCode != nil && strings.TrimSpace(codeStr) != "" {
-				if theme.ActionLink(c, fmt.Sprintf("code-copy-%d", b.Index), "Copy", th.InkMuted, th).Clicked() {
+				if theme.StyledButton(c, theme.ButtonSpec{
+					Key: fmt.Sprintf("code-copy-%d", b.Index), Label: "Copy", Icon: theme.IconCopy, Variant: theme.BtnGhost, Size: theme.BtnSizeSM,
+				}, th).Clicked() {
 					tr.OnCopyCode(codeStr)
 				}
 			}
@@ -237,7 +239,7 @@ func renderTransientStatusStrip(c *ui.Context, tr *mygoshell.TranscriptControlle
 	ui.Row(c.Key("conv-transient-pulse")).Height(28).Padding(0, 24).Gap(8).AlignItems(ui.Center).
 		Background(kit.WithAlpha(th.Info, 0.09)).
 		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.Info, 0.25)).Children(func() {
-		kit.LoadingIndicator(c, 12, th.Info, false)
+		ui.Spinner(c).Size(12, 12)
 		ui.Text(c, fmt.Sprintf("Live Stream · %s · Turn #%d", model, tr.ActiveTurn())).
 			Font(theme.FontMono).FontSize(11.5).FontWeight(600).TextColor(th.Info).NoWrap()
 		ui.Spacer(c)
@@ -263,7 +265,8 @@ func renderArtifactSplitStage(c *ui.Context, th theme.Theme, bc *Context) {
 			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.68)).
 			BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
 			renderMetaPill(c, art.DataType, th.Accent, th)
-			ui.Text(c, title).Font(kit.FontDisplay).FontSize(13).FontWeight(600).TextColor(th.Ink).Grow(1).NoWrap().MaxLines(1)
+			ui.Text(c, title).Font(kit.FontDisplay).FontSize(13).FontWeight(600).TextColor(th.Ink).
+				Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			if bc.OnCloseArtifact != nil {
 				if theme.ActionButton(c, "conv-artifact-close", "Close", th.InkMuted, false, th).Clicked() {
 					bc.OnCloseArtifact()

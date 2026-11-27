@@ -61,6 +61,7 @@ type ModelConfig struct {
 	Anthropic    AnthropicThinkingConfig
 	Session      SessionTOMLConfig
 	Host         HostTOMLConfig
+	Surface      SurfaceConfig
 	Loaded       bool
 	Warning      string
 }
@@ -153,6 +154,7 @@ func ParseModelConfigTOML(raw string) (ModelConfig, error) {
 		Default: ModelRoute{Alias: "default", IsDefault: true},
 		Named:   make(map[string]ModelRoute),
 	}
+	surfaceKV := make(map[string]string)
 	section := ""
 	lines := strings.Split(raw, "\n")
 	for idx, orig := range lines {
@@ -180,6 +182,8 @@ func ParseModelConfigTOML(raw string) (ModelConfig, error) {
 			applySessionField(&cfg.Session, key, val)
 		case section == "host":
 			applyHostField(&cfg.Host, key, val)
+		case section == "surface":
+			surfaceKV[strings.ToLower(key)] = unquoteTOML(val)
 		case strings.HasPrefix(section, "models."):
 			alias := strings.TrimSpace(strings.TrimPrefix(section, "models."))
 			alias = unquoteTOML(alias)
@@ -190,6 +194,13 @@ func ParseModelConfigTOML(raw string) (ModelConfig, error) {
 			rt.Alias = alias
 			applyRouteField(&rt, key, val)
 			cfg.Named[alias] = rt
+		}
+	}
+	if len(surfaceKV) > 0 {
+		var surfWarnings []string
+		cfg.Surface = parseSurfaceConfig(surfaceKV, "config.toml", &surfWarnings)
+		if len(surfWarnings) > 0 && cfg.Warning == "" {
+			cfg.Warning = strings.Join(surfWarnings, "; ")
 		}
 	}
 	return cfg, nil

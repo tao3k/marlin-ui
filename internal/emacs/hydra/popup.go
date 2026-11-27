@@ -107,7 +107,8 @@ func renderHeadRow(c *ui.Context, key string, h Head, th theme.Theme) ui.Element
 			ui.Text(c, h.Key).Font(theme.FontMono).FontSize(12).FontWeight(kWeight).TextColor(keyCol).NoWrap()
 		})
 		ui.Text(c, "→").Font(theme.FontMono).FontSize(11.5).TextColor(th.TabSeparator).NoWrap()
-		ui.Text(c, h.Label).Font(kit.FontDisplay).FontSize(theme.FontSizeUI).FontWeight(500).TextColor(labelCol).Grow(1).NoWrap().MaxLines(1)
+		ui.Text(c, h.Label).Font(kit.FontDisplay).FontSize(theme.FontSizeUI).FontWeight(500).TextColor(labelCol).
+			Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 	})
 	return row
 }

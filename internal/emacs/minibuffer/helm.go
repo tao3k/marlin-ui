@@ -17,7 +17,11 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
-// renderHelm renders Marlin AI's Rust-backed Vertico + Consult + Embark Helm surface:
+const helmDrawerHeight float32 = 356
+
+// renderHelm renders Marlin AI's Rust-backed Vertico + Consult + Embark Helm surface
+// inside a fixed-height drawer (Doom Emacs helm-display-buffer-default-height /
+// vertico-resize=nil) so candidate count changes NEVER bounce or reflow the viewport:
 //   - Row 1: Rust Helm Mode Preset Tabs ([All] [Search] [DSL] [Buffers] [Commands])
 //            + live source counts + authoritative Rust gRPC / generation badge + Follow toggle
 //   - Row 2: Live Two-Stage Consult / DSL Query Pill Bar (matching Rust MAR-HELM-R02:
@@ -40,23 +44,30 @@ func renderHelm(
 	}
 	eng := helm.Engine
 	eng.SetViewportRows(9)
-	rows, _, totalHits, _, _, gen := eng.VisibleWindow(s.helmRowsBuf[:0])
-	s.helmRowsBuf = rows
-	srcs := eng.SourceSummaries(nil)
+	liveRows, _, liveTotalHits, _, _, liveGen := eng.VisibleWindow(s.helmRowsBuf[:0])
+	s.helmRowsBuf = liveRows
+	liveSrcs := eng.SourceSummaries(nil)
 	activeFilter := eng.ActiveSourceFilter()
 	previewOpen := eng.PreviewOpen()
 	markedCount := eng.MarkedCount()
-	selCand, hasSel := eng.Selected()
-	_, prevTitle, prevBody := eng.Preview()
-	if prevTitle == "" && hasSel {
-		prevTitle = selCand.Title
+	liveSelCand, liveHasSel := eng.Selected()
+	_, livePrevTitle, livePrevBody := eng.Preview()
+	if livePrevTitle == "" && liveHasSel {
+		livePrevTitle = liveSelCand.Title
 	}
-	if prevBody == "" && hasSel {
-		prevBody = selCand.Snippet
-		if prevBody == "" {
-			prevBody = selCand.Location
+	if livePrevBody == "" && liveHasSel {
+		livePrevBody = liveSelCand.Snippet
+		if livePrevBody == "" {
+			livePrevBody = liveSelCand.Location
 		}
 	}
+
+	// Double-buffered Stale-While-Revalidate resolution: while a new keystroke's
+	// async Rust gRPC batch is in flight, hold the previous frame rock-steady
+	// instead of flashing blank / "No candidate selected".
+	rows, srcs, totalHits, _, selCand, hasSel, prevTitle, prevBody, _ := s.resolveHelmFrame(
+		rustConnected, liveRows, liveSrcs, liveTotalHits, liveGen, liveSelCand, liveHasSel, livePrevTitle, livePrevBody,
+	)
 
 	cq := search.ParseConsultQuery(query)
 	highlightQuery := query
@@ -75,10 +86,11 @@ func renderHelm(
 		return 0
 	}
 
-	ui.Column(c.Key("helm-vertico-list")).Background(theme.GlassTone(c, th.Bar, th, 0.56, 0.78)).Padding(10, 14).Gap(8).
+	ui.Column(c.Key("helm-vertico-list")).Height(helmDrawerHeight).Shrink(0).Clip().
+		Background(theme.GlassTone(c, th.Bar, th, 0.34, 0.58)).Padding(10, 14).Gap(8).
 		BorderWidth(1, 0, 0, 0).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.44, 0.56)).AlignItems(ui.Stretch).Children(func() {
-		// 1. Rust-Parity Mode Preset Tabs + Provenance Badge + Follow Preview Toggle.
-		ui.Row(c.Key("helm-mode-presets")).Gap(6).AlignItems(ui.Center).Children(func() {
+		// 1. Fixed-height Rust-Parity Mode Preset Tabs + Provenance Badge + Follow Preview Toggle.
+		ui.Row(c.Key("helm-mode-presets")).Height(28).Shrink(0).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
 			presets := []struct {
 				id       string
 				label    string
@@ -109,11 +121,13 @@ func renderHelm(
 					lbl = fmt.Sprintf("%s (%d)", preset.label, preset.count)
 				}
 				if theme.ActionButton(c, "hpreset-"+preset.id, lbl, tone, active, th).Clicked() {
+					s.ClearHelmPending()
 					if preset.dslSeed {
 						eng.SetSourceFilter("")
 						if !strings.HasPrefix(strings.TrimSpace(query), "(") {
 							s.SetInput("(query ")
-							helm.SetQuery("(query ")
+							gen := helm.SetQuery("(query ")
+							s.MarkHelmPending(gen)
 						}
 					} else if active && preset.filterID != "" {
 						eng.SetSourceFilter("")
@@ -149,11 +163,6 @@ func renderHelm(
 			if markedCount > 0 {
 				renderHelmChip(c, fmt.Sprintf("● %d marked", markedCount), th.Warning, th)
 			}
-			if rustConnected {
-				renderHelmChip(c, fmt.Sprintf("Rust gRPC · #%d", gen), th.Success, th)
-			} else {
-				renderHelmChip(c, fmt.Sprintf("Offline · #%d", gen), th.Warning, th)
-			}
 			prevTone := th.InkMuted
 			if previewOpen {
 				prevTone = th.Info
@@ -166,17 +175,15 @@ func renderHelm(
 		// 2. Live Two-Stage Consult / DSL Query Pill Strip (MAR-HELM-R02 parity).
 		renderConsultChipBar(c, cq, th)
 
-		// 3. Main Split Area: Left Candidate Stream | Right Follow-Mode Live Preview & Embark Actions.
-		ui.Row(c.Key("helm-split-body")).Gap(12).AlignItems(ui.Stretch).Children(func() {
-			// Left column: Vertico candidate list.
-			ui.Column(c.Key("helm-cand-col")).Grow(3).MinWidth(0).Gap(2).AlignItems(ui.Stretch).Children(func() {
+		// 3. Main Split Area (fixed-height fill): Left Candidate Stream | Right Follow-Mode Live Preview & Embark Actions.
+		ui.Row(c.Key("helm-split-body")).Grow(1).MinHeight(0).Gap(12).AlignItems(ui.Stretch).Clip().Children(func() {
+			// Left column: fixed-height Vertico candidate list.
+			ui.Column(c.Key("helm-cand-col")).Grow(3).MinWidth(0).MinHeight(0).Gap(2).AlignItems(ui.Stretch).Clip().Children(func() {
 				if len(rows) == 0 {
-					emptyMsg := "No matching candidates — try @lang:rust @sym:name #local !exclude or (dsl ...)"
-					if !rustConnected {
-						emptyMsg = "Offline standalone mode — connect Rust marlin-agent-core host for live Workspace Search & Ascent/Dusa DSL"
-					}
 					ui.Row(c).Padding(14, 12).Children(func() {
-						ui.Text(c, emptyMsg).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted)
+						ui.Text(c, "No matching candidates — try @lang:rust @sym:name #local !exclude or (dsl ...)").
+							Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).
+							SingleLine().Ellipsis("…").MinWidth(0).Clip()
 					})
 					return
 				}
@@ -207,33 +214,44 @@ func renderHelm(
 				}
 			})
 
-			// Right column: Follow-Mode Live Preview + Embark Action Transformer Bar.
-			if previewOpen && hasSel {
-				ui.Column(c.Key("helm-preview-col")).Grow(2).MinWidth(280).
+			// Right column: fixed-height Follow-Mode Live Preview + Embark Action Transformer Bar.
+			// Always keeps its column footprint while previewOpen is true so horizontal layout never jumps at 0 hits.
+			if previewOpen {
+				ui.Column(c.Key("helm-preview-col")).Grow(2).MinWidth(280).MinHeight(0).Clip().
 					Background(theme.GlassTone(c, th.Canvas, th, 0.46, 0.70)).Radius(theme.RadiusControl).
 					BorderWidth(1).BorderColor(theme.GlassTone(c, th.BorderSubtle, th, 0.35, 0.55)).
 					Padding(12, 14).Gap(8).AlignItems(ui.Stretch).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+					if !hasSel {
+						ui.Column(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, "No candidate selected").Font(kit.FontDisplay).FontSize(12.5).TextColor(th.InkMuted)
+						})
+						return
+					}
+					ui.Row(c).MinWidth(0).AlignItems(ui.Center).Gap(8).Clip().Children(func() {
 						renderHelmChip(c, selCand.SourceID, th.Accent, th)
 						ui.Text(c, prevTitle).Font(kit.FontDisplay).FontSize(theme.FontSizeUI).FontWeight(700).
-							TextColor(th.Info).Grow(1).NoWrap().MaxLines(1)
+							TextColor(th.Info).Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 					})
 					if selCand.Location != "" {
-						ui.Text(c, selCand.Location).Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).NoWrap().MaxLines(1)
+						ui.Text(c, selCand.Location).Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted).
+							SingleLine().Ellipsis("…").TruncateMiddle().MinWidth(0).Clip()
 					}
 					if selCand.Subtitle != "" && selCand.Subtitle != selCand.Location {
-						ui.Text(c, selCand.Subtitle).Font(theme.FontMono).FontSize(11).TextColor(th.BannerInk).NoWrap().MaxLines(1)
+						ui.Text(c, selCand.Subtitle).Font(theme.FontMono).FontSize(11).TextColor(th.BannerInk).
+							SingleLine().Ellipsis("…").MinWidth(0).Clip()
 					}
 					if prevBody != "" {
 						ui.Box(c).Height(1).Background(th.BorderSubtle)
-						ui.Text(c, prevBody).Font(theme.FontMono).FontSize(theme.FontSizeMeta).LineHeight(1.48).
-							TextColor(th.Ink).Grow(1).MaxLines(8)
+						ui.Scroll(c.Key("helm-preview-scroll")).Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+							ui.Text(c, prevBody).Font(theme.FontMono).FontSize(theme.FontSizeMeta).LineHeight(1.48).
+								TextColor(th.Ink).MinWidth(0)
+						})
 					} else {
 						ui.Spacer(c)
 					}
 
 					// Embark Action Transformer Bar (all backend actions dispatch via Rust gRPC).
-					ui.Row(c.Key("helm-embark-actions")).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Row(c.Key("helm-embark-actions")).MinWidth(0).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
 						if theme.ActionButton(c, "embark-open", "Open", th.Info, true, th).Clicked() {
 							if onPreview != nil && (strings.TrimSpace(selCand.Location) != "" || strings.TrimSpace(selCand.Snippet) != "") {
 								onPreview(selCand.Title, selCand.Location, selCand.Snippet, 0)
@@ -309,7 +327,7 @@ func renderConsultChipBar(c *ui.Context, cq search.ConsultQuery, th theme.Theme)
 		chips = append(chips, chip{"!" + neg, th.Danger})
 	}
 
-	ui.Row(c.Key("helm-consult-chips")).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("helm-consult-chips")).Height(22).Shrink(0).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
 		if len(chips) == 0 {
 			ui.Text(c, "Syntax: @lang:rust  @sym:fn  @prefix:crates/  #local  !exclude  (dsl ...)").
 				Font(theme.FontMono).FontSize(11).TextColor(th.BannerInk).NoWrap()

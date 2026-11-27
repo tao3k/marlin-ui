@@ -36,29 +36,31 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 			if len(themes) == 0 {
 				themes = theme.Catalog()
 			}
-			theme.FieldRow(c, "theme-profile", "nord-bento / doom-one / doom-tokyo-night / doom-one-light · ~/.config/marlin/ui/", th, func() {
-				for _, tp := range themes {
-					p := tp
-					active := p.ID == th.ID
-					tone := th.InkMuted
-					if active {
-						tone = th.Info
+			theme.FieldRow(c, "theme-profile", "Doom One · Tokyo Night · Nord Frost · Light (~/.config/marlin/ui/)", th, func() {
+				thIdx := 0
+				labels := make([]string, len(themes))
+				for i, tp := range themes {
+					labels[i] = tp.Name
+					if tp.ID == th.ID {
+						thIdx = i
 					}
-					if theme.ActionButton(c, "set-th-"+p.ID, p.Name, tone, active, th).Clicked() && bc.OnSetTheme != nil {
-						bc.OnSetTheme(p.ID)
-					}
+				}
+				seg := ui.Segmented(c.Key("set-th-seg"), &thIdx, labels...).Label("Theme Profile")
+				if seg.Changed() && thIdx >= 0 && thIdx < len(themes) && bc.OnSetTheme != nil {
+					bc.OnSetTheme(themes[thIdx].ID)
 				}
 			})
 			theme.FieldRow(c, "glass-surface", "optional Liquid Glass GPU material + Oklab aurora (SPC t v)", th, func() {
-				lbl := "Matte"
-				tone := th.InkMuted
-				if bc.Modules.Glass {
-					lbl = "Liquid Glass"
-					tone = th.Info
-				}
-				if theme.ActionButton(c, "set-glass-tog", lbl, tone, bc.Modules.Glass, th).Clicked() && bc.OnToggleGlass != nil {
+				on := bc.Modules.Glass
+				sw := ui.Switch(c.Key("set-glass-tog"), &on).Label("Liquid Glass")
+				if sw.Changed() && bc.OnToggleGlass != nil {
 					bc.OnToggleGlass()
 				}
+				lbl, tone := "Matte", th.InkMuted
+				if bc.Modules.Glass {
+					lbl, tone = "Liquid Glass", th.Info
+				}
+				ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(tone).SingleLine()
 			})
 			theme.FieldRow(c, "glass-opacity", "frosted glass transparency over OS vibrancy · tokens.json --glass-opacity (SPC t o)", th, func() {
 				op := bc.GlassOpacity
@@ -86,26 +88,28 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 				}
 			})
 			theme.FieldRow(c, "live-motion", "optional 120Hz spring gauges, hover lift & live clock (SPC t a)", th, func() {
-				lbl := "Static"
-				tone := th.InkMuted
-				if bc.Modules.Motion {
-					lbl = "120Hz Spring"
-					tone = th.Accent
-				}
-				if theme.ActionButton(c, "set-motion-tog", lbl, tone, bc.Modules.Motion, th).Clicked() && bc.OnToggleMotion != nil {
+				on := bc.Modules.Motion
+				sw := ui.Switch(c.Key("set-motion-tog"), &on).Label("120Hz Spring Motion")
+				if sw.Changed() && bc.OnToggleMotion != nil {
 					bc.OnToggleMotion()
 				}
+				lbl, tone := "Static", th.InkMuted
+				if bc.Modules.Motion {
+					lbl, tone = "120Hz Spring", th.Accent
+				}
+				ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(tone).SingleLine()
 			})
 			theme.FieldRow(c, "zen-mode", "hide tabs, modeline & resting echo bar (SPC t z)", th, func() {
-				lbl := "Off"
-				tone := th.InkMuted
-				if bc.ZenMode {
-					lbl = "Active"
-					tone = th.Success
-				}
-				if theme.ActionButton(c, "set-zen-tog", lbl, tone, bc.ZenMode, th).Clicked() && bc.OnToggleZenMode != nil {
+				on := bc.ZenMode
+				sw := ui.Switch(c.Key("set-zen-tog"), &on).Label("Zen Mode")
+				if sw.Changed() && bc.OnToggleZenMode != nil {
 					bc.OnToggleZenMode()
 				}
+				lbl, tone := "Off", th.InkMuted
+				if bc.ZenMode {
+					lbl, tone = "Active", th.Success
+				}
+				ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(tone).SingleLine()
 			})
 			theme.FieldRow(c, "stylesheets", "~/.config/marlin/ui/{manifest.toml, theme.css, dashboard.sexp|toml, widgets/<id>/}", th, func() {
 				if theme.ActionButton(c, "set-reload-themes", "Reload UI & Widgets (SPC t r)", th.Accent, false, th).Clicked() && bc.OnReloadThemes != nil {
@@ -119,18 +123,19 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 				theme.InlineInput(c, "set-rem", &st.RemoteHost, "host:50051", 250, th)
 			})
 			theme.FieldRow(c, "durable-streaming", "ConversationJournal", th, func() {
-				lbl := "Off"
-				tone := th.InkMuted
+				on := st.RealSession
+				sw := ui.Switch(c.Key("set-real-tog"), &on).Label("Durable Streaming")
+				if sw.Changed() {
+					st.RealSession = on
+				}
+				lbl, tone := "Off", th.InkMuted
 				if st.RealSession {
-					lbl = "On"
-					tone = th.Success
+					lbl, tone = "On", th.Success
 				}
-				if theme.ActionButton(c, "set-real-tog", lbl, tone, st.RealSession, th).Clicked() {
-					st.RealSession = !st.RealSession
-				}
+				ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(tone).SingleLine()
 			})
 			theme.FieldRow(c, "actions", "", th, func() {
-				if theme.ActionButton(c, "set-save-btn", "Save Preferences", th.Success, true, th).Clicked() {
+				if theme.ActionButton(c, "set-save-btn", "Save Preferences", th.Accent, true, th).Clicked() {
 					if bc.OnSavePrefs != nil {
 						bc.OnSavePrefs(st.SessionID, st.RemoteHost, st.RealSession)
 					}
@@ -147,7 +152,7 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 			})
 			theme.FieldRow(c, "bearer-token", "optional", th, func() {
 				theme.InlineInput(c, "add-rem-tok", &st.NewRemoteToken, "(optional)", 250, th)
-				if theme.ActionButton(c, "add-rem-go", "Connect", th.Info, true, th).Clicked() {
+				if theme.ActionButton(c, "add-rem-go", "Connect", th.Accent, true, th).Clicked() {
 					if bc.Adaptive != nil && bc.Adaptive.Desktop != nil && bc.Adaptive.Desktop.OnAddRemoteTarget != nil {
 						if err := bc.Adaptive.Desktop.OnAddRemoteTarget(st.NewRemoteID, st.NewRemoteID, st.NewRemoteEndpoint, st.NewRemoteToken); err != nil {
 							echo("Error: " + err.Error())
@@ -193,7 +198,7 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 						}
 						prov := p
 						theme.FieldRow(c, "oauth-"+string(prov.ID), "external browser PKCE", th, func() {
-							if theme.ActionButton(c, "set-oauth-"+string(prov.ID), "Sign in with "+prov.DisplayName, th.Info, true, th).Clicked() {
+							if theme.ActionButton(c, "set-oauth-"+string(prov.ID), "Sign in with "+prov.DisplayName, th.Accent, true, th).Clicked() {
 								if ac.OnStartOAuth != nil {
 									_ = ac.OnStartOAuth(prov.ID)
 									echo("Opening browser for " + prov.DisplayName)
@@ -207,7 +212,7 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 				})
 				theme.FieldRow(c, "oidc-client-id", "", th, func() {
 					theme.InlineInput(c, "set-oidc-cid", &st.OIDCClientID, "marlin-desktop", 200, th)
-					if theme.ActionButton(c, "set-oidc-go", "Connect OIDC", th.Info, true, th).Clicked() {
+					if theme.ActionButton(c, "set-oidc-go", "Connect OIDC", th.Accent, true, th).Clicked() {
 						if ac.OnConfigureOIDC != nil {
 							if err := ac.OnConfigureOIDC(st.OIDCIssuer, st.OIDCClientID); err != nil {
 								echo("OIDC error: " + err.Error())
@@ -224,18 +229,19 @@ func renderCustomize(c *ui.Context, th theme.Theme, bc *Context) {
 				for _, s := range bc.FeatureReg.Snapshot() {
 					stFeat := s
 					theme.FieldRow(c, string(stFeat.Meta.ID), stFeat.Meta.Description, th, func() {
-						lbl := "Disabled"
-						tone := th.InkMuted
-						if stFeat.Enabled {
-							lbl = "Enabled"
-							tone = th.Success
-						}
-						if theme.ActionButton(c, "set-feat-"+string(stFeat.Meta.ID), lbl, tone, stFeat.Enabled, th).Clicked() {
-							_ = bc.FeatureReg.SetEnabled(stFeat.Meta.ID, !stFeat.Enabled, bc.FeatureLedger, bc.FeatureHost)
+						on := stFeat.Enabled
+						sw := ui.Switch(c.Key("set-feat-"+string(stFeat.Meta.ID)), &on).Label(string(stFeat.Meta.ID))
+						if sw.Changed() {
+							_ = bc.FeatureReg.SetEnabled(stFeat.Meta.ID, on, bc.FeatureLedger, bc.FeatureHost)
 							if bc.Adaptive != nil {
 								bc.Adaptive.SetFeatureHost(bc.FeatureHost, bc.Adaptive.Desktop.GovernanceUI)
 							}
 						}
+						lbl, tone := "Disabled", th.InkMuted
+						if stFeat.Enabled {
+							lbl, tone = "Enabled", th.Success
+						}
+						ui.Text(c, lbl).Font(kit.FontDisplay).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(tone).SingleLine()
 					})
 				}
 			}

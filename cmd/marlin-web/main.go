@@ -30,7 +30,7 @@ func main() {
 	adaptive := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
 		BrandTitle:     "Marlin",
 		BrandSubtitle:  "WebAssembly · Desktop & Phone Adaptive",
-		InitialThemeID: "midnight",
+		InitialThemeID: "doom-one",
 		FormFactor:     mygoshell.FormFactorAuto,
 	})
 	adaptive.Desktop.ActiveSessionID = "marlin-web-main"

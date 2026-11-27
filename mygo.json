@@ -1,0 +1,18 @@
+{
+  "name": "Marlin",
+  "slug": "marlin",
+  "identifier": "org.tao3k.marlin",
+  "version": "0.1.0",
+  "copyright": "Copyright 2026 tao3k team and Contributors",
+  "license": "Apache-2.0 AND LGPL-2.1-or-later",
+  "icon": "resources/icon.png",
+  "main": "./cmd/marlin-mobile",
+  "out": "dist/ios",
+  "ios": {
+    "minimumSystemVersion": "17.0",
+    "orientations": ["portrait", "landscape"],
+    "infoPlist": {
+      "NSLocalNetworkUsageDescription": "Marlin connects over gRPC to your Marlin Agent Core host on the local network."
+    }
+  }
+}

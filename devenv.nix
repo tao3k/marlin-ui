@@ -21,6 +21,8 @@
     enable = true;
   };
 
+  dotenv.enable = true;
+
   git-hooks.hooks = {
     nixfmt.enable = true;
   };

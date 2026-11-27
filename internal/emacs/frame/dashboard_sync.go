@@ -123,12 +123,14 @@ func (f *Frame) applyThemeBundleLocked(bundle appconfig.UIThemeBundle, preferred
 		warnings = append(warnings, style.AuditPaletteContrast(selected.Ink, selected.InkMuted, selected.Canvas, f.uiModules.Glass)...)
 	}
 	f.Theme = selected
-	f.surfaceCfg = bundle.Manifest.Surface
-	if bundle.Manifest.Surface.Glass != nil {
-		f.uiModules.Glass = *bundle.Manifest.Surface.Glass
+	mergedSurface := appconfig.MergeSurfaceConfig(appconfig.DefaultSurfaceConfig(), f.AppCfg.ModelCfg.Surface)
+	mergedSurface = appconfig.MergeSurfaceConfig(mergedSurface, bundle.Manifest.Surface)
+	f.surfaceCfg = mergedSurface
+	if mergedSurface.Glass != nil {
+		f.uiModules.Glass = *mergedSurface.Glass
 	}
-	if bundle.Manifest.Surface.Motion != nil {
-		f.uiModules.Motion = *bundle.Manifest.Surface.Motion
+	if mergedSurface.Motion != nil {
+		f.uiModules.Motion = *mergedSurface.Motion
 	}
 	// Reset runtime opacity override on reload so manifest.toml / theme.toml / tokens.json take effect.
 	f.uiModules.GlassOpacity = 0
@@ -230,6 +232,9 @@ func (f *Frame) applyThemeBundleLocked(bundle appconfig.UIThemeBundle, preferred
 
 func (f *Frame) findThemeLocked(id string) theme.Theme {
 	norm := strings.ToLower(strings.TrimSpace(id))
+	if norm == "tokyo-night" || norm == "tokyo" || norm == "tokyonight" {
+		norm = "doom-tokyo-night"
+	}
 	for _, th := range f.themeCatalog {
 		if th.ID == norm {
 			return th
@@ -238,7 +243,7 @@ func (f *Frame) findThemeLocked(id string) theme.Theme {
 	if len(f.themeCatalog) > 0 {
 		return f.themeCatalog[0]
 	}
-	return theme.NordBento()
+	return theme.DoomOne()
 }
 
 func (f *Frame) buildLiveSignals(th theme.Theme, modelLbl, sessLbl string, pendingGates int) *widgets.Signals {
@@ -615,10 +620,10 @@ func (f *Frame) CycleGlassOpacity() {
 		name string
 		val  float32
 	}{
-		{"Clear", 0.22},
-		{"Balanced", 0.34},
-		{"Frosted", 0.54},
-		{"Deep", 0.74},
+		{"Airy", 0.65},
+		{"Balanced", 0.75},
+		{"Deep", 0.85},
+		{"Solid", 0.92},
 	}
 	f.mu.Lock()
 	cur := kit.ResolveGlassOpacity(kit.SurfaceOptions{GlassOpacity: f.uiModules.GlassOpacity}, f.Theme.Sheet)
@@ -869,6 +874,7 @@ func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string
 		}
 		if f.Adaptive.Desktop.HelmSearch != nil && f.Adaptive.Desktop.HelmSearch.Engine != nil {
 			helmTotal, _, _, _ = f.Adaptive.Desktop.HelmSearch.Engine.Stats()
+			helmTotal = f.miniState.DisplayHelmTotal(helmTotal)
 		}
 	}
 

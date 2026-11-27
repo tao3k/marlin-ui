@@ -101,12 +101,77 @@ func wireSessionAndHelm(
 		projectID = p
 	}
 	if app.HelmSearch != nil && app.HelmSearch.Engine != nil {
+		// Coalesce async Rust search updates so concurrent QueryProjectGraph +
+		// BrowseCommands completions swap into the UI in ONE atomic frame instead
+		// of cascading 2-3 row jumps per keystroke.
+		var (
+			helmPaintMu     sync.Mutex
+			helmPaintTimer  *time.Timer
+			helmQueryMu     sync.Mutex
+			helmQueryTimer  *time.Timer
+			helmSettleTimer *time.Timer
+		)
+		coalescedHelmPaint := func() {
+			eng := app.HelmSearch.Engine
+			cqNow := search.ParseConsultQuery(eng.Query())
+			srcs := eng.SourceSummaries(nil)
+			hasGraph, hasCmd := false, false
+			for _, sm := range srcs {
+				switch sm.ID {
+				case "rust-graph", "rust-dsl":
+					if sm.Count > 0 {
+						hasGraph = true
+					}
+				case "rust-commands":
+					if sm.Count > 0 {
+						hasCmd = true
+					}
+				}
+			}
+			// If both Rust sources (or DSL alone for S-exp queries) have landed,
+			// flush quickly (4ms); if only one has arrived, wait 32ms so the
+			// second RPC merges into the exact same single atomic UI frame.
+			delay := 32 * time.Millisecond
+			if hasGraph && (cqNow.IsDSL || hasCmd) {
+				delay = 4 * time.Millisecond
+			}
+			helmPaintMu.Lock()
+			if helmPaintTimer != nil {
+				helmPaintTimer.Stop()
+			}
+			helmPaintTimer = time.AfterFunc(delay, func() {
+				helmPaintMu.Lock()
+				helmPaintTimer = nil
+				helmPaintMu.Unlock()
+				markDirty()
+			})
+			helmPaintMu.Unlock()
+		}
+		sr.addCloser(func() {
+			helmPaintMu.Lock()
+			if helmPaintTimer != nil {
+				helmPaintTimer.Stop()
+				helmPaintTimer = nil
+			}
+			helmPaintMu.Unlock()
+			helmQueryMu.Lock()
+			if helmQueryTimer != nil {
+				helmQueryTimer.Stop()
+				helmQueryTimer = nil
+			}
+			if helmSettleTimer != nil {
+				helmSettleTimer.Stop()
+				helmSettleTimer = nil
+			}
+			helmQueryMu.Unlock()
+		})
+
 		rustBridge := &grpcwire.RustSearchBridge{
 			Provider:  switcher,
 			Engine:    app.HelmSearch.Engine,
 			ProjectID: projectID,
 			SessionFn: sr.currentSession,
-			OnUpdated: markDirty,
+			OnUpdated: coalescedHelmPaint,
 			Timeout:   1800 * time.Millisecond,
 			PageLimit: 64,
 		}
@@ -117,8 +182,40 @@ func wireSessionAndHelm(
 			eng := app.HelmSearch.Engine
 			cq := search.ParseConsultQuery(query)
 
-			// 1. Authoritative Rust backend search (QueryProjectGraph + BrowseCommands).
-			rustBridge.QueryAsync(linkCtx, gen, query)
+			// 1. Coalesced authoritative Rust backend search (QueryProjectGraph + BrowseCommands):
+			// initial empty query fires immediately; incremental typing coalesces within 30ms
+			// so rapid keystrokes never thrash cancel/restart loops or flicker the minibuffer.
+			helmQueryMu.Lock()
+			if helmQueryTimer != nil {
+				helmQueryTimer.Stop()
+				helmQueryTimer = nil
+			}
+			if helmSettleTimer != nil {
+				helmSettleTimer.Stop()
+				helmSettleTimer = nil
+			}
+			gCopy := gen
+			helmSettleTimer = time.AfterFunc(290*time.Millisecond, func() {
+				if eng.Generation() != gCopy {
+					return
+				}
+				// Ensure SWR settles cleanly if async Rust search returned 0 hits
+				// (even when local Buffers/Sessions exist).
+				markDirty()
+			})
+			if strings.TrimSpace(query) == "" {
+				helmQueryMu.Unlock()
+				rustBridge.QueryAsync(linkCtx, gen, query)
+			} else {
+				qCopy := query
+				helmQueryTimer = time.AfterFunc(35*time.Millisecond, func() {
+					if eng.Generation() != gCopy {
+						return
+					}
+					rustBridge.QueryAsync(linkCtx, gCopy, qCopy)
+				})
+				helmQueryMu.Unlock()
+			}
 
 			// 2. Pure UI-owned open Emacs buffers (never fabricated backend files).
 			if !cq.IsDSL && len(app.WindowBuffers) > 0 {
@@ -212,32 +309,74 @@ func wireSessionAndHelm(
 					}, targetHits)
 				}
 			}
-
-			markDirty()
+			// Note: do NOT call synchronous markDirty() here because OnQueryChanged
+			// frequently runs inside Frame.View(c) during inp.Changed(); async Rust
+			// completions trigger coalescedHelmPaint() cleanly at <= 1 repaint/vsync.
 		}
 		if !app.HelmSearch.Engine.PreviewOpen() {
 			app.HelmSearch.Engine.TogglePreview() // Follow-Mode split preview ON by default.
 		}
 	}
 
-	// Switch sessions cleanly while preserving per-session unsent drafts via fsync.
+	// Isolate per-session transcripts so New Chat always starts a clean blank
+	// conversation while switching back to an earlier session restores its history.
+	sessionTranscripts := map[string]*mygoshell.TranscriptController{}
+	if initSID := sr.currentSession(); initSID != "" && app.Transcript != nil {
+		sessionTranscripts[initSID] = app.Transcript
+	}
+	cloneTranscriptShell := func(src *mygoshell.TranscriptController, scope string) *mygoshell.TranscriptController {
+		fresh := mygoshell.NewTranscriptController()
+		if src != nil {
+			fresh.Resilience = src.Resilience
+			fresh.ResilienceScope = scope
+			fresh.OnDraftChanged = src.OnDraftChanged
+			fresh.OnDiscardOutbox = src.OnDiscardOutbox
+			fresh.OnRetryOutbox = src.OnRetryOutbox
+			fresh.OnSubmitTurn = src.OnSubmitTurn
+			fresh.OnCopyCode = src.OnCopyCode
+			fresh.OnRetryTurn = src.OnRetryTurn
+			fresh.OnForkTurn = src.OnForkTurn
+			fresh.OnPickAttachment = src.OnPickAttachment
+			fresh.OnSlashCommand = src.OnSlashCommand
+			fresh.OnQueryMentions = src.OnQueryMentions
+			fresh.SetDeepThink(src.DeepThinkEnabled())
+		}
+		if cfg.ModelCfg.Loaded {
+			if lbl := cfg.ModelCfg.SummaryLabel(); lbl != "" {
+				fresh.SetModelLabel(lbl)
+			}
+		}
+		return fresh
+	}
+
+	// Switch sessions cleanly while preserving per-session transcripts and drafts.
 	switchSession := func(sessionID string) {
 		sid := strings.TrimSpace(sessionID)
 		if sid == "" {
 			return
 		}
 		prev := sr.currentSession()
-		if transcript != nil && transcript.Resilience != nil && prev != "" {
-			transcript.Resilience.SetDraft("chat:"+prev, transcript.ComposerText())
+		curTr := app.Transcript
+		if curTr != nil && prev != "" {
+			sessionTranscripts[prev] = curTr
+			if curTr.Resilience != nil {
+				curTr.Resilience.SetDraft("chat:"+prev, curTr.ComposerText())
+			}
 		}
 		sr.setSession(sid)
 		app.ActiveSessionID = sid
 		ensureSessionEntry(app, sid, sid)
-		if transcript != nil && transcript.Resilience != nil {
-			scope := "chat:" + sid
-			transcript.ResilienceScope = scope
-			restored := transcript.RestoreDraftFromResilience(scope)
-			transcript.SetComposerText(restored)
+		scope := "chat:" + sid
+		nextTr, ok := sessionTranscripts[sid]
+		if !ok || nextTr == nil {
+			nextTr = cloneTranscriptShell(curTr, scope)
+			sessionTranscripts[sid] = nextTr
+		}
+		app.Transcript = nextTr
+		if nextTr.Resilience != nil {
+			nextTr.ResilienceScope = scope
+			restored := nextTr.RestoreDraftFromResilience(scope)
+			nextTr.SetComposerText(restored)
 			sr.scheduleSave()
 		}
 		if sr.onSessionChanged != nil {

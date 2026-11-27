@@ -150,21 +150,21 @@ func renderPackageRow(c *ui.Context, pkg marketplace.ManagedPackage, selected bo
 		statusCol = th.Warning
 	}
 
-	row := ui.Row(c.Key("pkg-row-"+pkg.ID)).Padding(7, 14).Gap(10).AlignItems(ui.Center).
-		Background(bg)
+	row := ui.Row(c.Key("pkg-row-"+pkg.ID)).MinWidth(0).Padding(7, 14).Gap(10).AlignItems(ui.Center).
+		Background(bg).Clip()
 	row.Children(func() {
-		ui.Column(c).Width(210).Gap(1).Children(func() {
+		ui.Column(c).Width(210).Shrink(0).MinWidth(0).Gap(1).Clip().Children(func() {
 			ui.Text(c, pkg.Name).Font(theme.FontMono).FontSize(theme.FontSizeUI).
-				FontWeight(700).TextColor(th.Ink).NoWrap().MaxLines(1)
+				FontWeight(700).TextColor(th.Ink).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			ui.Text(c, pkg.ID).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
-				FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).NoWrap().MaxLines(1)
+				FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 		})
-		ui.Text(c, string(pkg.Kind)).Width(82).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
-			FontWeight(600).TextColor(kindCol).NoWrap()
-		ui.Text(c, statusLbl).Width(112).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
-			FontWeight(600).TextColor(statusCol).NoWrap()
-		ui.Text(c, pkg.Summary).Grow(1).MinWidth(0).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
-			FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).NoWrap().MaxLines(1)
+		ui.Text(c, string(pkg.Kind)).Width(82).Shrink(0).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
+			FontWeight(600).TextColor(kindCol).SingleLine().Ellipsis("…").Clip()
+		ui.Text(c, statusLbl).Width(112).Shrink(0).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
+			FontWeight(600).TextColor(statusCol).SingleLine().Ellipsis("…").Clip()
+		ui.Text(c, pkg.Summary).Basis(0).Grow(1).MinWidth(0).Font(theme.FontMono).FontSize(theme.FontSizeMeta).
+			FontWeight(theme.GlassWeight(c, 400)).TextColor(th.InkMuted).SingleLine().Ellipsis("…").Clip()
 
 		ui.Row(c).Width(176).Gap(6).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 			switch pkg.Status {

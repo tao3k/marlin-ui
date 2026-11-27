@@ -12,22 +12,22 @@ import (
 const defaultManifestTOML = `# Marlin UI Declarative Surface & Theme Manifest
 # Edit and save — Marlin Desktop auto-reloads live (~600ms) or via SPC t r.
 schema_version = "marlin.ui.theme.v1"
-active_theme = "nord-bento"
+active_theme = "doom-one"
 
 [surface]
 glass = true
 motion = true
-vibrancy = "auto"        # "auto" | "hud" | "under-window" | "sidebar" | "popover" | "none"
-glass_opacity = 0.34     # floating cards & sidebar [0.08 .. 0.92]
-chrome_opacity = 0.18    # top tab bar, modeline & echo bar [0.00 .. 0.95]
-viewport_opacity = 0.22  # non-dashboard buffer backdrop [0.00 .. 0.95]
+vibrancy = "glass-clear"  # "glass-clear" | "glass" | "hud" | "popover" | "under-window" | "sidebar" | "none"
+window_opacity = 0.75     # unified smoked glass opacity across entire window (0.75 = 75% opaque / 25% see-through)
+glass_opacity = 0.56      # floating cards, popups & sidebar [0.08 .. 0.92]
+chrome_opacity = 0.0      # 0.0 inherits unified window surface (zero seams); set >0 to tint bars separately
 `
 
 const defaultTokensJSON = `{
   "color": {
     "$type": "color",
-    "accent": { "$value": { "colorSpace": "oklch", "components": [0.74, 0.11, 330] } },
-    "info":   { "$value": { "colorSpace": "oklch", "components": [0.78, 0.08, 215] } }
+    "accent": { "$value": { "colorSpace": "oklch", "components": [0.72, 0.13, 240] } },
+    "info":   { "$value": { "colorSpace": "oklch", "components": [0.78, 0.10, 215] } }
   },
   "radius": {
     "card": { "$type": "dimension", "$value": "20px" }

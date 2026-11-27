@@ -9,23 +9,23 @@
   --border: #cfd4de;
   --border-subtle: #e4e6ec;
 
-  --tab-active-bg: #d5c9c0;
-  --tab-active-fg: #282828;
-  --tab-inactive-fg: #665c54;
-  --tab-sep: #bdae93;
+  --tab-active-bg: #e2e6f0;
+  --tab-active-fg: #282c34;
+  --tab-inactive-fg: #696c77;
+  --tab-sep: #cfd4de;
 
   --banner: #9ca0aa;
   --fg: #383a42;
   --muted: #7a7f8c;
 
-  --accent: #a626a4;
-  --info: #4078f2;
+  --accent: #4078f2;
+  --info: #0184bc;
   --success: #50a14f;
   --warning: #c18401;
   --danger: #e45649;
 
-  --radius-small: 4px;
-  --radius-control: 8px;
+  --radius-small: 6px;
+  --radius-control: 10px;
   --radius-card: 20px;
 }
 

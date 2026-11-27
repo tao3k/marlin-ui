@@ -19,11 +19,12 @@ protocol = "anthropic"
 credential_env = "ANTHROPIC_API_KEY"
 timeout_seconds = 120
 
-# Optional Anthropic thinking settings; provider/model support varies.
+# Optional Anthropic thinking / output budget settings; aligned with crates/marlin-agent-tui/example.toml
+# (DeepSeek Anthropic-compatible endpoint rejects Claude-only adaptive/effort fields).
 [anthropic]
-thinking = { type = "adaptive" }
-effort = "low"
-max_tokens = 8192
+max_tokens = 16384
+# thinking = { type = "adaptive" }
+# effort = "low"
 # Manual mode instead: thinking = { type = "enabled", budget_tokens = 4096 }
 
 # DeepSeek V4 Pro shares the Anthropic environment with the default V4.1 Flash.
@@ -33,6 +34,7 @@ provider = "deepseek"
 model = "deepseek-v4-pro"
 protocol = "anthropic"
 credential_env = "ANTHROPIC_API_KEY"
+anthropic = { max_tokens = 16384 }
 
 # Optional OpenAI Responses API route.
 # [models.openai]
@@ -54,3 +56,14 @@ credential_env = "ANTHROPIC_API_KEY"
 # addr = "127.0.0.1:50051"
 # app_server_bin = "/path/to/marlin-mygo-host"
 # real_session = true
+
+# Declarative Liquid Glass & OS vibrancy configuration (unified 75% smoked glass
+# across top bar, viewport, and bottom bar with zero seams; optional chrome_opacity
+# lets you tint top/bottom bars separately if desired).
+[surface]
+glass = true
+motion = true
+vibrancy = "glass-clear"
+window_opacity = 0.75
+glass_opacity = 0.56
+chrome_opacity = 0.0

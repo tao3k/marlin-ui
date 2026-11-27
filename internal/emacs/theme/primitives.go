@@ -42,69 +42,32 @@ type TableColumn struct {
 	Mono  bool // true for IDs, paths, keybindings, code, and tabular numbers
 }
 
-// ActionButton renders a soft-rounded, Sheet-styled Doom Emacs action button
-// resolving `.btn`, `.btn.primary`, and `.btn:hover` from th.Sheet.
+// ActionButton renders an Apple 26 HIG × Vercel Geist button backed by
+// StyledButton (BtnGlassProminent when active, BtnGeistSecondary otherwise).
 func ActionButton(c *ui.Context, key, label string, tone ui.Color, active bool, th Theme) ui.Element {
-	btn := kit.ActionControl(ui.ButtonBase(c.Key(key)).Label(label).
-		Padding(5, 12).Radius(RadiusControl).AlignItems(ui.Center).Justify(ui.Center))
-
-	classes := []string{"btn"}
+	variant := BtnGeistSecondary
 	if active {
-		classes = append(classes, "primary")
+		variant = BtnGlassProminent
+	} else if tone == th.Danger {
+		variant = BtnDestructive
 	}
-	state := style.StateNone
-	if btn.Hovered() {
-		state |= style.StateHover
-	}
-	cs := th.Sheet.Resolve(classes, state)
-
-	bg := GlassTone(c, th.SurfaceElevated, th, 0.36, 0.56)
-	if active || btn.Hovered() {
-		bg = GlassTone(c, th.SurfaceHover, th, 0.50, 0.70)
-	}
-	if cs.HasBackground {
-		bg = cs.Background
-	}
-	btn.Background(bg)
-	if c.Vibrancy() {
-		btn.Border(1, kit.WithAlpha(th.Ink, 0.12))
-	}
-	cs.ApplyToElement(btn)
-	if !cs.HasBackground {
-		btn.Background(bg)
-	}
-
-	weight := 500
-	if active {
-		weight = 700
-	}
-	if cs.HasFontWeight {
-		weight = cs.FontWeight
-	}
-	fontSize := FontSizeMeta
-	if cs.HasFontSize {
-		fontSize = cs.FontSize
-	}
-	btn.Children(func() {
-		ui.Text(c, label).Font(kit.FontDisplay).FontSize(fontSize).FontWeight(weight).TextColor(tone).NoWrap()
-	})
-	return btn
+	return StyledButton(c, ButtonSpec{
+		Key:     key,
+		Label:   label,
+		Variant: variant,
+		Tone:    tone,
+	}, th)
 }
 
-// ActionLink renders a quiet soft-rounded hover text action for chrome bars.
+// ActionLink renders a quiet Vercel Geist ghost button for chrome & action bars.
 func ActionLink(c *ui.Context, key, label string, tone ui.Color, th Theme) ui.Element {
-	rad := th.Sheet.VarPx("--radius-small", RadiusSmall)
-	btn := kit.ActionControl(ui.ButtonBase(c.Key(key)).Label(label).
-		Padding(3, 9).Radius(rad).AlignItems(ui.Center).Justify(ui.Center))
-	bg := ui.Transparent
-	if btn.Hovered() {
-		bg = GlassTone(c, th.SurfaceHover, th, 0.30, 0.48)
-	}
-	btn.Background(bg)
-	btn.Children(func() {
-		ui.Text(c, label).Font(kit.FontDisplay).FontSize(FontSizeMeta).FontWeight(500).TextColor(tone).NoWrap()
-	})
-	return btn
+	return StyledButton(c, ButtonSpec{
+		Key:     key,
+		Label:   label,
+		Variant: BtnGhost,
+		Size:    BtnSizeSM,
+		Tone:    tone,
+	}, th)
 }
 
 // VerticoRow renders one soft-rounded Vertico / Helm candidate row styled by
@@ -114,8 +77,8 @@ func VerticoRow(c *ui.Context, key, name, desc, query string, nameWidth float32,
 		nameWidth = 240
 	}
 	row := kit.ActionControl(ui.ButtonBase(c.Key(key)).Label(name).
-		Height(RowHeight).Padding(0, 14).Gap(10).Radius(RadiusSmall).
-		AlignItems(ui.Center).Justify(ui.Start))
+		Height(RowHeight).MinWidth(0).Padding(0, 14).Gap(10).Radius(RadiusSmall).
+		AlignItems(ui.Center).Justify(ui.Start).Clip())
 
 	classes := []string{"vertico-row"}
 	if selected {
@@ -149,7 +112,7 @@ func VerticoRow(c *ui.Context, key, name, desc, query string, nameWidth float32,
 	}
 
 	row.Children(func() {
-		ui.Text(c, marker).Font(FontMono).FontSize(FontSizeBody).FontWeight(700).TextColor(th.Accent).Width(18).NoWrap()
+		ui.Text(c, marker).Font(FontMono).FontSize(FontSizeBody).FontWeight(700).TextColor(th.Accent).Width(18).Shrink(0).NoWrap()
 		renderHighlightedRuns(c, name, query, FontSizeUI, weight, nameCol, nameWidth, false, th)
 		if desc != "" {
 			renderHighlightedRuns(c, desc, query, FontSizeMeta, 400, th.InkMuted, 0, true, th)
@@ -177,11 +140,14 @@ func renderHighlightedRuns(
 		}
 	}
 	if !hasMatch {
-		el := ui.Text(c, text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).NoWrap().MaxLines(1)
+		// Use SingleLine().Ellipsis("…").Clip() (NOT NoWrap, which intentionally lets
+		// overflowing text paint outside its bounding box on top of adjacent columns).
+		el := ui.Text(c, text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).
+			SingleLine().Ellipsis("…").MinWidth(0).Clip()
 		if fixedWidth > 0 {
-			el.Width(fixedWidth)
+			el.Width(fixedWidth).Shrink(0)
 		} else if grow {
-			el.Grow(1)
+			el.Basis(0).Grow(1)
 		}
 		return
 	}
@@ -207,20 +173,20 @@ func renderHighlightedRuns(
 		hitWeight = hitStyle.FontWeight
 	}
 
-	box := ui.Row(c).AlignItems(ui.Center).Clip()
+	box := ui.Row(c).AlignItems(ui.Center).MinWidth(0).Clip()
 	if fixedWidth > 0 {
-		box.Width(fixedWidth)
+		box.Width(fixedWidth).Shrink(0)
 	} else if grow {
-		box.Grow(1)
+		box.Basis(0).Grow(1)
 	}
 	box.Children(func() {
 		for _, r := range runs {
 			if r.Matched {
-				ui.Row(c).Background(hitBg).Radius(hitRadius).Padding(0, 1).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Background(hitBg).Radius(hitRadius).Padding(0, 1).Shrink(0).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, r.Text).Font(FontMono).FontSize(fontSize).FontWeight(hitWeight).TextColor(hitFg).NoWrap()
 				})
 			} else {
-				ui.Text(c, r.Text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).NoWrap()
+				ui.Text(c, r.Text).Font(FontMono).FontSize(fontSize).FontWeight(baseWeight).TextColor(baseCol).Shrink(0).NoWrap()
 			}
 		}
 	})
@@ -229,18 +195,19 @@ func renderHighlightedRuns(
 // TabulatedHeader renders a clean theme- and glass-aware Doom Emacs tabulated-list header strip.
 func TabulatedHeader(c *ui.Context, cols []TableColumn, th Theme) {
 	hdrBg := GlassTone(c, th.SurfaceElevated, th, 0.22, 0.44)
-	row := ui.Row(c).Height(32).Padding(0, 18).Gap(12).AlignItems(ui.Center).Background(hdrBg)
+	row := ui.Row(c).Height(32).MinWidth(0).Padding(0, 18).Gap(12).AlignItems(ui.Center).Background(hdrBg).Clip()
 	if c.Vibrancy() {
 		row.BorderWidth(0, 0, 1, 0).BorderColor(kit.WithAlpha(th.Ink, 0.10))
 	}
 	row.Children(func() {
-		ui.Box(c).Width(16)
+		ui.Box(c).Width(16).Shrink(0)
 		for _, col := range cols {
-			t := ui.Text(c, col.Label).Font(kit.FontDisplay).FontSize(FontSizeMeta).FontWeight(600).TextColor(th.InkMuted).NoWrap()
+			t := ui.Text(c, col.Label).Font(kit.FontDisplay).FontSize(FontSizeMeta).FontWeight(600).
+				TextColor(th.InkMuted).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			if col.Width > 0 {
-				t.Width(col.Width)
+				t.Width(col.Width).Shrink(0)
 			} else {
-				t.Grow(1)
+				t.Basis(0).Grow(1)
 			}
 		}
 	})
@@ -250,8 +217,8 @@ func TabulatedHeader(c *ui.Context, cols []TableColumn, th Theme) {
 func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, th Theme) ui.Element {
 	rad := th.Sheet.VarPx("--radius-small", RadiusSmall)
 	row := kit.ActionControl(ui.ButtonBase(c.Key(key)).Label(firstColLabel(cols)).
-		Height(RowHeight + 2).Padding(0, 18).Gap(12).Radius(rad).
-		AlignItems(ui.Center).Justify(ui.Start))
+		Height(RowHeight+2).MinWidth(0).Padding(0, 18).Gap(12).Radius(rad).
+		AlignItems(ui.Center).Justify(ui.Start).Clip())
 	bg := ui.Transparent
 	marker := "  "
 	if selected {
@@ -265,7 +232,7 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 	}
 	row.Background(bg)
 	row.Children(func() {
-		ui.Text(c, marker).Font(FontMono).FontSize(FontSizeBody).FontWeight(700).TextColor(th.Accent).Width(16).NoWrap()
+		ui.Text(c, marker).Font(FontMono).FontSize(FontSizeBody).FontWeight(700).TextColor(th.Accent).Width(16).Shrink(0).NoWrap()
 		for _, col := range cols {
 			ink := col.Color
 			if ink == (ui.Color{}) {
@@ -279,11 +246,12 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 			if col.Mono {
 				fontFam = FontMono
 			}
-			t := ui.Text(c, col.Label).Font(fontFam).FontSize(FontSizeUI).FontWeight(w).TextColor(ink).NoWrap().MaxLines(1)
+			t := ui.Text(c, col.Label).Font(fontFam).FontSize(FontSizeUI).FontWeight(w).TextColor(ink).
+				SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			if col.Width > 0 {
-				t.Width(col.Width)
+				t.Width(col.Width).Shrink(0)
 			} else {
-				t.Grow(1)
+				t.Basis(0).Grow(1)
 			}
 		}
 	})
@@ -292,33 +260,27 @@ func TabulatedRow(c *ui.Context, key string, cols []TableColumn, selected bool, 
 
 // FieldRow renders a spacious, soft Emacs customize key/value row inside *Settings*.
 func FieldRow(c *ui.Context, keyLabel, hint string, th Theme, control func()) {
-	ui.Row(c).Padding(9, 20).Gap(14).AlignItems(ui.Center).
+	ui.Row(c).MinWidth(0).Padding(9, 20).Gap(14).AlignItems(ui.Center).Clip().
 		BorderWidth(0, 0, 1, 0).BorderColor(GlassTone(c, th.BorderSubtle, th, 0.35, 0.45)).Children(func() {
-		ui.Text(c, keyLabel).Font(kit.FontDisplay).FontSize(FontSizeUI).FontWeight(600).TextColor(th.Info).Width(210).NoWrap()
-		ui.Row(c).Grow(1).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, keyLabel).Font(kit.FontDisplay).FontSize(FontSizeUI).FontWeight(600).TextColor(th.Info).
+			Width(210).Shrink(0).SingleLine().Ellipsis("…").Clip()
+		ui.Row(c).Basis(0).Grow(1).MinWidth(0).Gap(10).AlignItems(ui.Center).Clip().Children(func() {
 			if control != nil {
 				control()
 			}
 			if hint != "" {
-				ui.Text(c, hint).Font(kit.FontDisplay).FontSize(FontSizeMeta).TextColor(th.InkMuted).NoWrap()
+				ui.Text(c, hint).Font(kit.FontDisplay).FontSize(FontSizeMeta).TextColor(th.InkMuted).
+					SingleLine().Ellipsis("…").Shrink(1).MinWidth(0).Clip()
 			}
 		})
 	})
 }
 
-// InlineInput renders a soft-rounded monospace input field styled via `.input`.
+// InlineInput renders an Apple-styled native MyGo ui.TextInput field with
+// monospace value rendering, subtle glass surface, and clean focus ring.
 func InlineInput(c *ui.Context, key string, value *string, placeholder string, width float32, th Theme) ui.Element {
-	var inp ui.Element
 	cs := th.Sheet.Resolve([]string{"input"}, style.StateNone)
-	row := ui.Row(c.Key(key+"-wrap")).Padding(6, 10).
-		Background(GlassTone(c, th.Bar, th, 0.34, 0.58)).
-		Radius(RadiusControl).Border(1, GlassTone(c, th.Border, th, 0.55, 0.65)).AlignItems(ui.Center)
-	cs.ApplyToElement(row)
-	if width > 0 {
-		row.Width(width)
-	} else {
-		row.Grow(1)
-	}
+	rad := th.Sheet.VarPx("--radius-control", RadiusControl)
 	fontSize := FontSizeUI
 	if cs.HasFontSize {
 		fontSize = cs.FontSize
@@ -327,10 +289,17 @@ func InlineInput(c *ui.Context, key string, value *string, placeholder string, w
 	if cs.HasColor {
 		textCol = cs.Color
 	}
-	row.Children(func() {
-		inp = ui.TextInputBase(c.Key(key), value).
-			Placeholder(placeholder).Font(FontMono).FontSize(fontSize).TextColor(textCol).Grow(1)
-	})
+	inp := ui.TextInput(c.Key(key), value).
+		Placeholder(placeholder).
+		Font(FontMono).FontSize(fontSize).TextColor(textCol).
+		Radius(rad).
+		Background(GlassTone(c, th.Bar, th, 0.38, 0.64)).
+		Border(1, GlassTone(c, th.Border, th, 0.55, 0.72))
+	if width > 0 {
+		inp.Width(width)
+	} else {
+		inp.Grow(1)
+	}
 	return inp
 }
 

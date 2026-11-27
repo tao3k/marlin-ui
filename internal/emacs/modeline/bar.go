@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/pkg/schema"
@@ -73,11 +74,11 @@ func Render(c *ui.Context, st Status) {
 	bg := th.Bar
 	row := ui.Row(c.Key("doom-modeline")).Height(theme.ModelineHeight)
 	if st.Glass && c.Vibrancy() {
-		a := st.GlassOpacity
-		if a <= 0 {
-			a = 0.24
+		if st.GlassOpacity > 0 {
+			bg = kit.WithAlpha(th.Bar, st.GlassOpacity)
+		} else {
+			bg = ui.Transparent
 		}
-		bg = kit.WithAlpha(th.Bar, a)
 		row.BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(ui.RGB(255, 255, 255), 0.08))
 	}
 	row.Background(bg).AlignItems(ui.Center).Clip().Children(func() {
@@ -138,7 +139,8 @@ func renderDashboardSegments(c *ui.Context, st Status, th theme.Theme) {
 	if ws == "" {
 		ws = "~/marlin/" + st.SessionID + "/"
 	}
-	ui.Text(c, ws).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).MinWidth(0).Ellipsis("...").NoWrap().MaxLines(1)
+	ui.Text(c, ws).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).
+		SingleLine().Ellipsis("…").TruncateMiddle().Shrink(1).MinWidth(0).Clip()
 
 	if st.RemoteHost != "" {
 		ui.Text(c, "@"+st.RemoteHost).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.Accent).NoWrap()
@@ -238,10 +240,14 @@ func renderRightDeclarative(c *ui.Context, st Status, th theme.Theme, showDashbo
 			displayModel = st.ActivityLabel
 		}
 		if st.OnOpenModels != nil && displayModel != "" {
-			mbtn := kit.ActionControl(ui.ButtonBase(c.Key("dm-model-pill")).Label(displayModel).
-				Padding(2, 8).Gap(6).Radius(theme.RadiusPill).AlignItems(ui.Center))
-			if mbtn.Hovered() {
-				mbtn.Background(theme.GlassTone(c, th.SurfaceHover, th, 0.44, 0.66))
+			mbtn := kit.ActionControl(ui.Button(c.Key("dm-model-pill"), "").Label(displayModel).
+				Padding(3, 9).Gap(6).Radius(theme.RadiusPill).AlignItems(ui.Center).
+				Background(ui.Transparent).Border(0, ui.Transparent))
+			if c.Vibrancy() {
+				mbtn.Material(glass.Glass{Style: glass.Clear, Tint: kit.WithAlpha(th.SurfaceElevated, 0.24), Interactive: true})
+				mbtn.Border(1, kit.WithAlpha(ui.RGB(255, 255, 255), 0.10))
+			} else if mbtn.Hovered() {
+				mbtn.Background(th.SurfaceHover)
 			}
 			mbtn.Children(func() {
 				ui.Box(c).Width(7).Height(7).Radius(theme.RadiusPill).Background(actCol)
@@ -249,7 +255,8 @@ func renderRightDeclarative(c *ui.Context, st Status, th theme.Theme, showDashbo
 				if modelLabel == "" {
 					col = actCol
 				}
-				ui.Text(c, displayModel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(col).NoWrap()
+				ui.Text(c, displayModel).Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(600).TextColor(col).
+					SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			})
 			if mbtn.Clicked() {
 				st.OnOpenModels()

@@ -56,11 +56,11 @@ func Render(c *ui.Context, p RenderProps) {
 
 	rowBg := th.Canvas
 	if p.Glass && c.Vibrancy() {
-		a := p.GlassOpacity
-		if a <= 0 {
-			a = 0.18
+		if p.GlassOpacity > 0 {
+			rowBg = kit.WithAlpha(th.Canvas, p.GlassOpacity)
+		} else {
+			rowBg = ui.Transparent
 		}
-		rowBg = kit.WithAlpha(th.Canvas, a)
 	}
 
 	ui.Column(c.Key("doom-minibuffer")).Background(ui.Transparent).AlignItems(ui.Stretch).Children(func() {
@@ -94,9 +94,10 @@ func Render(c *ui.Context, p RenderProps) {
 		// 3. Echo Area when SPC Keypad/Hydra is active.
 		if p.Keypad != "" {
 			ui.Row(c.Key("keypad-echo")).Height(theme.MinibufferHeight).Padding(0, 14).Gap(10).
-				AlignItems(ui.Center).Background(rowBg).Children(func() {
-				ui.Text(c, p.Keypad+"-").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Accent).NoWrap()
-				ui.Text(c, meow.KeypadHints(p.Keypad)).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).Grow(1).NoWrap().MaxLines(1)
+				AlignItems(ui.Center).Background(rowBg).Clip().Children(func() {
+				ui.Text(c, p.Keypad+"-").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Accent).Shrink(0).NoWrap()
+				ui.Text(c, meow.KeypadHints(p.Keypad)).Font(theme.FontMono).FontSize(theme.FontSizeMeta).TextColor(th.InkMuted).
+					Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 			})
 			return
 		}
@@ -104,15 +105,16 @@ func Render(c *ui.Context, p RenderProps) {
 		// 3b. Authentic Emacs y-or-n-p approval prompt inside Minibuffer when requested.
 		if mode == ModeGateReview {
 			ui.Row(c.Key("mini-gate-yorn")).Height(theme.MinibufferHeight).Padding(0, 14).Gap(10).
-				AlignItems(ui.Center).Background(rowBg).Children(func() {
-				ui.Text(c, "Approve (y or n):").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Warning).NoWrap()
+				AlignItems(ui.Center).Background(rowBg).Clip().Children(func() {
+				ui.Text(c, "Approve (y or n):").Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Warning).Shrink(0).NoWrap()
 				msg := p.GatePrompt
 				if p.GateTitle != "" && msg != "" {
 					msg = p.GateTitle + " — " + msg
 				} else if msg == "" {
 					msg = "No pending approvals"
 				}
-				ui.Text(c, msg).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(th.Ink).Grow(1).NoWrap().MaxLines(1)
+				ui.Text(c, msg).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(th.Ink).
+					Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 				if p.GatePrompt != "" {
 					if theme.ActionButton(c, "mini-gate-yes", "Yes (y)", th.Success, true, th).Clicked() {
 						if p.OnResolveGate != nil {
@@ -142,11 +144,8 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeThemeSwitch:
 			prompt = fmt.Sprintf("%d/%d Theme: ", clampSel(sel, len(items)), len(items))
 		case ModeHelm:
-			total := 0
-			if p.Helm != nil && p.Helm.Engine != nil {
-				total, _, _, _ = p.Helm.Engine.Stats()
-			}
-			prompt = fmt.Sprintf("%d Helm: ", total)
+			prompt = "Helm ›"
+			placeholder = "Search workspace, @lang:rust, @sym:name, #local, !exclude, (dsl ...)"
 		case ModeWorkspaceCreate:
 			prompt = "New workspace: "
 			placeholder = "name or name @/path/to/project (Enter to create)"
@@ -173,7 +172,8 @@ func Render(c *ui.Context, p RenderProps) {
 					bar.Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.34, 0.52))
 				}
 				bar.Children(func() {
-					ui.Text(c, echoLabel).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(echoCol).NoWrap().MaxLines(1)
+					ui.Text(c, echoLabel).Font(theme.FontMono).FontSize(theme.FontSizeUI).TextColor(echoCol).
+						Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 				})
 				if bar.Clicked() && p.OnEnterInsert != nil {
 					p.OnEnterInsert()
@@ -181,7 +181,13 @@ func Render(c *ui.Context, p RenderProps) {
 				return
 			}
 
-			ui.Text(c, prompt).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+			promptEl := ui.Text(c, prompt).Font(theme.FontMono).FontSize(theme.FontSizeUI).FontWeight(700).TextColor(th.Info).NoWrap()
+			switch mode {
+			case ModeHelm:
+				promptEl.Width(64)
+			case ModeCommand, ModeBufferSwitch, ModeThemeSwitch:
+				promptEl.MinWidth(96)
+			}
 
 			inp := ui.TextInputBase(c.Key("doom-mini-input"), &val).
 				Placeholder(placeholder).Font(theme.FontMono).FontSize(theme.FontSizeBody).TextColor(th.Ink).Grow(1)
@@ -191,7 +197,8 @@ func Render(c *ui.Context, p RenderProps) {
 			if inp.Changed() {
 				s.SetInput(val)
 				if mode == ModeHelm && p.Helm != nil {
-					p.Helm.SetQuery(val)
+					gen := p.Helm.SetQuery(val)
+					s.MarkHelmPending(gen)
 				}
 			}
 			if inp.Submitted() {

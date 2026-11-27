@@ -168,7 +168,7 @@ func New(cfg Config) *Frame {
 		WebHost:             cfg.WebHost,
 		AppCfg:              cfg.AppConfig,
 		Prefs:               cfg.Prefs,
-		Theme:               theme.NordBento(),
+		Theme:               theme.DoomOne(),
 		themeCatalog:        theme.Catalog(),
 		dashboardNode:       widgets.DefaultDashboard(nil),
 		uiModules:           widgets.DefaultModules(),
@@ -454,14 +454,14 @@ func (f *Frame) OpenHydra(prefix string) {
 	f.miniState.Close()
 	f.meowState.EnterNormal()
 	f.meowState.SetKeypad(prefix)
-	f.invalidate()
+	f.requestFrame()
 }
 
 // EnterInsert transitions Meow to INSERT mode and focuses the Minibuffer prompt.
 func (f *Frame) EnterInsert() {
 	f.meowState.EnterInsert()
 	f.miniState.RequestFocus()
-	f.invalidate()
+	f.requestFrame()
 }
 
 // OpenMinibuffer activates the bottom Emacs Minibuffer in the given mode.
@@ -473,9 +473,10 @@ func (f *Frame) OpenMinibuffer(mode minibuffer.Mode) {
 		if seed != "" {
 			f.miniState.SetInput(seed)
 		}
-		f.Adaptive.Desktop.HelmSearch.SetQuery(seed)
+		gen := f.Adaptive.Desktop.HelmSearch.SetQuery(seed)
+		f.miniState.MarkHelmPending(gen)
 	}
-	f.invalidate()
+	f.requestFrame()
 }
 
 // OpenHelm opens 120Hz Helm live search inside the Minibuffer (SPC s / Cmd+P).
@@ -676,8 +677,9 @@ func (f *Frame) View(c *ui.Context) {
 	}
 
 	isDashboard := activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
+	overlayActive := f.miniState.IsCompletionActive() || f.meowState.Keypad() != ""
 	if f.pacer != nil {
-		f.pacer.SetLiveClockVisible(isDashboard && mods.Motion)
+		f.pacer.SetLiveClockVisible(isDashboard && mods.Motion && !overlayActive)
 	}
 	glassOp, chromeOp, viewportOp, _ := effectiveSurfaceFromSnap(snap)
 	var sig *widgets.Signals
@@ -686,6 +688,7 @@ func (f *Frame) View(c *ui.Context) {
 		sig = f.buildLiveSignals(th, modelLbl, sessLbl, pendingGateCount)
 		wrt = f.buildWidgetRuntime(snap, mods, pendingGateCount, gateTitle, gateID, pg)
 		wrt.Modules.GlassOpacity = glassOp
+		wrt.Modules.Motion = mods.Motion && !overlayActive
 	}
 
 	bc := &buffer.Context{
@@ -792,9 +795,7 @@ func (f *Frame) View(c *ui.Context) {
 	frameBg := th.Canvas
 	if mods.Glass {
 		kit.ApplyWindowTransparency(c, true)
-		if isDashboard {
-			frameBg = ui.Transparent
-		} else if c.Vibrancy() {
+		if c.Vibrancy() {
 			frameBg = kit.WithAlpha(th.Canvas, viewportOp)
 		}
 	}
@@ -848,12 +849,13 @@ func (f *Frame) View(c *ui.Context) {
 			_, activePlugin = f.appendMountedPluginTabs(snap, nil)
 			isDashboard = activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
 			if f.pacer != nil {
-				f.pacer.SetLiveClockVisible(isDashboard && mods.Motion)
+				f.pacer.SetLiveClockVisible(isDashboard && mods.Motion && !overlayActive)
 			}
 			if isDashboard && sig == nil {
 				sig = f.buildLiveSignals(th, modelLbl, sessLbl, pendingGateCount)
 				wrt = f.buildWidgetRuntime(snap, mods, pendingGateCount, gateTitle, gateID, pg)
 				wrt.Modules.GlassOpacity = glassOp
+				wrt.Modules.Motion = mods.Motion && !overlayActive
 				bc.Signals = sig
 				bc.WidgetRuntime = wrt
 			}
@@ -902,7 +904,7 @@ func (f *Frame) View(c *ui.Context) {
 					}
 				},
 				OnEcho:       f.Echo,
-				OnInvalidate: f.invalidate,
+				OnInvalidate: f.requestFrame,
 			})
 		}
 	})
