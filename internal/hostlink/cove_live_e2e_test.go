@@ -63,7 +63,7 @@ func locateMarlinCoveBinary() string {
 //
 //	marlin-ui (Go gRPC HTTP/2 CoveClient + WatchRoomEvents stream)
 //	  <-> real Rust `marlin-cove serve` binary (tonic gRPC HTTP/2 + external webhooks)
-//	  <-> live Go gRPC HTTP/2 MarlinGatewayService (`RoomGovernanceEnvelope`)
+//	  <-> native `marlin.app.v1.AppServer` (`StreamTurn` + `x-marlin-cove-*` governance metadata)
 func TestLiveCrossProcessCoveRelayEndToEnd(t *testing.T) {
 	bin := locateMarlinCoveBinary()
 	if bin == "" {
@@ -255,9 +255,13 @@ mention_policy = "required"
 	}
 	gwMu.Lock()
 	gwCount := len(capturedEnvs)
+	var capturedEnv CoveGovernanceEnvelope
+	if gwCount > 0 {
+		capturedEnv = capturedEnvs[0]
+	}
 	gwMu.Unlock()
-	if gwCount != 1 {
-		t.Fatalf("expected Marlin Gateway gRPC server to receive 1 verified RoomGovernanceEnvelope, got %d", gwCount)
+	if gwCount != 1 || capturedEnv.RoomID != "cove-main" || capturedEnv.ActorID != "human:owner" || capturedEnv.ActorRole != "owner" || capturedEnv.TaintedExternal {
+		t.Fatalf("expected marlin.app.v1.AppServer to receive 1 verified RoomGovernanceEnvelope via metadata, got count=%d env=%+v", gwCount, capturedEnv)
 	}
 
 	// 9. Tier-0 Gate: Agent denied (PermissionDenied), Human Owner approves, replay denied (AlreadyExists).

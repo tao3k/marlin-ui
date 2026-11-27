@@ -420,9 +420,7 @@ type MessageAttachment_ImageUrl struct {
 
 func (*MessageAttachment_ImageUrl) isMessageAttachment_Kind() {}
 
-// Verified room/people/bot governance metadata forwarded to Marlin Gateway
-// (`marlin-agent-core`), which runs atomic `.org` context projection on the
-// agent side without Cove storing or inspecting `.org` content.
+// Verified room/people/bot governance envelope forwarded to Marlin Gateway.
 type RoomGovernanceEnvelope struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	RoomId          string                 `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
@@ -2423,126 +2421,6 @@ func (x *WatchRoomEventsRequest) GetRoomId() string {
 	return ""
 }
 
-type MarlinGatewayTurnRequest struct {
-	state             protoimpl.MessageState  `protogen:"open.v1"`
-	SessionId         string                  `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Governance        *RoomGovernanceEnvelope `protobuf:"bytes,2,opt,name=governance,proto3" json:"governance,omitempty"`
-	TargetAgentHandle string                  `protobuf:"bytes,3,opt,name=target_agent_handle,json=targetAgentHandle,proto3" json:"target_agent_handle,omitempty"`
-	Message           string                  `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
-	Attachments       []*MessageAttachment    `protobuf:"bytes,5,rep,name=attachments,proto3" json:"attachments,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *MarlinGatewayTurnRequest) Reset() {
-	*x = MarlinGatewayTurnRequest{}
-	mi := &file_marlin_cove_v1_cove_proto_msgTypes[27]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MarlinGatewayTurnRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MarlinGatewayTurnRequest) ProtoMessage() {}
-
-func (x *MarlinGatewayTurnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_marlin_cove_v1_cove_proto_msgTypes[27]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MarlinGatewayTurnRequest.ProtoReflect.Descriptor instead.
-func (*MarlinGatewayTurnRequest) Descriptor() ([]byte, []int) {
-	return file_marlin_cove_v1_cove_proto_rawDescGZIP(), []int{27}
-}
-
-func (x *MarlinGatewayTurnRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *MarlinGatewayTurnRequest) GetGovernance() *RoomGovernanceEnvelope {
-	if x != nil {
-		return x.Governance
-	}
-	return nil
-}
-
-func (x *MarlinGatewayTurnRequest) GetTargetAgentHandle() string {
-	if x != nil {
-		return x.TargetAgentHandle
-	}
-	return ""
-}
-
-func (x *MarlinGatewayTurnRequest) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *MarlinGatewayTurnRequest) GetAttachments() []*MessageAttachment {
-	if x != nil {
-		return x.Attachments
-	}
-	return nil
-}
-
-type MarlinGatewayTurnResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Response      string                 `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MarlinGatewayTurnResponse) Reset() {
-	*x = MarlinGatewayTurnResponse{}
-	mi := &file_marlin_cove_v1_cove_proto_msgTypes[28]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MarlinGatewayTurnResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MarlinGatewayTurnResponse) ProtoMessage() {}
-
-func (x *MarlinGatewayTurnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_marlin_cove_v1_cove_proto_msgTypes[28]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MarlinGatewayTurnResponse.ProtoReflect.Descriptor instead.
-func (*MarlinGatewayTurnResponse) Descriptor() ([]byte, []int) {
-	return file_marlin_cove_v1_cove_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *MarlinGatewayTurnResponse) GetResponse() string {
-	if x != nil {
-		return x.Response
-	}
-	return ""
-}
-
 var File_marlin_cove_v1_cove_proto protoreflect.FileDescriptor
 
 const file_marlin_cove_v1_cove_proto_rawDesc = "" +
@@ -2726,18 +2604,7 @@ const file_marlin_cove_v1_cove_proto_rawDesc = "" +
 	"\bapproved\x18\x04 \x01(\bR\bapproved\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\"1\n" +
 	"\x16WatchRoomEventsRequest\x12\x17\n" +
-	"\aroom_id\x18\x01 \x01(\tR\x06roomId\"\x90\x02\n" +
-	"\x18MarlinGatewayTurnRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12F\n" +
-	"\n" +
-	"governance\x18\x02 \x01(\v2&.marlin.cove.v1.RoomGovernanceEnvelopeR\n" +
-	"governance\x12.\n" +
-	"\x13target_agent_handle\x18\x03 \x01(\tR\x11targetAgentHandle\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\x12C\n" +
-	"\vattachments\x18\x05 \x03(\v2!.marlin.cove.v1.MessageAttachmentR\vattachments\"7\n" +
-	"\x19MarlinGatewayTurnResponse\x12\x1a\n" +
-	"\bresponse\x18\x01 \x01(\tR\bresponse*c\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId*c\n" +
 	"\rPrincipalKind\x12\x1e\n" +
 	"\x1aPRINCIPAL_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14PRINCIPAL_KIND_HUMAN\x10\x01\x12\x18\n" +
@@ -2783,9 +2650,7 @@ const file_marlin_cove_v1_cove_proto_rawDesc = "" +
 	"\fDispatchTurn\x12#.marlin.cove.v1.DispatchTurnRequest\x1a$.marlin.cove.v1.DispatchTurnResponse\x12K\n" +
 	"\vRequestGate\x12\".marlin.cove.v1.RequestGateRequest\x1a\x18.marlin.cove.v1.RoomGate\x12V\n" +
 	"\vResolveGate\x12\".marlin.cove.v1.ResolveGateRequest\x1a#.marlin.cove.v1.GateApprovalReceipt\x12V\n" +
-	"\x0fWatchRoomEvents\x12&.marlin.cove.v1.WatchRoomEventsRequest\x1a\x19.marlin.cove.v1.RoomEvent0\x012{\n" +
-	"\x14MarlinGatewayService\x12c\n" +
-	"\fDispatchTurn\x12(.marlin.cove.v1.MarlinGatewayTurnRequest\x1a).marlin.cove.v1.MarlinGatewayTurnResponseB6Z4github.com/tao3k/marlin-ui/gen/marlin/cove/v1;covev1b\x06proto3"
+	"\x0fWatchRoomEvents\x12&.marlin.cove.v1.WatchRoomEventsRequest\x1a\x19.marlin.cove.v1.RoomEvent0\x01B6Z4github.com/tao3k/marlin-ui/gen/marlin/cove/v1;covev1b\x06proto3"
 
 var (
 	file_marlin_cove_v1_cove_proto_rawDescOnce sync.Once
@@ -2800,7 +2665,7 @@ func file_marlin_cove_v1_cove_proto_rawDescGZIP() []byte {
 }
 
 var file_marlin_cove_v1_cove_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_marlin_cove_v1_cove_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_marlin_cove_v1_cove_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_marlin_cove_v1_cove_proto_goTypes = []any{
 	(PrincipalKind)(0),                   // 0: marlin.cove.v1.PrincipalKind
 	(PrincipalRole)(0),                   // 1: marlin.cove.v1.PrincipalRole
@@ -2835,8 +2700,6 @@ var file_marlin_cove_v1_cove_proto_goTypes = []any{
 	(*RequestGateRequest)(nil),           // 30: marlin.cove.v1.RequestGateRequest
 	(*ResolveGateRequest)(nil),           // 31: marlin.cove.v1.ResolveGateRequest
 	(*WatchRoomEventsRequest)(nil),       // 32: marlin.cove.v1.WatchRoomEventsRequest
-	(*MarlinGatewayTurnRequest)(nil),     // 33: marlin.cove.v1.MarlinGatewayTurnRequest
-	(*MarlinGatewayTurnResponse)(nil),    // 34: marlin.cove.v1.MarlinGatewayTurnResponse
 }
 var file_marlin_cove_v1_cove_proto_depIdxs = []int32{
 	0,  // 0: marlin.cove.v1.RoomGovernanceEnvelope.actor_kind:type_name -> marlin.cove.v1.PrincipalKind
@@ -2871,39 +2734,35 @@ var file_marlin_cove_v1_cove_proto_depIdxs = []int32{
 	11, // 29: marlin.cove.v1.DispatchTurnResponse.user_message:type_name -> marlin.cove.v1.RoomMessage
 	7,  // 30: marlin.cove.v1.DispatchTurnResponse.governance:type_name -> marlin.cove.v1.RoomGovernanceEnvelope
 	11, // 31: marlin.cove.v1.DispatchTurnResponse.agent_reply:type_name -> marlin.cove.v1.RoomMessage
-	7,  // 32: marlin.cove.v1.MarlinGatewayTurnRequest.governance:type_name -> marlin.cove.v1.RoomGovernanceEnvelope
-	6,  // 33: marlin.cove.v1.MarlinGatewayTurnRequest.attachments:type_name -> marlin.cove.v1.MessageAttachment
-	18, // 34: marlin.cove.v1.CoveRelayService.Health:input_type -> marlin.cove.v1.HealthRequest
-	20, // 35: marlin.cove.v1.CoveRelayService.ListRooms:input_type -> marlin.cove.v1.ListRoomsRequest
-	22, // 36: marlin.cove.v1.CoveRelayService.CreateRoom:input_type -> marlin.cove.v1.CreateRoomRequest
-	23, // 37: marlin.cove.v1.CoveRelayService.GetRoomSnapshot:input_type -> marlin.cove.v1.GetRoomSnapshotRequest
-	24, // 38: marlin.cove.v1.CoveRelayService.GetGovernanceEnvelope:input_type -> marlin.cove.v1.GetGovernanceEnvelopeRequest
-	25, // 39: marlin.cove.v1.CoveRelayService.CreateInvite:input_type -> marlin.cove.v1.CreateInviteRequest
-	26, // 40: marlin.cove.v1.CoveRelayService.RedeemInvite:input_type -> marlin.cove.v1.RedeemInviteRequest
-	27, // 41: marlin.cove.v1.CoveRelayService.PostMessage:input_type -> marlin.cove.v1.PostMessageRequest
-	28, // 42: marlin.cove.v1.CoveRelayService.DispatchTurn:input_type -> marlin.cove.v1.DispatchTurnRequest
-	30, // 43: marlin.cove.v1.CoveRelayService.RequestGate:input_type -> marlin.cove.v1.RequestGateRequest
-	31, // 44: marlin.cove.v1.CoveRelayService.ResolveGate:input_type -> marlin.cove.v1.ResolveGateRequest
-	32, // 45: marlin.cove.v1.CoveRelayService.WatchRoomEvents:input_type -> marlin.cove.v1.WatchRoomEventsRequest
-	33, // 46: marlin.cove.v1.MarlinGatewayService.DispatchTurn:input_type -> marlin.cove.v1.MarlinGatewayTurnRequest
-	19, // 47: marlin.cove.v1.CoveRelayService.Health:output_type -> marlin.cove.v1.HealthResponse
-	21, // 48: marlin.cove.v1.CoveRelayService.ListRooms:output_type -> marlin.cove.v1.ListRoomsResponse
-	15, // 49: marlin.cove.v1.CoveRelayService.CreateRoom:output_type -> marlin.cove.v1.RoomSnapshot
-	15, // 50: marlin.cove.v1.CoveRelayService.GetRoomSnapshot:output_type -> marlin.cove.v1.RoomSnapshot
-	7,  // 51: marlin.cove.v1.CoveRelayService.GetGovernanceEnvelope:output_type -> marlin.cove.v1.RoomGovernanceEnvelope
-	10, // 52: marlin.cove.v1.CoveRelayService.CreateInvite:output_type -> marlin.cove.v1.RoomInvite
-	8,  // 53: marlin.cove.v1.CoveRelayService.RedeemInvite:output_type -> marlin.cove.v1.RoomParticipant
-	11, // 54: marlin.cove.v1.CoveRelayService.PostMessage:output_type -> marlin.cove.v1.RoomMessage
-	29, // 55: marlin.cove.v1.CoveRelayService.DispatchTurn:output_type -> marlin.cove.v1.DispatchTurnResponse
-	13, // 56: marlin.cove.v1.CoveRelayService.RequestGate:output_type -> marlin.cove.v1.RoomGate
-	12, // 57: marlin.cove.v1.CoveRelayService.ResolveGate:output_type -> marlin.cove.v1.GateApprovalReceipt
-	17, // 58: marlin.cove.v1.CoveRelayService.WatchRoomEvents:output_type -> marlin.cove.v1.RoomEvent
-	34, // 59: marlin.cove.v1.MarlinGatewayService.DispatchTurn:output_type -> marlin.cove.v1.MarlinGatewayTurnResponse
-	47, // [47:60] is the sub-list for method output_type
-	34, // [34:47] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	18, // 32: marlin.cove.v1.CoveRelayService.Health:input_type -> marlin.cove.v1.HealthRequest
+	20, // 33: marlin.cove.v1.CoveRelayService.ListRooms:input_type -> marlin.cove.v1.ListRoomsRequest
+	22, // 34: marlin.cove.v1.CoveRelayService.CreateRoom:input_type -> marlin.cove.v1.CreateRoomRequest
+	23, // 35: marlin.cove.v1.CoveRelayService.GetRoomSnapshot:input_type -> marlin.cove.v1.GetRoomSnapshotRequest
+	24, // 36: marlin.cove.v1.CoveRelayService.GetGovernanceEnvelope:input_type -> marlin.cove.v1.GetGovernanceEnvelopeRequest
+	25, // 37: marlin.cove.v1.CoveRelayService.CreateInvite:input_type -> marlin.cove.v1.CreateInviteRequest
+	26, // 38: marlin.cove.v1.CoveRelayService.RedeemInvite:input_type -> marlin.cove.v1.RedeemInviteRequest
+	27, // 39: marlin.cove.v1.CoveRelayService.PostMessage:input_type -> marlin.cove.v1.PostMessageRequest
+	28, // 40: marlin.cove.v1.CoveRelayService.DispatchTurn:input_type -> marlin.cove.v1.DispatchTurnRequest
+	30, // 41: marlin.cove.v1.CoveRelayService.RequestGate:input_type -> marlin.cove.v1.RequestGateRequest
+	31, // 42: marlin.cove.v1.CoveRelayService.ResolveGate:input_type -> marlin.cove.v1.ResolveGateRequest
+	32, // 43: marlin.cove.v1.CoveRelayService.WatchRoomEvents:input_type -> marlin.cove.v1.WatchRoomEventsRequest
+	19, // 44: marlin.cove.v1.CoveRelayService.Health:output_type -> marlin.cove.v1.HealthResponse
+	21, // 45: marlin.cove.v1.CoveRelayService.ListRooms:output_type -> marlin.cove.v1.ListRoomsResponse
+	15, // 46: marlin.cove.v1.CoveRelayService.CreateRoom:output_type -> marlin.cove.v1.RoomSnapshot
+	15, // 47: marlin.cove.v1.CoveRelayService.GetRoomSnapshot:output_type -> marlin.cove.v1.RoomSnapshot
+	7,  // 48: marlin.cove.v1.CoveRelayService.GetGovernanceEnvelope:output_type -> marlin.cove.v1.RoomGovernanceEnvelope
+	10, // 49: marlin.cove.v1.CoveRelayService.CreateInvite:output_type -> marlin.cove.v1.RoomInvite
+	8,  // 50: marlin.cove.v1.CoveRelayService.RedeemInvite:output_type -> marlin.cove.v1.RoomParticipant
+	11, // 51: marlin.cove.v1.CoveRelayService.PostMessage:output_type -> marlin.cove.v1.RoomMessage
+	29, // 52: marlin.cove.v1.CoveRelayService.DispatchTurn:output_type -> marlin.cove.v1.DispatchTurnResponse
+	13, // 53: marlin.cove.v1.CoveRelayService.RequestGate:output_type -> marlin.cove.v1.RoomGate
+	12, // 54: marlin.cove.v1.CoveRelayService.ResolveGate:output_type -> marlin.cove.v1.GateApprovalReceipt
+	17, // 55: marlin.cove.v1.CoveRelayService.WatchRoomEvents:output_type -> marlin.cove.v1.RoomEvent
+	44, // [44:56] is the sub-list for method output_type
+	32, // [32:44] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_marlin_cove_v1_cove_proto_init() }
@@ -2927,9 +2786,9 @@ func file_marlin_cove_v1_cove_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_marlin_cove_v1_cove_proto_rawDesc), len(file_marlin_cove_v1_cove_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   29,
+			NumMessages:   27,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   1,
 		},
 		GoTypes:           file_marlin_cove_v1_cove_proto_goTypes,
 		DependencyIndexes: file_marlin_cove_v1_cove_proto_depIdxs,

@@ -45,8 +45,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// High-performance gRPC over HTTP/2 Cloud Room Relay service exposed by
-// `marlin-cove` to `marlin-ui` clients (Desktop, iOS, Android, TUI).
+// High-performance gRPC over HTTP/2 Cloud Room Relay service.
 type CoveRelayServiceClient interface {
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	ListRooms(ctx context.Context, in *ListRoomsRequest, opts ...grpc.CallOption) (*ListRoomsResponse, error)
@@ -203,8 +202,7 @@ type CoveRelayService_WatchRoomEventsClient = grpc.ServerStreamingClient[RoomEve
 // All implementations must embed UnimplementedCoveRelayServiceServer
 // for forward compatibility.
 //
-// High-performance gRPC over HTTP/2 Cloud Room Relay service exposed by
-// `marlin-cove` to `marlin-ui` clients (Desktop, iOS, Android, TUI).
+// High-performance gRPC over HTTP/2 Cloud Room Relay service.
 type CoveRelayServiceServer interface {
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	ListRooms(context.Context, *ListRoomsRequest) (*ListRoomsResponse, error)
@@ -553,115 +551,5 @@ var CoveRelayService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "marlin/cove/v1/cove.proto",
-}
-
-const (
-	MarlinGatewayService_DispatchTurn_FullMethodName = "/marlin.cove.v1.MarlinGatewayService/DispatchTurn"
-)
-
-// MarlinGatewayServiceClient is the client API for MarlinGatewayService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// High-performance gRPC over HTTP/2 boundary between `marlin-cove` and
-// Marlin Gateway (`marlin-agent-core`), forwarding verified
-// `RoomGovernanceEnvelope` metadata for agent-side atomic `.org` governance.
-type MarlinGatewayServiceClient interface {
-	DispatchTurn(ctx context.Context, in *MarlinGatewayTurnRequest, opts ...grpc.CallOption) (*MarlinGatewayTurnResponse, error)
-}
-
-type marlinGatewayServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewMarlinGatewayServiceClient(cc grpc.ClientConnInterface) MarlinGatewayServiceClient {
-	return &marlinGatewayServiceClient{cc}
-}
-
-func (c *marlinGatewayServiceClient) DispatchTurn(ctx context.Context, in *MarlinGatewayTurnRequest, opts ...grpc.CallOption) (*MarlinGatewayTurnResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MarlinGatewayTurnResponse)
-	err := c.cc.Invoke(ctx, MarlinGatewayService_DispatchTurn_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// MarlinGatewayServiceServer is the server API for MarlinGatewayService service.
-// All implementations must embed UnimplementedMarlinGatewayServiceServer
-// for forward compatibility.
-//
-// High-performance gRPC over HTTP/2 boundary between `marlin-cove` and
-// Marlin Gateway (`marlin-agent-core`), forwarding verified
-// `RoomGovernanceEnvelope` metadata for agent-side atomic `.org` governance.
-type MarlinGatewayServiceServer interface {
-	DispatchTurn(context.Context, *MarlinGatewayTurnRequest) (*MarlinGatewayTurnResponse, error)
-	mustEmbedUnimplementedMarlinGatewayServiceServer()
-}
-
-// UnimplementedMarlinGatewayServiceServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedMarlinGatewayServiceServer struct{}
-
-func (UnimplementedMarlinGatewayServiceServer) DispatchTurn(context.Context, *MarlinGatewayTurnRequest) (*MarlinGatewayTurnResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DispatchTurn not implemented")
-}
-func (UnimplementedMarlinGatewayServiceServer) mustEmbedUnimplementedMarlinGatewayServiceServer() {}
-func (UnimplementedMarlinGatewayServiceServer) testEmbeddedByValue()                              {}
-
-// UnsafeMarlinGatewayServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to MarlinGatewayServiceServer will
-// result in compilation errors.
-type UnsafeMarlinGatewayServiceServer interface {
-	mustEmbedUnimplementedMarlinGatewayServiceServer()
-}
-
-func RegisterMarlinGatewayServiceServer(s grpc.ServiceRegistrar, srv MarlinGatewayServiceServer) {
-	// If the following call panics, it indicates UnimplementedMarlinGatewayServiceServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&MarlinGatewayService_ServiceDesc, srv)
-}
-
-func _MarlinGatewayService_DispatchTurn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MarlinGatewayTurnRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MarlinGatewayServiceServer).DispatchTurn(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MarlinGatewayService_DispatchTurn_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MarlinGatewayServiceServer).DispatchTurn(ctx, req.(*MarlinGatewayTurnRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// MarlinGatewayService_ServiceDesc is the grpc.ServiceDesc for MarlinGatewayService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var MarlinGatewayService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "marlin.cove.v1.MarlinGatewayService",
-	HandlerType: (*MarlinGatewayServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "DispatchTurn",
-			Handler:    _MarlinGatewayService_DispatchTurn_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "marlin/cove/v1/cove.proto",
 }

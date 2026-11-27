@@ -17,15 +17,16 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	appv1 "github.com/tao3k/marlin-mygo/gen/marlin/app/v1"
 	"github.com/tao3k/marlin-mygo/runtime/async"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
-	covev1 "github.com/tao3k/marlin-ui/gen/marlin/cove/v1"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 )
 
-// MarlinGatewayTurnRequest mirrors marlin.cove.v1.MarlinGatewayTurnRequest
-// dispatched over gRPC HTTP/2 to Marlin Gateway (`marlin-agent-core`).
+// MarlinGatewayTurnRequest projects an inbound `marlin.app.v1.AppServer/StreamTurn`
+// call arriving from `marlin-cove`, including its verified `x-marlin-cove-*`
+// governance metadata headers.
 type MarlinGatewayTurnRequest struct {
 	SessionID         string
 	Governance        CoveGovernanceEnvelope
@@ -33,54 +34,112 @@ type MarlinGatewayTurnRequest struct {
 	Message           string
 }
 
-type marlinGatewayGRPCServer struct {
-	covev1.UnimplementedMarlinGatewayServiceServer
+type marlinAppServerGRPCAdapter struct {
+	appv1.UnimplementedAppServerServer
 	expectedToken string
 	responder     func(ctx context.Context, req MarlinGatewayTurnRequest) (string, error)
 }
 
-func (s *marlinGatewayGRPCServer) DispatchTurn(
-	ctx context.Context,
-	req *covev1.MarlinGatewayTurnRequest,
-) (*covev1.MarlinGatewayTurnResponse, error) {
+func (s *marlinAppServerGRPCAdapter) StreamTurn(
+	req *appv1.StreamTurnRequest,
+	stream grpc.ServerStreamingServer[appv1.TurnEvent],
+) error {
+	ctx := stream.Context()
+	md, _ := metadata.FromIncomingContext(ctx)
 	if s.expectedToken != "" {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing authorization metadata")
-		}
 		authVals := md.Get("authorization")
 		if len(authVals) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing bearer token")
+			return status.Error(codes.Unauthenticated, "missing bearer token")
 		}
 		got := strings.TrimSpace(strings.TrimPrefix(authVals[0], "Bearer "))
 		if subtle.ConstantTimeCompare([]byte(s.expectedToken), []byte(got)) != 1 {
-			return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
+			return status.Error(codes.Unauthenticated, "invalid bearer token")
 		}
 	}
 	if s.responder == nil {
-		return nil, status.Error(codes.Unavailable, "gateway responder unavailable")
+		return status.Error(codes.Unavailable, "gateway responder unavailable")
 	}
-	reply, err := s.responder(ctx, MarlinGatewayTurnRequest{
-		SessionID:         req.GetSessionId(),
-		Governance:        governanceFromProto(req.GetGovernance()),
-		TargetAgentHandle: req.GetTargetAgentHandle(),
-		Message:           req.GetMessage(),
-	})
+
+	var userMessage string
+	for _, msg := range req.GetMessages() {
+		if msg.GetRole() == appv1.MessageRole_MESSAGE_ROLE_USER {
+			userMessage = msg.GetText()
+		}
+	}
+
+	turnReq := MarlinGatewayTurnRequest{
+		SessionID:         firstMeta(md, "x-marlin-cove-session-id"),
+		TargetAgentHandle: firstMeta(md, "x-marlin-cove-target-agent"),
+		Message:           userMessage,
+		Governance:        governanceFromMetadata(md),
+	}
+
+	reply, err := s.responder(ctx, turnReq)
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return status.Error(codes.Unavailable, err.Error())
 	}
-	return &covev1.MarlinGatewayTurnResponse{Response: reply}, nil
+
+	if err := stream.Send(&appv1.TurnEvent{
+		Event: &appv1.TurnEvent_Started{Started: &appv1.TurnStarted{}},
+	}); err != nil {
+		return err
+	}
+	if err := stream.Send(&appv1.TurnEvent{
+		Event: &appv1.TurnEvent_TextDelta{
+			TextDelta: &appv1.TextDelta{Sequence: 1, Text: reply},
+		},
+	}); err != nil {
+		return err
+	}
+	return stream.Send(&appv1.TurnEvent{
+		Event: &appv1.TurnEvent_Completed{
+			Completed: &appv1.TurnCompleted{
+				TextChunks: 1,
+				TextBytes:  uint64(len(reply)),
+			},
+		},
+	})
 }
 
-// RegisterMarlinGatewayGRPCServer mounts an authenticated gRPC HTTP/2
-// `marlin.cove.v1.MarlinGatewayService` onto server, bridging Cove's verified
-// RoomGovernanceEnvelope directly to a Marlin Agent Core responder.
+func firstMeta(md metadata.MD, key string) string {
+	vals := md.Get(key)
+	if len(vals) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(vals[0])
+}
+
+func governanceFromMetadata(md metadata.MD) CoveGovernanceEnvelope {
+	var scopes []string
+	if raw := firstMeta(md, "x-marlin-cove-granted-scopes"); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				scopes = append(scopes, trimmed)
+			}
+		}
+	}
+	return CoveGovernanceEnvelope{
+		RoomID:          firstMeta(md, "x-marlin-cove-room-id"),
+		ChannelID:       firstMeta(md, "x-marlin-cove-channel-id"),
+		ActorID:         firstMeta(md, "x-marlin-cove-actor-id"),
+		ActorKind:       firstMeta(md, "x-marlin-cove-actor-kind"),
+		ActorRole:       firstMeta(md, "x-marlin-cove-actor-role"),
+		GrantedScopes:   scopes,
+		Origin:          firstMeta(md, "x-marlin-cove-origin"),
+		TaintedExternal: strings.EqualFold(firstMeta(md, "x-marlin-cove-tainted-external"), "true"),
+	}
+}
+
+// RegisterMarlinGatewayGRPCServer mounts an authenticated native
+// `marlin.app.v1.AppServer` (`StreamTurn`) gRPC HTTP/2 handler onto server,
+// extracting Cove's verified `x-marlin-cove-*` governance metadata without
+// requiring `marlin-agent-core` to depend on any `marlin-cove` protocol.
 func RegisterMarlinGatewayGRPCServer(
 	server *grpc.Server,
 	bearerToken string,
 	responder func(ctx context.Context, req MarlinGatewayTurnRequest) (string, error),
 ) {
-	covev1.RegisterMarlinGatewayServiceServer(server, &marlinGatewayGRPCServer{
+	appv1.RegisterAppServerServer(server, &marlinAppServerGRPCAdapter{
 		expectedToken: strings.TrimSpace(bearerToken),
 		responder:     responder,
 	})
