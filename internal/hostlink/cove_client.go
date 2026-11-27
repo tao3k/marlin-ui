@@ -181,12 +181,56 @@ func (c *CoveClient) PostMessage(ctx context.Context, roomID, channelID, authorI
 	return out, err
 }
 
+// CoveDispatchResponse mirrors marlin-cove's POST /v1/rooms/{room_id}/dispatch response.
+type CoveDispatchResponse struct {
+	UserMessage CoveMessage            `json:"user_message"`
+	Governance  CoveGovernanceEnvelope `json:"governance"`
+	AgentReply  CoveMessage            `json:"agent_reply"`
+}
+
+// CoveGateReceipt mirrors marlin-cove's GateApprovalReceipt wire model.
+type CoveGateReceipt struct {
+	GateID         string `json:"gate_id"`
+	ResolvedBy     string `json:"resolved_by"`
+	Decision       string `json:"decision"`
+	Reason         string `json:"reason"`
+	ResolvedAtUnix int64  `json:"resolved_at_unix"`
+}
+
 // FetchGovernanceEnvelope fetches the verified room governance envelope that
 // Marlin Cove forwards to Marlin Gateway (marlin-agent-core).
 func (c *CoveClient) FetchGovernanceEnvelope(ctx context.Context, roomID, principalID string) (CoveGovernanceEnvelope, error) {
 	var out CoveGovernanceEnvelope
 	path := fmt.Sprintf("/v1/rooms/%s/governance/%s", url.PathEscape(roomID), url.PathEscape(principalID))
 	err := c.doJSON(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// DispatchTurn posts a user turn into Cove and dispatches it live to Marlin
+// Gateway (marlin-agent-core) with a verified RoomGovernanceEnvelope.
+func (c *CoveClient) DispatchTurn(ctx context.Context, roomID, channelID, authorID, targetAgentHandle, body string) (CoveDispatchResponse, error) {
+	var out CoveDispatchResponse
+	path := fmt.Sprintf("/v1/rooms/%s/dispatch", url.PathEscape(roomID))
+	payload := map[string]any{
+		"channel_id":          channelID,
+		"author_id":           authorID,
+		"target_agent_handle": targetAgentHandle,
+		"body":                body,
+	}
+	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
+	return out, err
+}
+
+// ResolveGate resolves a Tier-0 PromptGate as a human Owner/Maintainer.
+func (c *CoveClient) ResolveGate(ctx context.Context, roomID, gateID, actorID string, approved bool, reason string) (CoveGateReceipt, error) {
+	var out CoveGateReceipt
+	path := fmt.Sprintf("/v1/rooms/%s/gates/%s/resolve", url.PathEscape(roomID), url.PathEscape(gateID))
+	payload := map[string]any{
+		"actor_id": actorID,
+		"approved": approved,
+		"reason":   reason,
+	}
+	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
 	return out, err
 }
 

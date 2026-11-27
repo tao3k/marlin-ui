@@ -61,6 +61,19 @@ func TestCoveClientWireParityAndSnapshotProjection(t *testing.T) {
 				Origin:          "telegram",
 				TaintedExternal: true,
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/cove-main/dispatch":
+			_ = json.NewEncoder(w).Encode(CoveDispatchResponse{
+				UserMessage: CoveMessage{ID: "msg_u1", ChannelID: "architecture", AuthorID: "human:owner", AuthorKind: "human", Body: "@architect check", Origin: "cove_native"},
+				Governance:  CoveGovernanceEnvelope{RoomID: "cove-main", ChannelID: "architecture", ActorID: "human:owner", ActorKind: "human", ActorRole: "owner", Origin: "cove_native", TaintedExternal: false},
+				AgentReply:  CoveMessage{ID: "msg_a1", ChannelID: "architecture", AuthorID: "agent:architect", AuthorKind: "agent", Body: "Marlin Gateway verified.", Origin: "marlin_gateway", BotChainDepth: 1},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/cove-main/gates/gate_1/resolve":
+			_ = json.NewEncoder(w).Encode(CoveGateReceipt{
+				GateID:     "gate_1",
+				ResolvedBy: "human:owner",
+				Decision:   "approved",
+				Reason:     "human reviewed",
+			})
 		default:
 			http.NotFound(w, r)
 		}
@@ -99,5 +112,21 @@ func TestCoveClientWireParityAndSnapshotProjection(t *testing.T) {
 	}
 	if !env.TaintedExternal || env.ActorRole != "external_guest" || env.Origin != "telegram" {
 		t.Fatalf("unexpected governance envelope: %+v", env)
+	}
+
+	dispatched, err := client.DispatchTurn(ctx, "cove-main", "architecture", "human:owner", "architect", "@architect check")
+	if err != nil {
+		t.Fatalf("DispatchTurn failed: %v", err)
+	}
+	if dispatched.AgentReply.Origin != "marlin_gateway" || dispatched.Governance.TaintedExternal {
+		t.Fatalf("unexpected dispatch response: %+v", dispatched)
+	}
+
+	receipt, err := client.ResolveGate(ctx, "cove-main", "gate_1", "human:owner", true, "human reviewed")
+	if err != nil {
+		t.Fatalf("ResolveGate failed: %v", err)
+	}
+	if receipt.Decision != "approved" || receipt.ResolvedBy != "human:owner" {
+		t.Fatalf("unexpected gate receipt: %+v", receipt)
 	}
 }
