@@ -104,7 +104,9 @@ type Shell struct {
 	roomDetailsTabIdx    int
 	roomMentionForceOpen bool
 	roomDraft            string
+	roomDraftEpoch       int
 	roomThreadDraft      string
+	roomThreadDraftEpoch int
 	roomTaskDraft        string
 	searchQuery          string
 	selectedHit    *search.Candidate

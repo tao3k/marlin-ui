@@ -160,7 +160,7 @@ dev-room *args:
     }
     trap cleanup EXIT INT TERM
     bridge_token="${MARLIN_BRIDGE_TOKEN:-marlin-cove-dev-$(date +%s)}"
-    cove_token="${MARLIN_COVE_TOKEN:-cove-room-dev-$(date +%s)}"
+    cove_token="${MARLIN_COVE_TOKEN:-marlin-cove-local-dev}"
     MARLIN_BRIDGE_REAL_SESSION=1 MARLIN_BRIDGE_TOKEN="$bridge_token" MARLIN_CONFIG="$cfg_file" MARLIN_BRIDGE_CONFIG="$cfg_file" "$app_bin" >"$app_log" 2>&1 &
     APP_PID=$!
     app_addr=""
@@ -177,31 +177,36 @@ dev-room *args:
         exit 1
     fi
     cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
-    MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
-    MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
-    MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
-    MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
-        "$cove_bin" serve >"$cove_log" 2>&1 &
-    COVE_PID=$!
     cove_host="${cove_bind%:*}"
     cove_port="${cove_bind##*:}"
-    cove_ready=0
-    for _ in $(seq 1 50); do
-        if ! kill -0 "$COVE_PID" 2>/dev/null; then
-            echo "error: marlin-cove exited early:" >&2
-            cat "$cove_log" >&2
-            exit 1
+    if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+        exec 3>&- 3<&-
+        echo "[dev-room] reusing live marlin-cove at $cove_bind (shared room across Desktop & Mobile)"
+    else
+        MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
+        MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
+        MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
+        MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
+            "$cove_bin" serve >"$cove_log" 2>&1 &
+        COVE_PID=$!
+        cove_ready=0
+        for _ in $(seq 1 50); do
+            if ! kill -0 "$COVE_PID" 2>/dev/null; then
+                echo "error: marlin-cove exited early:" >&2
+                cat "$cove_log" >&2
+                exit 1
+            fi
+            if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+                exec 3>&- 3<&-
+                cove_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+        if [ "$cove_ready" -ne 1 ]; then
+            echo "warning: marlin-cove did not open $cove_bind within 5s (logs follow); UI will keep local fallback live:" >&2
+            cat "$cove_log" >&2 || true
         fi
-        if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
-            exec 3>&- 3<&-
-            cove_ready=1
-            break
-        fi
-        sleep 0.1
-    done
-    if [ "$cove_ready" -ne 1 ]; then
-        echo "warning: marlin-cove did not open $cove_bind within 5s (logs follow); UI will keep local fallback live:" >&2
-        cat "$cove_log" >&2 || true
     fi
     echo "[dev-room] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
     exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop \

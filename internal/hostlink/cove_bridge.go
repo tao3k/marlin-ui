@@ -600,11 +600,8 @@ func firstAgentMention(body string, participants []CoveParticipant) string {
 			}
 		}
 	}
-	for _, field := range strings.Fields(body) {
-		if !strings.HasPrefix(field, "@") {
-			continue
-		}
-		handle := strings.ToLower(strings.TrimRight(strings.TrimPrefix(field, "@"), ".,!?:;"))
+	for _, raw := range featurekit.ExtractRoomMentions(body) {
+		handle := strings.ToLower(raw)
 		if known[handle] {
 			return handle
 		}

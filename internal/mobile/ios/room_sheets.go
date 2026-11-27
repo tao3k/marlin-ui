@@ -431,11 +431,46 @@ func (s *Shell) renderRoomThreadSheet(
 					}
 				})
 			})
+			if thQ, thAt := activeMentionQuery(*threadDraft); thAt {
+				agents, humans := featurekit.MatchRoomParticipants(snap.Participants, thQ)
+				if len(agents) > 0 || len(humans) > 0 {
+					ui.Column(c.Key("ios-room-th-mpop")).Padding(8, 14).Gap(4).AlignItems(ui.Stretch).Children(func() {
+						pop := ui.Column(c).Padding(8, 10).Gap(4).Radius(16).AlignItems(ui.Stretch).
+							Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.56)})
+						pop.Children(func() {
+							for _, p := range append(agents, humans...) {
+								mem := p
+								btn := kit.ActionControl(ui.ButtonBase(c.Key("ios-th-mpop-"+mem.ID)).Label("Thread mention @"+mem.Handle).
+									FillWidth().Padding(6, 8).Gap(8).Radius(10).AlignItems(ui.Center))
+								if btn.Hovered() || btn.Pressed() {
+									btn.Background(kit.WithAlpha(th.Accent, 0.14))
+								}
+								btn.Children(func() {
+									renderRoleEmblemAvatar(c, mem.Name, mem.Handle, mem.IsAgent, mem.Presence, 24, th)
+									ui.Text(c, mem.Name).Font(kit.FontDisplay).FontSize(13).FontWeight(600).TextColor(th.Ink).SingleLine()
+									ui.Text(c, "@"+mem.Handle).Font(theme.FontMono).FontSize(11).TextColor(th.Accent).SingleLine()
+								})
+								if btn.Clicked() {
+									mygo.Haptics.Selection()
+									*threadDraft = applyMentionCompletion(*threadDraft, mem.Handle)
+									s.mu.Lock()
+									s.roomThreadDraftEpoch++
+									s.mu.Unlock()
+									s.invalidate()
+								}
+							}
+						})
+					})
+				}
+			}
 			ui.Row(c.Key("ios-room-thread-comp")).Shrink(0).Padding(0, 14).Children(func() {
-				ui.Row(c).Grow(1).Height(42).Padding(5, 8, 5, 12).Gap(8).Radius(21).AlignItems(ui.Center).
+				ui.Row(c).Grow(1).MinWidth(0).Height(42).Padding(5, 8, 5, 12).Gap(8).Radius(21).AlignItems(ui.Center).
 					Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.42)}).Children(func() {
-					inp := ui.TextInputBase(c.Key("ios-room-th-in"), threadDraft).
-						Label("Thread reply").Placeholder("Reply in thread…").Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Height(28).Grow(1).MinWidth(0)
+					s.mu.Lock()
+					thEpoch := s.roomThreadDraftEpoch
+					s.mu.Unlock()
+					inp := ui.TextInputBase(c.Key(fmt.Sprintf("ios-room-th-in-%d", thEpoch)), threadDraft).
+						Label("Thread reply").Placeholder("Reply in thread (@architect)…").Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Height(28).Basis(0).Grow(1).MinWidth(0)
 					sendThread := func() {
 						txt := strings.TrimSpace(*threadDraft)
 						if txt == "" {

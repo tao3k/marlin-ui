@@ -50,12 +50,17 @@ type dmMessage struct {
 }
 
 type bentoChatRoomModule struct {
-	inner            *chatroom.Module
-	activeTab        chatroom.ViewTab
-	draft            string
-	threadDraft      string
-	focusThreadInput bool
-	itemDraft        string
+	inner                  *chatroom.Module
+	activeTab              chatroom.ViewTab
+	draft                  string
+	draftEpoch             int
+	focusMainInput         bool
+	mentionForceOpen       bool
+	threadDraft            string
+	threadDraftEpoch       int
+	focusThreadInput       bool
+	threadMentionForceOpen bool
+	itemDraft              string
 
 	dmMu              sync.Mutex
 	activeDMID        string
@@ -200,24 +205,7 @@ func cleanRoomChannelName(raw string) string {
 }
 
 func extractRoomMentions(body string) []string {
-	fields := strings.Fields(body)
-	seen := make(map[string]struct{})
-	var out []string
-	for _, tok := range fields {
-		if !strings.HasPrefix(tok, "@") || len(tok) < 2 {
-			continue
-		}
-		clean := strings.TrimRight(tok[1:], ".,:;!?()[]{}\"'")
-		if clean == "" {
-			continue
-		}
-		key := strings.ToLower(clean)
-		if _, dup := seen[key]; !dup {
-			seen[key] = struct{}{}
-			out = append(out, clean)
-		}
-	}
-	return out
+	return ExtractRoomMentions(body)
 }
 
 func (m *bentoChatRoomModule) fullSnapshot() RoomFullSnapshot {
@@ -620,12 +608,33 @@ func (m *bentoChatRoomModule) dispatchBotReplies(
 	if responder == nil {
 		return
 	}
-	// Collect up to 4 recent channel lines for compact shared context.
+	// Collect compact shared context: when replying inside a Thread, include
+	// the Thread Root message plus up to 4 recent thread replies from
+	// snap.ThreadReplies (NOT only top-level snap.Messages!).
 	var ctxLines []string
-	for i := len(snap.Messages) - 1; i >= 0 && len(ctxLines) < 4; i-- {
-		rm := snap.Messages[i]
-		if rm.ChannelID == channelID && rm.ThreadRootID == threadRootID {
-			ctxLines = append([]string{fmt.Sprintf("[%s]: %s", rm.AuthorID, rm.Body)}, ctxLines...)
+	if threadRootID != "" {
+		for _, rm := range snap.Messages {
+			if rm.ID == threadRootID {
+				ctxLines = append(ctxLines, fmt.Sprintf("[Thread Root %s]: %s", rm.AuthorID, rm.Body))
+				break
+			}
+		}
+		start := len(snap.ThreadReplies) - 4
+		if start < 0 {
+			start = 0
+		}
+		for i := start; i < len(snap.ThreadReplies); i++ {
+			rm := snap.ThreadReplies[i]
+			if rm.ThreadRootID == threadRootID {
+				ctxLines = append(ctxLines, fmt.Sprintf("[%s]: %s", rm.AuthorID, rm.Body))
+			}
+		}
+	} else {
+		for i := len(snap.Messages) - 1; i >= 0 && len(ctxLines) < 4; i-- {
+			rm := snap.Messages[i]
+			if rm.ChannelID == channelID && rm.ThreadRootID == "" {
+				ctxLines = append([]string{fmt.Sprintf("[%s]: %s", rm.AuthorID, rm.Body)}, ctxLines...)
+			}
 		}
 	}
 	recentCtx := strings.Join(ctxLines, "\n")
@@ -635,7 +644,7 @@ func (m *bentoChatRoomModule) dispatchBotReplies(
 		m.dmMu.Lock()
 		m.presenceOverrides[b.ID] = "thinking"
 		m.dmMu.Unlock()
-		notifyRoomInvalidated()
+		NotifyRoomChanged()
 
 		m.botScope.Go(func(parentCtx context.Context) {
 			ctx, cancel := context.WithTimeout(parentCtx, 45*time.Second)
@@ -663,7 +672,7 @@ func (m *bentoChatRoomModule) dispatchBotReplies(
 			if body != "" {
 				m.appendBotReply(channelID, b.ID, body, threadRootID)
 			}
-			notifyRoomInvalidated()
+			NotifyRoomChanged()
 		})
 	}
 }

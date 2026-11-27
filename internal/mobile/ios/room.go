@@ -674,42 +674,15 @@ func (s *Shell) renderInlineGateEmbed(c *ui.Context, th theme.Theme, m featureki
 }
 
 func activeMentionQuery(draft string) (string, bool) {
-	if draft == "" {
-		return "", false
-	}
-	// If draft ends with whitespace, the user already finished the @token.
-	last := draft[len(draft)-1]
-	if last == ' ' || last == '\n' || last == '\t' {
-		return "", false
-	}
-	idx := strings.LastIndexAny(draft, " \n\t")
-	token := draft[idx+1:]
-	if !strings.HasPrefix(token, "@") {
-		return "", false
-	}
-	return strings.ToLower(token[1:]), true
+	return featurekit.ActiveMentionQuery(draft)
 }
 
 func applyMentionCompletion(draft, handle string) string {
-	clean := strings.TrimPrefix(strings.TrimSpace(handle), "@")
-	if _, ok := activeMentionQuery(draft); ok {
-		idx := strings.LastIndexAny(draft, " \n\t")
-		prefix := draft[:idx+1]
-		return prefix + "@" + clean + " "
-	}
-	trimmed := strings.TrimSpace(draft)
-	if trimmed == "" {
-		return "@" + clean + " "
-	}
-	return trimmed + " @" + clean + " "
+	return featurekit.ApplyMentionCompletion(draft, handle)
 }
 
 func activeSlashQuery(draft string) (string, bool) {
-	trimmed := strings.TrimLeft(draft, " \t")
-	if !strings.HasPrefix(trimmed, "/") || strings.ContainsAny(trimmed, " \n\t") {
-		return "", false
-	}
-	return strings.ToLower(trimmed[1:]), true
+	return featurekit.ActiveSlashQuery(draft)
 }
 
 // SubmitRoomDraft executes slash commands (/task, /pin, /clear, /ask) or posts
@@ -821,7 +794,10 @@ func (s *Shell) renderRoomComposer(
 				pill.Border(1, kit.WithAlpha(ui.RGB(255, 255, 255), 0.14))
 			}
 			pill.Children(func() {
-				inp := ui.TextInputBase(c.Key("ios-room-input"), &draft).
+				s.mu.Lock()
+				draftEpoch := s.roomDraftEpoch
+				s.mu.Unlock()
+				inp := ui.TextInputBase(c.Key(fmt.Sprintf("ios-room-input-%d", draftEpoch)), &draft).
 					Placeholder(placeholder).
 					Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Grow(1).MinWidth(0)
 				if inp.Changed() {
@@ -900,6 +876,7 @@ func (s *Shell) renderSlashPopover(c *ui.Context, th theme.Theme, query string) 
 				} else {
 					s.mu.Lock()
 					s.roomDraft = item.insert
+					s.roomDraftEpoch++
 					s.mu.Unlock()
 					s.invalidate()
 				}
@@ -969,6 +946,7 @@ func (s *Shell) renderMentionPopover(
 					mygo.Haptics.Selection()
 					s.mu.Lock()
 					s.roomDraft = applyMentionCompletion(draft, mem.Handle)
+					s.roomDraftEpoch++
 					s.roomMentionForceOpen = false
 					s.mu.Unlock()
 					s.invalidate()

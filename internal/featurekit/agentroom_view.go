@@ -75,23 +75,34 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 	}
 
 	var (
-		selectCh     string
-		mention      string
-		sendMsg      bool
-		openThread   string
-		closeThread  bool
-		sendThread   bool
-		addItem      bool
-		cycleTaskID  string
-		promoteTitle string
-		toggleRxMsg  string
-		toggleRxTag  string
+		selectCh         string
+		mention          string
+		mainMentionPick  string
+		mainSlashInsert  string
+		mainSlashExec    string
+		toggleMainAt     bool
+		thMentionPick    string
+		toggleThAt       bool
+		sendMsg          bool
+		openThread       string
+		closeThread      bool
+		sendThread       bool
+		addItem          bool
+		cycleTaskID      string
+		promoteTitle     string
+		toggleRxMsg      string
+		toggleRxTag      string
 	)
 
-	ui.Row(c.Key("bento-room-stage")).Fill().Background(canvas).Padding(14, 18).Gap(14).
-		AlignItems(ui.Stretch).Children(func() {
+	railW := float32(252)
+	if snap.ActiveThreadID != "" {
+		railW = 220
+	}
+
+	ui.Row(c.Key("bento-room-stage")).Fill().Background(canvas).Padding(14, 18).Gap(12).
+		AlignItems(ui.Stretch).Clip().Children(func() {
 		// Left Column: Dual-tier Channels & Direct Bots + HUMANS / AI AGENTS Roster.
-		ui.Column(c.Key("bento-room-rail")).Width(252).Shrink(0).Gap(12).AlignItems(ui.Stretch).Children(func() {
+		ui.Column(c.Key("bento-room-rail")).Width(railW).Shrink(0).Gap(12).AlignItems(ui.Stretch).Clip().Children(func() {
 			// Dual-tier Channel Directory Card.
 			ui.Column(c.Key("bento-room-channels")).Radius(16).Background(panelBg).Border(1, hairline).
 				Padding(12).Gap(10).AlignItems(ui.Stretch).Children(func() {
@@ -227,8 +238,8 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 				prefix = "@"
 			}
 			// Unified Apple 26 × Geist Header Bar.
-			ui.Row(c.Key("bento-room-header")).Height(54).Radius(16).Background(panelBg).Border(1, hairline).
-				Padding(0, 16).Gap(10).AlignItems(ui.Center).Clip().Children(func() {
+			ui.Row(c.Key("bento-room-header")).Height(54).MinWidth(0).Radius(16).Background(panelBg).Border(1, hairline).
+				Padding(0, 14).Gap(8).AlignItems(ui.Center).Clip().Children(func() {
 				if activeCh.IsDM {
 					if bot, ok := partByID[activeCh.BotParticipantID]; ok {
 						theme.RoleEmblemAvatar(c, bot.Name, bot.Handle, true, bot.Presence, 26, th)
@@ -489,18 +500,55 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						})
 					}
 
-					// Pure Apple 26 × Geist Liquid Glass Composer.
-					ui.Row(c.Key("br-composer-wrap")).Padding(0, 16).Children(func() {
-						comp := ui.Row(c.Key("br-composer")).Grow(1).Height(42).Padding(4, 6, 4, 14).Gap(8).Radius(21).AlignItems(ui.Center)
+					// Context-aware Desktop '/' Slash Command Popover & '@' Mention Autocomplete Popover
+					// (1:1 parity with Mobile iOS/Android).
+					mainMentionQ, mainTypedAt := ActiveMentionQuery(m.draft)
+					mainSlashQ, mainSlashActive := ActiveSlashQuery(m.draft)
+					showMainMention := (mainTypedAt || m.mentionForceOpen) && !mainSlashActive
+					if mainSlashActive {
+						if ins, execCmd := renderDesktopSlashPopover(c, "br-slash", th, panelBg, hairline, mainSlashQ); ins != "" || execCmd != "" {
+							mainSlashInsert = ins
+							mainSlashExec = execCmd
+						}
+					}
+					if showMainMention {
+						if picked := renderDesktopMentionPopover(c, "br-mpop", th, panelBg, hairline, snap.Participants, mainMentionQ); picked != "" {
+							mainMentionPick = picked
+						}
+					}
+
+					// Pure Apple 26 × Geist Liquid Glass Composer with '@' Mention trigger.
+					ui.Row(c.Key("br-composer-wrap")).Padding(0, 16).Gap(8).AlignItems(ui.Center).Children(func() {
+						atVar := theme.BtnGlass
+						atTone := th.InkMuted
+						if showMainMention {
+							atVar = theme.BtnTinted
+							atTone = th.Accent
+						}
+						if theme.IconCircleButton(c, "br-at-btn", "Mention agent", "at", 36, atVar, atTone, false, th).Clicked() {
+							toggleMainAt = true
+						}
+
+						comp := ui.Row(c.Key("br-composer")).Basis(0).Grow(1).MinWidth(0).Height(42).Padding(4, 6, 4, 14).Gap(8).Radius(21).AlignItems(ui.Center)
 						if c.Vibrancy() {
 							comp.Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.Bar, 0.42)})
 						} else {
 							comp.Background(insetBg).Border(1, hairline)
 						}
 						comp.Children(func() {
-							inp := ui.TextInputBase(c.Key("br-draft"), &m.draft).
+							inp := ui.TextInputBase(c.Key(fmt.Sprintf("br-draft-%d", m.draftEpoch)), &m.draft).
+								Label("Room message").
 								Placeholder("Message " + prefix + activeCh.Name + " (@architect, @reviewer, /task …)").
-								Font(kit.FontDisplay).FontSize(13.5).TextColor(th.Ink).Grow(1).MinWidth(0)
+								Font(kit.FontDisplay).FontSize(13.5).TextColor(th.Ink).Basis(0).Grow(1).MinWidth(0)
+							if m.focusMainInput {
+								inp.Focus()
+								m.focusMainInput = false
+							}
+							if inp.Changed() {
+								if _, active := ActiveMentionQuery(m.draft); !active {
+									m.mentionForceOpen = false
+								}
+							}
 							if inp.Submitted() {
 								sendMsg = true
 							}
@@ -520,11 +568,11 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		// Optional Right Thread Drawer Card.
+		// Optional Right Thread Drawer Card (unclipped layout + dedicated '@' Mention Autocomplete).
 		if snap.ActiveThreadID != "" {
-			ui.Column(c.Key("br-thread-card")).Width(312).Shrink(0).MinHeight(0).Radius(16).Background(panelBg).Border(1, hairline).
-				Padding(14).Gap(10).AlignItems(ui.Stretch).Children(func() {
-				ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+			ui.Column(c.Key("br-thread-card")).Width(316).Shrink(0).MinHeight(0).Radius(16).Background(panelBg).Border(1, hairline).
+				Padding(14).Gap(10).AlignItems(ui.Stretch).Clip().Children(func() {
+				ui.Row(c).Shrink(0).MinWidth(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 					ui.Text(c, "THREAD REPLIES").Font(theme.FontMono).FontSize(10.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.Info).SingleLine()
 					if theme.IconCircleButton(c, "br-th-close", "Close thread", theme.IconClose, 26, theme.BtnGhost, th.InkMuted, false, th).Clicked() {
 						closeThread = true
@@ -536,13 +584,13 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						for _, rootMsg := range snap.Messages {
 							if rootMsg.ID == snap.ActiveThreadID {
 								rm := rootMsg
-								ui.Column(c.Key("br-th-root-"+rm.ID)).Radius(12).Background(kit.WithAlpha(th.Accent, 0.08)).
-									Border(1, kit.WithAlpha(th.Accent, 0.22)).Padding(10, 12).Gap(4).Children(func() {
-									ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+								ui.Column(c.Key("br-th-root-"+rm.ID)).MinWidth(0).Radius(12).Background(kit.WithAlpha(th.Accent, 0.08)).
+									Border(1, kit.WithAlpha(th.Accent, 0.22)).Padding(10, 12).Gap(4).Clip().Children(func() {
+									ui.Row(c).MinWidth(0).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
 										theme.RoleEmblemAvatar(c, rm.AuthorName, rm.AuthorHandle, rm.IsAgent, rm.AuthorPresence, 20, th)
-										ui.Text(c, rm.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Ink).SingleLine()
-										ui.Spacer(c)
-										ui.Text(c, "Root").Font(theme.FontMono).FontSize(9.5).FontWeight(600).TextColor(th.Accent).SingleLine()
+										ui.Text(c, rm.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Ink).
+											Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
+										ui.Text(c, "Root").Font(theme.FontMono).FontSize(9.5).FontWeight(600).TextColor(th.Accent).SingleLine().Shrink(0)
 									})
 									markdown.View(c.Key("br-th-root-md-"+rm.ID), strings.TrimSpace(rm.Body), theme.CompactMarkdownOptions(th))
 								})
@@ -555,28 +603,59 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 						}
 						for _, rep := range snap.ThreadMessages {
 							r := rep
-							ui.Column(c.Key("br-rep-"+r.ID)).Radius(12).Background(insetBg).Padding(10, 12).Gap(4).Children(func() {
-								ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							ui.Column(c.Key("br-rep-"+r.ID)).MinWidth(0).Radius(12).Background(insetBg).Padding(10, 12).Gap(4).Clip().Children(func() {
+								ui.Row(c).MinWidth(0).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
 									theme.RoleEmblemAvatar(c, r.AuthorName, r.AuthorHandle, r.IsAgent, r.AuthorPresence, 20, th)
-									ui.Text(c, r.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Accent).SingleLine()
+									ui.Text(c, r.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Accent).
+										Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
 									if r.Timestamp != "" {
-										ui.Spacer(c)
-										ui.Text(c, r.Timestamp).Font(theme.FontMono).FontSize(10).TextColor(th.InkMuted).SingleLine()
+										ui.Text(c, r.Timestamp).Font(theme.FontMono).FontSize(10).TextColor(th.InkMuted).SingleLine().Shrink(0)
 									}
 								})
 								markdown.View(c.Key("br-rep-md-"+r.ID), strings.TrimSpace(r.Body), theme.CompactMarkdownOptions(th))
 							})
 						}
+						if len(snap.ThinkingBots) > 0 {
+							ui.Row(c.Key("br-th-typing")).Padding(4, 6).Gap(6).AlignItems(ui.Center).Children(func() {
+								ui.Spinner(c).Size(11, 11)
+								ui.Text(c, fmt.Sprintf("%s replying in thread…", strings.Join(snap.ThinkingBots, ", "))).
+									Font(kit.FontDisplay).FontSize(11.5).TextColor(th.Accent).SingleLine().Ellipsis("…").MinWidth(0).Clip()
+							})
+						}
 					})
 				})
-				ui.Row(c.Key("br-th-composer")).Height(40).Shrink(0).Radius(20).Background(insetBg).Border(1, hairline).
-					Padding(4, 6, 4, 12).Gap(6).AlignItems(ui.Center).Children(func() {
-					inp := ui.TextInputBase(c.Key("br-th-draft"), &m.threadDraft).
-						Label("Thread reply").Placeholder("Reply in thread…").
-						Font(kit.FontDisplay).FontSize(12.5).TextColor(th.Ink).Height(28).Grow(1).MinWidth(0)
+
+				// Thread-scoped '@' Mention Autocomplete Popover.
+				thMentionQ, thTypedAt := ActiveMentionQuery(m.threadDraft)
+				showThMention := thTypedAt || m.threadMentionForceOpen
+				if showThMention {
+					if picked := renderDesktopMentionPopover(c, "br-th-mpop", th, panelBg, hairline, snap.Participants, thMentionQ); picked != "" {
+						thMentionPick = picked
+					}
+				}
+
+				ui.Row(c.Key("br-th-composer")).Height(40).Shrink(0).MinWidth(0).Radius(20).Background(insetBg).Border(1, hairline).
+					Padding(4, 6, 4, 6).Gap(6).AlignItems(ui.Center).Clip().Children(func() {
+					thAtVar := theme.BtnGhost
+					thAtTone := th.InkMuted
+					if showThMention {
+						thAtVar = theme.BtnTinted
+						thAtTone = th.Accent
+					}
+					if theme.IconCircleButton(c, "br-th-at", "Mention in thread", "at", 28, thAtVar, thAtTone, false, th).Clicked() {
+						toggleThAt = true
+					}
+					inp := ui.TextInputBase(c.Key(fmt.Sprintf("br-th-draft-%d", m.threadDraftEpoch)), &m.threadDraft).
+						Label("Thread reply").Placeholder("Reply in thread (@architect)…").
+						Font(kit.FontDisplay).FontSize(12.5).TextColor(th.Ink).Height(28).Basis(0).Grow(1).MinWidth(0)
 					if m.focusThreadInput {
 						inp.Focus()
 						m.focusThreadInput = false
+					}
+					if inp.Changed() {
+						if _, active := ActiveMentionQuery(m.threadDraft); !active {
+							m.threadMentionForceOpen = false
+						}
 					}
 					if inp.Submitted() {
 						sendThread = true
@@ -598,18 +677,71 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 
 	// Commit all controller mutations cleanly outside layout closures.
 	if selectCh != "" {
+		m.mentionForceOpen = false
+		m.threadMentionForceOpen = false
 		_ = SelectAgentRoomChannel(selectCh)
 	}
+	if toggleMainAt {
+		m.mentionForceOpen = !m.mentionForceOpen
+		m.focusMainInput = true
+		NotifyRoomChanged()
+	}
+	if toggleThAt {
+		m.threadMentionForceOpen = !m.threadMentionForceOpen
+		m.focusThreadInput = true
+		NotifyRoomChanged()
+	}
+	if mainMentionPick != "" {
+		m.draft = ApplyMentionCompletion(m.draft, mainMentionPick)
+		m.draftEpoch++
+		m.mentionForceOpen = false
+		m.focusMainInput = true
+		NotifyRoomChanged()
+	}
+	if thMentionPick != "" {
+		m.threadDraft = ApplyMentionCompletion(m.threadDraft, thMentionPick)
+		m.threadDraftEpoch++
+		m.threadMentionForceOpen = false
+		m.focusThreadInput = true
+		NotifyRoomChanged()
+	}
+	if mainSlashInsert != "" {
+		m.draft = mainSlashInsert
+		m.draftEpoch++
+		m.focusMainInput = true
+		NotifyRoomChanged()
+	}
+	if mainSlashExec == "/clear" {
+		m.draft = ""
+		m.draftEpoch++
+		m.mentionForceOpen = false
+		NotifyRoomChanged()
+	} else if mainSlashExec == "/pin" {
+		m.draft = ""
+		m.draftEpoch++
+		m.activeTab = chatroom.TabTimeline
+		NotifyRoomChanged()
+	}
 	if mention != "" {
-		if strings.TrimSpace(m.draft) == "" {
-			m.draft = mention + " "
+		// When a Thread Drawer is open, clicking a roster member targets the
+		// active Thread Composer so thread-scoped @mentions stay in-thread.
+		if snap.ActiveThreadID != "" {
+			m.threadDraft = ApplyMentionCompletion(m.threadDraft, mention)
+			m.threadDraftEpoch++
+			m.threadMentionForceOpen = false
+			m.focusThreadInput = true
 		} else {
-			m.draft = strings.TrimSpace(m.draft) + " " + mention + " "
+			m.draft = ApplyMentionCompletion(m.draft, mention)
+			m.draftEpoch++
+			m.mentionForceOpen = false
+			m.focusMainInput = true
 		}
+		NotifyRoomChanged()
 	}
 	if sendMsg && strings.TrimSpace(m.draft) != "" {
 		txt := strings.TrimSpace(m.draft)
 		lower := strings.ToLower(txt)
+		m.mentionForceOpen = false
 		if strings.HasPrefix(lower, "/task ") {
 			if title := strings.TrimSpace(txt[len("/task "):]); title != "" {
 				_ = AddAgentRoomTask(title)
@@ -628,13 +760,16 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 	}
 	if openThread != "" {
 		m.focusThreadInput = true
+		m.threadMentionForceOpen = false
 		_ = OpenAgentRoomThread(openThread)
 	}
 	if closeThread {
 		m.focusThreadInput = false
+		m.threadMentionForceOpen = false
 		CloseAgentRoomThread()
 	}
 	if sendThread && snap.ActiveThreadID != "" && strings.TrimSpace(m.threadDraft) != "" {
+		m.threadMentionForceOpen = false
 		if PostAgentRoomMessage(snap.ActiveChannelID, m.threadDraft, snap.ActiveThreadID) == nil {
 			m.threadDraft = ""
 		}
@@ -737,6 +872,133 @@ func desktopPermChip(c *ui.Context, label string, enabled bool, tone ui.Color, t
 	}
 	ui.Text(c, label).Font(theme.FontMono).FontSize(10).FontWeight(600).TextColor(col).
 		Padding(3, 8).Radius(theme.RadiusPill).Background(bg).SingleLine()
+}
+
+func renderDesktopMentionPopover(
+	c *ui.Context,
+	keyPrefix string,
+	th theme.Theme,
+	panelBg, hairline ui.Color,
+	participants []RoomParticipantView,
+	query string,
+) string {
+	agents, humans := MatchRoomParticipants(participants, query)
+	if len(agents) == 0 && len(humans) == 0 {
+		return ""
+	}
+	picked := ""
+	marginX := float32(16)
+	if strings.HasPrefix(keyPrefix, "br-th-") {
+		marginX = 0
+	}
+	ui.Row(c.Key(keyPrefix+"-wrap")).Padding(0, marginX).Shrink(0).Children(func() {
+		pop := ui.Column(c.Key(keyPrefix+"-box")).Basis(0).Grow(1).MinWidth(0).Padding(8, 10).Gap(5).Radius(14).AlignItems(ui.Stretch).
+			Background(panelBg).Border(1, hairline).Clip()
+		if c.Vibrancy() {
+			pop.Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.56)})
+		}
+		pop.Children(func() {
+			renderGroup := func(header string, list []RoomParticipantView) {
+				if len(list) == 0 {
+					return
+				}
+				ui.Text(c, header).Font(theme.FontMono).FontSize(9.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).
+					Padding(2, 6, 0, 6).SingleLine()
+				for _, p := range list {
+					mem := p
+					btnLabel := "Mention @" + mem.Handle
+					if strings.HasPrefix(keyPrefix, "br-th-") {
+						btnLabel = "Thread mention @" + mem.Handle
+					}
+					btn := kit.ActionControl(ui.ButtonBase(c.Key(keyPrefix+"-"+mem.ID)).Label(btnLabel).
+						FillWidth().Padding(5, 8).Gap(8).Radius(10).AlignItems(ui.Center).Justify(ui.Start))
+					if btn.Hovered() || btn.Pressed() {
+						btn.Background(kit.WithAlpha(th.Accent, 0.16))
+					}
+					btn.Children(func() {
+						theme.RoleEmblemAvatar(c, mem.Name, mem.Handle, mem.IsAgent, mem.Presence, 22, th)
+						ui.Column(c).Basis(0).Grow(1).MinWidth(0).Gap(1).AlignItems(ui.Start).Children(func() {
+							ui.Row(c).Gap(5).AlignItems(ui.Center).Clip().Children(func() {
+								ui.Text(c, mem.Name).Font(kit.FontDisplay).FontSize(12.5).FontWeight(600).TextColor(th.Ink).SingleLine()
+								ui.Text(c, "@"+mem.Handle).Font(theme.FontMono).FontSize(10.5).TextColor(th.Accent).SingleLine()
+							})
+							if mem.Role != "" {
+								ui.Text(c, mem.Role).Font(kit.FontDisplay).FontSize(10.5).TextColor(th.InkMuted).
+									SingleLine().Ellipsis("…").MinWidth(0).Clip()
+							}
+						})
+						ui.Text(c, theme.PresenceLabel(mem.Presence)).Font(theme.FontMono).FontSize(9.5).
+							TextColor(theme.PresenceColor(mem.Presence, th)).SingleLine().Shrink(0)
+					})
+					if btn.Clicked() {
+						picked = mem.Handle
+					}
+				}
+			}
+			renderGroup("AI AGENTS", agents)
+			renderGroup("HUMANS", humans)
+		})
+	})
+	return picked
+}
+
+func renderDesktopSlashPopover(
+	c *ui.Context,
+	keyPrefix string,
+	th theme.Theme,
+	panelBg, hairline ui.Color,
+	query string,
+) (insert, execCmd string) {
+	cmds := []struct {
+		cmd, desc, insert, icon string
+	}{
+		{"/task", "Create a shared channel task", "/task ", "checklist"},
+		{"/ask", "Route a question to @architect", "/ask @architect ", "sparkles"},
+		{"/pin", "View pinned channel messages", "/pin", "pin"},
+		{"/clear", "Clear current draft", "/clear", "xmark.circle"},
+	}
+	var matched []int
+	for i, item := range cmds {
+		if query == "" || strings.Contains(strings.TrimPrefix(item.cmd, "/"), query) {
+			matched = append(matched, i)
+		}
+	}
+	if len(matched) == 0 {
+		return "", ""
+	}
+	ui.Row(c.Key(keyPrefix+"-wrap")).Padding(0, 16).Shrink(0).Children(func() {
+		pop := ui.Column(c.Key(keyPrefix+"-box")).Basis(0).Grow(1).MinWidth(0).Padding(8, 10).Gap(4).Radius(14).AlignItems(ui.Stretch).
+			Background(panelBg).Border(1, hairline).Clip()
+		if c.Vibrancy() {
+			pop.Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.56)})
+		}
+		pop.Children(func() {
+			ui.Text(c, "ROOM COMMANDS").Font(theme.FontMono).FontSize(9.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).
+				Padding(2, 6, 0, 6).SingleLine()
+			for _, idx := range matched {
+				item := cmds[idx]
+				btn := kit.ActionControl(ui.ButtonBase(c.Key(keyPrefix+"-"+item.cmd)).Label(item.cmd).
+					FillWidth().Padding(6, 8).Gap(8).Radius(10).AlignItems(ui.Center).Justify(ui.Start))
+				if btn.Hovered() || btn.Pressed() {
+					btn.Background(kit.WithAlpha(th.Accent, 0.16))
+				}
+				btn.Children(func() {
+					theme.SFIcon(c, item.icon, 13, th.Accent, false)
+					ui.Text(c, item.cmd).Font(theme.FontMono).FontSize(12).FontWeight(700).TextColor(th.Ink).SingleLine()
+					ui.Text(c, item.desc).Font(kit.FontDisplay).FontSize(11).TextColor(th.InkMuted).
+						SingleLine().Ellipsis("…").MinWidth(0).Clip()
+				})
+				if btn.Clicked() {
+					if item.insert == "/pin" || item.insert == "/clear" {
+						execCmd = item.insert
+					} else {
+						insert = item.insert
+					}
+				}
+			}
+		})
+	})
+	return insert, execCmd
 }
 
 func summarizeForTask(body string) string {

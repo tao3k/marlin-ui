@@ -113,4 +113,80 @@ func TestDesktopAgentRoomAppleGeistParityAndLiveBotRouting(t *testing.T) {
 	if !tt.HasText("Second reply via button!") {
 		t.Fatalf("expected thread reply submitted via Send button to render in THREAD REPLIES, got %q", strings.Join(tt.Texts(), " | "))
 	}
+
+	// Verify thread-scoped @mention autocomplete + thread-only bot reply (never leaks to main timeline)
+	// + full thread root context passed to the bot responder, including CJK punctuation after @mention.
+	var gotThreadReq featurekit.RoomAgentRequest
+	threadBotDone := make(chan struct{})
+	featurekit.SetRoomAgentResponder(func(_ context.Context, req featurekit.RoomAgentRequest) (string, error) {
+		gotThreadReq = req
+		defer close(threadBotDone)
+		return "Architect Thread-Only Reply for `" + req.ThreadRootID + "`.", nil
+	})
+	if err := tt.Click("Thread reply"); err != nil {
+		t.Fatalf("Click('Thread reply') for @ mention popover failed: %v", err)
+	}
+	tt.Type("@arc")
+	tt.Frame()
+	if _, ok := tt.Find("Thread mention @architect"); !ok {
+		t.Fatalf("expected thread @ mention autocomplete popover to show 'Thread mention @architect', got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if err := tt.Click("Thread mention @architect"); err != nil {
+		t.Fatalf("Click('Thread mention @architect') failed: %v", err)
+	}
+	tt.Frame()
+	tt.Type("，请只在这个线程里回复")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+
+	select {
+	case <-threadBotDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for thread-scoped @architect reply")
+	}
+	if gotThreadReq.ThreadRootID != "msg-1" {
+		t.Fatalf("expected ThreadRootID=msg-1, got %q", gotThreadReq.ThreadRootID)
+	}
+	if !strings.Contains(gotThreadReq.RecentContext, "Shared context synchronized with Rust AppServer") {
+		t.Fatalf("expected bot RecentContext to include Thread Root message, got %q", gotThreadReq.RecentContext)
+	}
+
+	snapAfterThread := featurekit.AgentRoomSnapshot()
+	foundInThread := false
+	for _, tm := range snapAfterThread.ThreadMessages {
+		if strings.Contains(tm.Body, "Architect Thread-Only Reply") {
+			foundInThread = true
+		}
+	}
+	if !foundInThread {
+		t.Fatalf("expected @architect reply inside ThreadMessages, got %+v", snapAfterThread.ThreadMessages)
+	}
+	for _, mm := range snapAfterThread.Messages {
+		if strings.Contains(mm.Body, "Architect Thread-Only Reply") {
+			t.Fatalf("thread-scoped @architect reply leaked into main timeline Messages: %+v", mm)
+		}
+	}
+
+	// Verify Main Composer '@' autocomplete & '/' slash command popovers work on Desktop (1:1 with Mobile).
+	featurekit.CloseAgentRoomThread()
+	tt.Frame()
+	if err := tt.Click("Room message"); err != nil {
+		t.Fatalf("Click('Room message') failed: %v", err)
+	}
+	tt.Type("@rev")
+	tt.Frame()
+	if _, ok := tt.Find("Mention @reviewer"); !ok {
+		t.Fatalf("expected main composer @ mention autocomplete popover to show 'Mention @reviewer', got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if err := tt.Click("Mention @reviewer"); err != nil {
+		t.Fatalf("Click('Mention @reviewer') failed: %v", err)
+	}
+	tt.Frame()
+}
+
+func TestExtractRoomMentionsHandlesASCIIAndCJKPunctuation(t *testing.T) {
+	got := featurekit.ExtractRoomMentions("@Architect，帮我看一下 @reviewer：以及 @security请检查")
+	if len(got) != 3 || strings.ToLower(got[0]) != "architect" || strings.ToLower(got[1]) != "reviewer" || strings.ToLower(got[2]) != "security" {
+		t.Fatalf("expected [architect reviewer security], got %v", got)
+	}
 }

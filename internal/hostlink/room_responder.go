@@ -123,11 +123,17 @@ func formatRoleRoomPrompt(req featurekit.RoomAgentRequest) string {
 	scope := "#" + req.ChannelName
 	if req.IsDM {
 		scope = "Direct 1:1 with @" + req.BotHandle
+	} else if strings.TrimSpace(req.ThreadRootID) != "" {
+		scope = "#" + req.ChannelName + " (Thread " + strings.TrimSpace(req.ThreadRootID) + ")"
 	}
 	fmt.Fprintf(&b, "[Marlin Agent Room | Channel: %s | Role: %s (%s)]\n", scope, req.BotName, req.BotRole)
 	fmt.Fprintf(&b, "Respond concisely and directly in Markdown as %s (%s). Do not address yourself or create infinite bot loops.\n", req.BotName, req.BotRole)
 	if strings.TrimSpace(req.RecentContext) != "" {
-		fmt.Fprintf(&b, "\nRecent room context:\n%s\n", req.RecentContext)
+		if strings.TrimSpace(req.ThreadRootID) != "" {
+			fmt.Fprintf(&b, "\nThread context:\n%s\n", req.RecentContext)
+		} else {
+			fmt.Fprintf(&b, "\nRecent room context:\n%s\n", req.RecentContext)
+		}
 	}
 	fmt.Fprintf(&b, "\nUser message:\n%s", strings.TrimSpace(req.UserPrompt))
 	return b.String()
