@@ -8,79 +8,97 @@ package hostlink
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"testing"
+
+	"google.golang.org/grpc"
+
+	covev1 "github.com/tao3k/marlin-ui/gen/marlin/cove/v1"
 )
 
-func TestCoveClientWireParityAndSnapshotProjection(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/health":
-			_ = json.NewEncoder(w).Encode(CoveHealth{
-				Status:   "ok",
-				Service:  "marlin-cove",
-				Features: []string{"relay", "telegram", "discord"},
-			})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/rooms/cove-main/snapshot":
-			_ = json.NewEncoder(w).Encode(CoveRoomSnapshot{
-				RoomID:    "cove-main",
-				Title:     "Marlin Cove Main",
-				LatestSeq: 4,
-				Channels: []CoveChannel{
-					{ID: "general", Name: "general", Topic: "Shared room"},
-					{ID: "architecture", Name: "architecture", Topic: "Design"},
-				},
-				Participants: []CoveParticipant{
-					{ID: "human:owner", DisplayName: "Owner", Handle: "owner", Kind: "human", Role: "owner", Presence: "online"},
-					{ID: "agent:architect", DisplayName: "Architect", Handle: "architect", Kind: "agent", Role: "role_agent", Presence: "thinking"},
-					{ID: "tg:501", DisplayName: "@alice", Handle: "alice", Kind: "human", Role: "external_guest", Presence: "online"},
-				},
-				Messages: []CoveMessage{
-					{
-						ID:         "msg_1",
-						RoomID:     "cove-main",
-						ChannelID:  "general",
-						AuthorID:   "tg:501",
-						AuthorKind: "human",
-						Body:       "@architect review Cove relay",
-						Mentions:   []string{"architect"},
-						Origin:     "telegram",
-					},
-				},
-			})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/rooms/cove-main/governance/tg:501":
-			_ = json.NewEncoder(w).Encode(CoveGovernanceEnvelope{
-				RoomID:          "cove-main",
-				ChannelID:       "general",
-				ActorID:         "tg:501",
-				ActorKind:       "human",
-				ActorRole:       "external_guest",
-				GrantedScopes:   []string{"public"},
-				Origin:          "telegram",
-				TaintedExternal: true,
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/cove-main/dispatch":
-			_ = json.NewEncoder(w).Encode(CoveDispatchResponse{
-				UserMessage: CoveMessage{ID: "msg_u1", ChannelID: "architecture", AuthorID: "human:owner", AuthorKind: "human", Body: "@architect check", Origin: "cove_native"},
-				Governance:  CoveGovernanceEnvelope{RoomID: "cove-main", ChannelID: "architecture", ActorID: "human:owner", ActorKind: "human", ActorRole: "owner", Origin: "cove_native", TaintedExternal: false},
-				AgentReply:  CoveMessage{ID: "msg_a1", ChannelID: "architecture", AuthorID: "agent:architect", AuthorKind: "agent", Body: "Marlin Gateway verified.", Origin: "marlin_gateway", BotChainDepth: 1},
-			})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/rooms/cove-main/gates/gate_1/resolve":
-			_ = json.NewEncoder(w).Encode(CoveGateReceipt{
-				GateID:     "gate_1",
-				ResolvedBy: "human:owner",
-				Decision:   "approved",
-				Reason:     "human reviewed",
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
+type stubCoveRelayGRPCServer struct {
+	covev1.UnimplementedCoveRelayServiceServer
+}
 
-	client := NewCoveClient(srv.URL, "cove-test-token")
+func (s *stubCoveRelayGRPCServer) Health(context.Context, *covev1.HealthRequest) (*covev1.HealthResponse, error) {
+	return &covev1.HealthResponse{
+		Status:   covev1.ServiceHealthStatus_SERVICE_HEALTH_STATUS_OK,
+		Service:  "marlin-cove",
+		Features: []string{"relay", "telegram", "discord"},
+	}, nil
+}
+
+func (s *stubCoveRelayGRPCServer) GetRoomSnapshot(context.Context, *covev1.GetRoomSnapshotRequest) (*covev1.RoomSnapshot, error) {
+	return &covev1.RoomSnapshot{
+		RoomId:    "cove-main",
+		Title:     "Marlin Cove Main",
+		LatestSeq: 4,
+		Channels: []*covev1.RoomChannel{
+			{Id: "general", Name: "general", Topic: "Shared room"},
+			{Id: "architecture", Name: "architecture", Topic: "Design"},
+		},
+		Participants: []*covev1.RoomParticipant{
+			{Id: "human:owner", DisplayName: "Owner", Handle: "owner", Kind: covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN, Role: covev1.PrincipalRole_PRINCIPAL_ROLE_OWNER, Presence: covev1.PresenceStatus_PRESENCE_STATUS_ONLINE},
+			{Id: "agent:architect", DisplayName: "Architect", Handle: "architect", Kind: covev1.PrincipalKind_PRINCIPAL_KIND_AGENT, Role: covev1.PrincipalRole_PRINCIPAL_ROLE_ROLE_AGENT, Presence: covev1.PresenceStatus_PRESENCE_STATUS_THINKING},
+			{Id: "tg:501", DisplayName: "@alice", Handle: "alice", Kind: covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN, Role: covev1.PrincipalRole_PRINCIPAL_ROLE_EXTERNAL_GUEST, Presence: covev1.PresenceStatus_PRESENCE_STATUS_ONLINE},
+		},
+		Messages: []*covev1.RoomMessage{
+			{
+				Id:         "msg_1",
+				RoomId:     "cove-main",
+				ChannelId:  "general",
+				AuthorId:   "tg:501",
+				AuthorKind: covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN,
+				Body:       "@architect review Cove relay",
+				Mentions:   []string{"architect"},
+				Origin:     covev1.BridgeOrigin_BRIDGE_ORIGIN_TELEGRAM,
+			},
+		},
+	}, nil
+}
+
+func (s *stubCoveRelayGRPCServer) GetGovernanceEnvelope(context.Context, *covev1.GetGovernanceEnvelopeRequest) (*covev1.RoomGovernanceEnvelope, error) {
+	return &covev1.RoomGovernanceEnvelope{
+		RoomId:          "cove-main",
+		ChannelId:       "general",
+		ActorId:         "tg:501",
+		ActorKind:       covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN,
+		ActorRole:       covev1.PrincipalRole_PRINCIPAL_ROLE_EXTERNAL_GUEST,
+		GrantedScopes:   []string{"public"},
+		Origin:          covev1.BridgeOrigin_BRIDGE_ORIGIN_TELEGRAM,
+		TaintedExternal: true,
+	}, nil
+}
+
+func (s *stubCoveRelayGRPCServer) DispatchTurn(context.Context, *covev1.DispatchTurnRequest) (*covev1.DispatchTurnResponse, error) {
+	return &covev1.DispatchTurnResponse{
+		UserMessage: &covev1.RoomMessage{Id: "msg_u1", ChannelId: "architecture", AuthorId: "human:owner", AuthorKind: covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN, Body: "@architect check", Origin: covev1.BridgeOrigin_BRIDGE_ORIGIN_COVE_NATIVE},
+		Governance:  &covev1.RoomGovernanceEnvelope{RoomId: "cove-main", ChannelId: "architecture", ActorId: "human:owner", ActorKind: covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN, ActorRole: covev1.PrincipalRole_PRINCIPAL_ROLE_OWNER, Origin: covev1.BridgeOrigin_BRIDGE_ORIGIN_COVE_NATIVE, TaintedExternal: false},
+		AgentReply:  &covev1.RoomMessage{Id: "msg_a1", ChannelId: "architecture", AuthorId: "agent:architect", AuthorKind: covev1.PrincipalKind_PRINCIPAL_KIND_AGENT, Body: "Marlin Gateway verified.", Origin: covev1.BridgeOrigin_BRIDGE_ORIGIN_MARLIN_GATEWAY, BotChainDepth: 1},
+	}, nil
+}
+
+func (s *stubCoveRelayGRPCServer) ResolveGate(context.Context, *covev1.ResolveGateRequest) (*covev1.GateApprovalReceipt, error) {
+	return &covev1.GateApprovalReceipt{
+		GateId:     "gate_1",
+		ResolvedBy: "human:owner",
+		Decision:   covev1.GateDecision_GATE_DECISION_APPROVED,
+		Reason:     "human reviewed",
+	}, nil
+}
+
+func TestCoveClientGRPCWireParityAndSnapshotProjection(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	grpcSrv := grpc.NewServer()
+	covev1.RegisterCoveRelayServiceServer(grpcSrv, &stubCoveRelayGRPCServer{})
+	go func() { _ = grpcSrv.Serve(ln) }()
+	defer grpcSrv.Stop()
+
+	client := NewCoveClient(ln.Addr().String(), "cove-test-token")
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 
 	health, err := client.Health(ctx)

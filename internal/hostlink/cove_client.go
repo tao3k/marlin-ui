@@ -7,123 +7,159 @@
 package hostlink
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
-	"time"
+	"sync"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
+	covev1 "github.com/tao3k/marlin-ui/gen/marlin/cove/v1"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 )
 
-// CoveHealth mirrors marlin-cove's GET /v1/health response.
+// CoveHealth mirrors marlin.cove.v1.HealthResponse.
 type CoveHealth struct {
-	Status   string   `json:"status"`
-	Service  string   `json:"service"`
-	Features []string `json:"features"`
+	Status   string
+	Service  string
+	Features []string
 }
 
-// CoveChannel mirrors marlin-cove's RoomChannel wire model.
+// CoveChannel mirrors marlin.cove.v1.RoomChannel.
 type CoveChannel struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Topic    string `json:"topic"`
-	IsDirect bool   `json:"is_direct"`
+	ID       string
+	Name     string
+	Topic    string
+	IsDirect bool
 }
 
-// CoveParticipant mirrors marlin-cove's RoomParticipant wire model.
+// CoveParticipant mirrors marlin.cove.v1.RoomParticipant.
 type CoveParticipant struct {
-	ID          string   `json:"id"`
-	DisplayName string   `json:"display_name"`
-	Handle      string   `json:"handle"`
-	Kind        string   `json:"kind"` // "human" | "agent"
-	Role        string   `json:"role"` // "owner" | "maintainer" | "member" | "external_guest" | "role_agent"
-	Scopes      []string `json:"scopes"`
-	Presence    string   `json:"presence"`
+	ID          string
+	DisplayName string
+	Handle      string
+	Kind        string // "human" | "agent"
+	Role        string // "owner" | "maintainer" | "member" | "external_guest" | "role_agent"
+	Scopes      []string
+	Presence    string
 }
 
-// CoveMessage mirrors marlin-cove's RoomMessage wire model.
+// CoveMessage mirrors marlin.cove.v1.RoomMessage.
 type CoveMessage struct {
-	ID            string   `json:"id"`
-	RoomID        string   `json:"room_id"`
-	ChannelID     string   `json:"channel_id"`
-	ThreadRootID  string   `json:"thread_root_id,omitempty"`
-	AuthorID      string   `json:"author_id"`
-	AuthorKind    string   `json:"author_kind"`
-	Body          string   `json:"body"`
-	Mentions      []string `json:"mentions"`
-	GateID        string   `json:"gate_id,omitempty"`
-	Origin        string   `json:"origin"`
-	BotChainDepth uint8    `json:"bot_chain_depth"`
-	CreatedAtUnix int64    `json:"created_at_unix"`
+	ID            string
+	RoomID        string
+	ChannelID     string
+	ThreadRootID  string
+	AuthorID      string
+	AuthorKind    string
+	Body          string
+	Mentions      []string
+	GateID        string
+	Origin        string
+	BotChainDepth uint8
+	CreatedAtUnix int64
 }
 
-// CoveGate mirrors marlin-cove's RoomGate wire model.
+// CoveGate mirrors marlin.cove.v1.RoomGate.
 type CoveGate struct {
-	ID          string `json:"id"`
-	RoomID      string `json:"room_id"`
-	ChannelID   string `json:"channel_id"`
-	RequestedBy string `json:"requested_by"`
-	Summary     string `json:"summary"`
-	Capability  string `json:"capability"`
-	Decision    string `json:"decision"`
+	ID          string
+	RoomID      string
+	ChannelID   string
+	RequestedBy string
+	Summary     string
+	Capability  string
+	Decision    string
 }
 
-// CoveRoomSnapshot mirrors marlin-cove's GET /v1/rooms/{room_id}/snapshot response.
+// CoveRoomSnapshot mirrors marlin.cove.v1.RoomSnapshot.
 type CoveRoomSnapshot struct {
-	RoomID       string            `json:"room_id"`
-	Title        string            `json:"title"`
-	LatestSeq    uint64            `json:"latest_seq"`
-	Channels     []CoveChannel     `json:"channels"`
-	Participants []CoveParticipant `json:"participants"`
-	Messages     []CoveMessage     `json:"messages"`
-	Gates        []CoveGate        `json:"gates"`
+	RoomID       string
+	Title        string
+	LatestSeq    uint64
+	Channels     []CoveChannel
+	Participants []CoveParticipant
+	Messages     []CoveMessage
+	Gates        []CoveGate
 }
 
-// CoveInvite mirrors marlin-cove's RoomInvite wire model.
+// CoveInvite mirrors marlin.cove.v1.RoomInvite.
 type CoveInvite struct {
-	Token       string   `json:"token"`
-	RoomID      string   `json:"room_id"`
-	IssuedBy    string   `json:"issued_by"`
-	GrantRole   string   `json:"grant_role"`
-	GrantScopes []string `json:"grant_scopes"`
-	MaxUses     uint32   `json:"max_uses"`
-	Uses        uint32   `json:"uses"`
+	Token       string
+	RoomID      string
+	IssuedBy    string
+	GrantRole   string
+	GrantScopes []string
+	MaxUses     uint32
+	Uses        uint32
 }
 
-// CoveGovernanceEnvelope mirrors marlin-cove's verified room/people/bot
-// governance envelope forwarded to Marlin Gateway (marlin-agent-core) so each
-// agent can run its own atomic .org context governance.
+// CoveGovernanceEnvelope mirrors marlin.cove.v1.RoomGovernanceEnvelope
+// forwarded to Marlin Gateway (`marlin-agent-core`) over gRPC HTTP/2.
 type CoveGovernanceEnvelope struct {
-	RoomID          string   `json:"room_id"`
-	ChannelID       string   `json:"channel_id"`
-	ActorID         string   `json:"actor_id"`
-	ActorKind       string   `json:"actor_kind"`
-	ActorRole       string   `json:"actor_role"`
-	GrantedScopes   []string `json:"granted_scopes"`
-	Origin          string   `json:"origin"`
-	TaintedExternal bool     `json:"tainted_external"`
+	RoomID          string
+	ChannelID       string
+	ActorID         string
+	ActorKind       string
+	ActorRole       string
+	GrantedScopes   []string
+	Origin          string
+	TaintedExternal bool
 }
 
-// CoveClient speaks the typed HTTP contract exposed by a Marlin Cove relay server.
+// CoveDispatchResponse mirrors marlin.cove.v1.DispatchTurnResponse.
+type CoveDispatchResponse struct {
+	UserMessage CoveMessage
+	Governance  CoveGovernanceEnvelope
+	AgentReply  CoveMessage
+}
+
+// CoveGateReceipt mirrors marlin.cove.v1.GateApprovalReceipt.
+type CoveGateReceipt struct {
+	GateID         string
+	ResolvedBy     string
+	Decision       string
+	Reason         string
+	ResolvedAtUnix int64
+}
+
+// CoveRoomEvent mirrors marlin.cove.v1.RoomEvent streamed over HTTP/2 gRPC.
+type CoveRoomEvent struct {
+	Seq    uint64
+	RoomID string
+	Kind   CoveRoomEventKind
+}
+
+// CoveRoomEventKind projects the RoomEvent oneof payload.
+type CoveRoomEventKind struct {
+	Type        string
+	Message     *CoveMessage
+	Participant *CoveParticipant
+	Gate        *CoveGate
+	Receipt     *CoveGateReceipt
+}
+
+// CoveClient speaks Protobuf v3 gRPC over HTTP/2 (`marlin.cove.v1.CoveRelayService`)
+// to a Marlin Cove cloud relay server.
 type CoveClient struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	target string
+	token  string
+
+	mu   sync.Mutex
+	conn *grpc.ClientConn
+	rpc  covev1.CoveRelayServiceClient
 }
 
-// NewCoveClient builds a Marlin Cove relay client for the given base URL.
-func NewCoveClient(baseURL, bearerToken string) *CoveClient {
+// NewCoveClient builds a Marlin Cove gRPC HTTP/2 client for the given target
+// address (accepts `host:port`, `http://host:port`, or `grpc://host:port`).
+func NewCoveClient(target, bearerToken string) *CoveClient {
 	return &CoveClient{
-		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		token:   strings.TrimSpace(bearerToken),
-		http:    &http.Client{Timeout: 10 * time.Second},
+		target: normalizeGRPCTarget(target),
+		token:  strings.TrimSpace(bearerToken),
 	}
 }
 
@@ -136,195 +172,249 @@ func NewCoveClientFromConfig(cfg appconfig.Config) *CoveClient {
 	return NewCoveClient(cfg.CoveURL, cfg.CoveToken)
 }
 
-// Health probes GET /v1/health and returns enabled Cove server features.
+// Close closes the underlying HTTP/2 gRPC client connection.
+func (c *CoveClient) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	conn := c.conn
+	c.conn = nil
+	c.rpc = nil
+	c.mu.Unlock()
+	if conn != nil {
+		return conn.Close()
+	}
+	return nil
+}
+
+func (c *CoveClient) client() (covev1.CoveRelayServiceClient, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.rpc != nil {
+		return c.rpc, nil
+	}
+	if c.target == "" {
+		return nil, fmt.Errorf("marlin-cove gRPC target is empty")
+	}
+	conn, err := grpc.NewClient(c.target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("dial marlin-cove gRPC %s: %w", c.target, err)
+	}
+	c.conn = conn
+	c.rpc = covev1.NewCoveRelayServiceClient(conn)
+	return c.rpc, nil
+}
+
+func (c *CoveClient) withAuth(ctx context.Context) context.Context {
+	if c.token == "" {
+		return ctx
+	}
+	header := c.token
+	if !strings.HasPrefix(header, "Bearer ") {
+		header = "Bearer " + header
+	}
+	return metadata.AppendToOutgoingContext(ctx, "authorization", header)
+}
+
+// Health invokes CoveRelayService/Health over HTTP/2.
 func (c *CoveClient) Health(ctx context.Context) (CoveHealth, error) {
-	var out CoveHealth
-	err := c.doJSON(ctx, http.MethodGet, "/v1/health", nil, &out)
-	return out, err
+	rpc, err := c.client()
+	if err != nil {
+		return CoveHealth{}, err
+	}
+	resp, err := rpc.Health(ctx, &covev1.HealthRequest{})
+	if err != nil {
+		return CoveHealth{}, err
+	}
+	status := "unknown"
+	if resp.GetStatus() == covev1.ServiceHealthStatus_SERVICE_HEALTH_STATUS_OK {
+		status = "ok"
+	}
+	return CoveHealth{
+		Status:   status,
+		Service:  resp.GetService(),
+		Features: append([]string(nil), resp.GetFeatures()...),
+	}, nil
 }
 
-// FetchSnapshot fetches GET /v1/rooms/{room_id}/snapshot.
+// FetchSnapshot invokes CoveRelayService/GetRoomSnapshot over HTTP/2.
 func (c *CoveClient) FetchSnapshot(ctx context.Context, roomID string) (CoveRoomSnapshot, error) {
-	var out CoveRoomSnapshot
-	path := fmt.Sprintf("/v1/rooms/%s/snapshot", url.PathEscape(roomID))
-	err := c.doJSON(ctx, http.MethodGet, path, nil, &out)
-	return out, err
-}
-
-// CreateInvite issues a scoped invite token via POST /v1/rooms/{room_id}/invites.
-func (c *CoveClient) CreateInvite(ctx context.Context, roomID, issuedBy, grantRole string, scopes []string, maxUses uint32) (CoveInvite, error) {
-	var out CoveInvite
-	path := fmt.Sprintf("/v1/rooms/%s/invites", url.PathEscape(roomID))
-	payload := map[string]any{
-		"issued_by":    issuedBy,
-		"grant_role":   grantRole,
-		"grant_scopes": scopes,
-		"max_uses":     maxUses,
+	rpc, err := c.client()
+	if err != nil {
+		return CoveRoomSnapshot{}, err
 	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
-}
-
-// PostMessage posts a room message via POST /v1/rooms/{room_id}/messages.
-func (c *CoveClient) PostMessage(ctx context.Context, roomID, channelID, authorID, body, threadRootID string) (CoveMessage, error) {
-	var out CoveMessage
-	path := fmt.Sprintf("/v1/rooms/%s/messages", url.PathEscape(roomID))
-	payload := map[string]any{
-		"channel_id": channelID,
-		"author_id":  authorID,
-		"body":       body,
-		"origin":     "cove_native",
+	resp, err := rpc.GetRoomSnapshot(c.withAuth(ctx), &covev1.GetRoomSnapshotRequest{
+		RoomId: roomID,
+	})
+	if err != nil {
+		return CoveRoomSnapshot{}, err
 	}
-	if strings.TrimSpace(threadRootID) != "" {
-		payload["thread_root_id"] = threadRootID
-	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
+	return snapshotFromProto(resp), nil
 }
 
-// CoveDispatchResponse mirrors marlin-cove's POST /v1/rooms/{room_id}/dispatch response.
-type CoveDispatchResponse struct {
-	UserMessage CoveMessage            `json:"user_message"`
-	Governance  CoveGovernanceEnvelope `json:"governance"`
-	AgentReply  CoveMessage            `json:"agent_reply"`
-}
-
-// CoveGateReceipt mirrors marlin-cove's GateApprovalReceipt wire model.
-type CoveGateReceipt struct {
-	GateID         string `json:"gate_id"`
-	ResolvedBy     string `json:"resolved_by"`
-	Decision       string `json:"decision"`
-	Reason         string `json:"reason"`
-	ResolvedAtUnix int64  `json:"resolved_at_unix"`
-}
-
-// CoveRoomEvent mirrors marlin-cove's monotonic SSE RoomEvent envelope.
-type CoveRoomEvent struct {
-	Seq    uint64            `json:"seq"`
-	RoomID string            `json:"room_id"`
-	Kind   CoveRoomEventKind `json:"kind"`
-}
-
-// CoveRoomEventKind mirrors marlin-cove's tagged RoomEventKind payload.
-type CoveRoomEventKind struct {
-	Type        string           `json:"type"`
-	Message     *CoveMessage     `json:"message,omitempty"`
-	Participant *CoveParticipant `json:"participant,omitempty"`
-	Gate        *CoveGate        `json:"gate,omitempty"`
-	Receipt     *CoveGateReceipt `json:"receipt,omitempty"`
-}
-
-// FetchGovernanceEnvelope fetches the verified room governance envelope that
-// Marlin Cove forwards to Marlin Gateway (marlin-agent-core).
+// FetchGovernanceEnvelope invokes CoveRelayService/GetGovernanceEnvelope over HTTP/2.
 func (c *CoveClient) FetchGovernanceEnvelope(ctx context.Context, roomID, principalID string) (CoveGovernanceEnvelope, error) {
-	var out CoveGovernanceEnvelope
-	path := fmt.Sprintf("/v1/rooms/%s/governance/%s", url.PathEscape(roomID), url.PathEscape(principalID))
-	err := c.doJSON(ctx, http.MethodGet, path, nil, &out)
-	return out, err
+	rpc, err := c.client()
+	if err != nil {
+		return CoveGovernanceEnvelope{}, err
+	}
+	resp, err := rpc.GetGovernanceEnvelope(c.withAuth(ctx), &covev1.GetGovernanceEnvelopeRequest{
+		RoomId:      roomID,
+		PrincipalId: principalID,
+	})
+	if err != nil {
+		return CoveGovernanceEnvelope{}, err
+	}
+	return governanceFromProto(resp), nil
 }
 
-// RedeemInvite redeems a scoped invite token via POST /v1/invites/{token}/join.
+// CreateInvite invokes CoveRelayService/CreateInvite over HTTP/2.
+func (c *CoveClient) CreateInvite(ctx context.Context, roomID, issuedBy, grantRole string, scopes []string, maxUses uint32) (CoveInvite, error) {
+	rpc, err := c.client()
+	if err != nil {
+		return CoveInvite{}, err
+	}
+	resp, err := rpc.CreateInvite(c.withAuth(ctx), &covev1.CreateInviteRequest{
+		RoomId:      roomID,
+		IssuedBy:    issuedBy,
+		GrantRole:   principalRoleToProto(grantRole),
+		GrantScopes: scopes,
+		MaxUses:     maxUses,
+	})
+	if err != nil {
+		return CoveInvite{}, err
+	}
+	return inviteFromProto(resp), nil
+}
+
+// RedeemInvite invokes CoveRelayService/RedeemInvite over HTTP/2.
 func (c *CoveClient) RedeemInvite(ctx context.Context, token, principalID, displayName, handle, kind string) (CoveParticipant, error) {
-	var out CoveParticipant
-	path := fmt.Sprintf("/v1/invites/%s/join", url.PathEscape(token))
-	payload := map[string]any{
-		"principal_id": principalID,
-		"display_name": displayName,
-		"handle":       handle,
-		"kind":         kind,
-	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
-}
-
-// RequestGate opens a Tier-0 PromptGate via POST /v1/rooms/{room_id}/gates.
-func (c *CoveClient) RequestGate(ctx context.Context, roomID, channelID, requestedBy, summary, capability string) (CoveGate, error) {
-	var out CoveGate
-	path := fmt.Sprintf("/v1/rooms/%s/gates", url.PathEscape(roomID))
-	payload := map[string]any{
-		"channel_id":   channelID,
-		"requested_by": requestedBy,
-		"summary":      summary,
-		"capability":   capability,
-	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
-}
-
-// WatchEvents subscribes to GET /v1/rooms/{room_id}/events (SSE) and invokes
-// onEvent for every RoomEvent until ctx is canceled or the stream ends.
-func (c *CoveClient) WatchEvents(ctx context.Context, roomID string, onEvent func(CoveRoomEvent)) error {
-	path := fmt.Sprintf("/v1/rooms/%s/events", url.PathEscape(roomID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	rpc, err := c.client()
 	if err != nil {
-		return err
+		return CoveParticipant{}, err
 	}
-	req.Header.Set("Accept", "text/event-stream")
-	if c.token != "" {
-		if strings.HasPrefix(c.token, "Bearer ") {
-			req.Header.Set("Authorization", c.token)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+c.token)
-		}
-	}
-
-	sseClient := &http.Client{}
-	resp, err := sseClient.Do(req)
+	resp, err := rpc.RedeemInvite(ctx, &covev1.RedeemInviteRequest{
+		Token:       token,
+		PrincipalId: principalID,
+		DisplayName: displayName,
+		Handle:      handle,
+		Kind:        principalKindToProto(kind),
+	})
 	if err != nil {
-		return err
+		return CoveParticipant{}, err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("marlin-cove SSE %s failed (%d): %s", path, resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		var evt CoveRoomEvent
-		if err := json.Unmarshal([]byte(payload), &evt); err == nil && onEvent != nil {
-			onEvent(evt)
-		}
-	}
-	return scanner.Err()
+	return participantFromProto(resp), nil
 }
 
-// DispatchTurn posts a user turn into Cove and dispatches it live to Marlin
-// Gateway (marlin-agent-core) with a verified RoomGovernanceEnvelope.
+// PostMessage invokes CoveRelayService/PostMessage over HTTP/2.
+func (c *CoveClient) PostMessage(ctx context.Context, roomID, channelID, authorID, body, threadRootID string) (CoveMessage, error) {
+	rpc, err := c.client()
+	if err != nil {
+		return CoveMessage{}, err
+	}
+	resp, err := rpc.PostMessage(c.withAuth(ctx), &covev1.PostMessageRequest{
+		RoomId:       roomID,
+		ChannelId:    channelID,
+		ThreadRootId: strings.TrimSpace(threadRootID),
+		AuthorId:     authorID,
+		Body:         body,
+		Origin:       covev1.BridgeOrigin_BRIDGE_ORIGIN_COVE_NATIVE,
+	})
+	if err != nil {
+		return CoveMessage{}, err
+	}
+	return messageFromProto(resp), nil
+}
+
+// DispatchTurn invokes CoveRelayService/DispatchTurn over HTTP/2, forwarding a
+// verified RoomGovernanceEnvelope to Marlin Gateway (`marlin-agent-core`).
 func (c *CoveClient) DispatchTurn(ctx context.Context, roomID, channelID, authorID, targetAgentHandle, body string) (CoveDispatchResponse, error) {
-	var out CoveDispatchResponse
-	path := fmt.Sprintf("/v1/rooms/%s/dispatch", url.PathEscape(roomID))
-	payload := map[string]any{
-		"channel_id":          channelID,
-		"author_id":           authorID,
-		"target_agent_handle": targetAgentHandle,
-		"body":                body,
+	rpc, err := c.client()
+	if err != nil {
+		return CoveDispatchResponse{}, err
 	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
+	resp, err := rpc.DispatchTurn(c.withAuth(ctx), &covev1.DispatchTurnRequest{
+		RoomId:            roomID,
+		ChannelId:         channelID,
+		AuthorId:          authorID,
+		TargetAgentHandle: targetAgentHandle,
+		Body:              body,
+	})
+	if err != nil {
+		return CoveDispatchResponse{}, err
+	}
+	return CoveDispatchResponse{
+		UserMessage: messageFromProto(resp.GetUserMessage()),
+		Governance:  governanceFromProto(resp.GetGovernance()),
+		AgentReply:  messageFromProto(resp.GetAgentReply()),
+	}, nil
 }
 
-// ResolveGate resolves a Tier-0 PromptGate as a human Owner/Maintainer.
-func (c *CoveClient) ResolveGate(ctx context.Context, roomID, gateID, actorID string, approved bool, reason string) (CoveGateReceipt, error) {
-	var out CoveGateReceipt
-	path := fmt.Sprintf("/v1/rooms/%s/gates/%s/resolve", url.PathEscape(roomID), url.PathEscape(gateID))
-	payload := map[string]any{
-		"actor_id": actorID,
-		"approved": approved,
-		"reason":   reason,
+// RequestGate invokes CoveRelayService/RequestGate over HTTP/2.
+func (c *CoveClient) RequestGate(ctx context.Context, roomID, channelID, requestedBy, summary, capability string) (CoveGate, error) {
+	rpc, err := c.client()
+	if err != nil {
+		return CoveGate{}, err
 	}
-	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
-	return out, err
+	resp, err := rpc.RequestGate(c.withAuth(ctx), &covev1.RequestGateRequest{
+		RoomId:      roomID,
+		ChannelId:   channelID,
+		RequestedBy: requestedBy,
+		Summary:     summary,
+		Capability:  capability,
+	})
+	if err != nil {
+		return CoveGate{}, err
+	}
+	return gateFromProto(resp), nil
+}
+
+// ResolveGate invokes CoveRelayService/ResolveGate over HTTP/2 as a human Owner/Maintainer.
+func (c *CoveClient) ResolveGate(ctx context.Context, roomID, gateID, actorID string, approved bool, reason string) (CoveGateReceipt, error) {
+	rpc, err := c.client()
+	if err != nil {
+		return CoveGateReceipt{}, err
+	}
+	resp, err := rpc.ResolveGate(c.withAuth(ctx), &covev1.ResolveGateRequest{
+		RoomId:   roomID,
+		GateId:   gateID,
+		ActorId:  actorID,
+		Approved: approved,
+		Reason:   reason,
+	})
+	if err != nil {
+		return CoveGateReceipt{}, err
+	}
+	return receiptFromProto(resp), nil
+}
+
+// WatchEvents subscribes to CoveRelayService/WatchRoomEvents (native HTTP/2
+// gRPC server-streaming) and invokes onEvent for every RoomEvent until ctx is
+// canceled or the stream closes.
+func (c *CoveClient) WatchEvents(ctx context.Context, roomID string, onEvent func(CoveRoomEvent)) error {
+	rpc, err := c.client()
+	if err != nil {
+		return err
+	}
+	stream, err := rpc.WatchRoomEvents(c.withAuth(ctx), &covev1.WatchRoomEventsRequest{
+		RoomId: roomID,
+	})
+	if err != nil {
+		return err
+	}
+	for {
+		evt, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if onEvent != nil {
+			onEvent(eventFromProto(evt))
+		}
+	}
 }
 
 // ToRoomFullSnapshot projects a Cove relay snapshot into marlin-ui's native
@@ -404,46 +494,263 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshot(activeChannelID, currentActorID str
 	}
 }
 
-func (c *CoveClient) doJSON(ctx context.Context, method, path string, body any, out any) error {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(raw)
+func normalizeGRPCTarget(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	for _, prefix := range []string{"http://", "https://", "grpc://"} {
+		trimmed = strings.TrimPrefix(trimmed, prefix)
 	}
+	return strings.TrimRight(trimmed, "/")
+}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
-	if err != nil {
-		return err
+func principalKindToProto(kind string) covev1.PrincipalKind {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "human":
+		return covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN
+	case "agent":
+		return covev1.PrincipalKind_PRINCIPAL_KIND_AGENT
+	default:
+		return covev1.PrincipalKind_PRINCIPAL_KIND_UNSPECIFIED
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.token != "" {
-		if strings.HasPrefix(c.token, "Bearer ") {
-			req.Header.Set("Authorization", c.token)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+c.token)
-		}
-	}
+}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
+func principalKindFromProto(kind covev1.PrincipalKind) string {
+	switch kind {
+	case covev1.PrincipalKind_PRINCIPAL_KIND_HUMAN:
+		return "human"
+	case covev1.PrincipalKind_PRINCIPAL_KIND_AGENT:
+		return "agent"
+	default:
+		return "unknown"
 	}
-	defer resp.Body.Close()
+}
 
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+func principalRoleToProto(role string) covev1.PrincipalRole {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner":
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_OWNER
+	case "maintainer":
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_MAINTAINER
+	case "member":
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_MEMBER
+	case "external_guest":
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_EXTERNAL_GUEST
+	case "role_agent":
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_ROLE_AGENT
+	default:
+		return covev1.PrincipalRole_PRINCIPAL_ROLE_UNSPECIFIED
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("marlin-cove %s %s failed (%d): %s", method, path, resp.StatusCode, strings.TrimSpace(string(respBytes)))
+}
+
+func principalRoleFromProto(role covev1.PrincipalRole) string {
+	switch role {
+	case covev1.PrincipalRole_PRINCIPAL_ROLE_OWNER:
+		return "owner"
+	case covev1.PrincipalRole_PRINCIPAL_ROLE_MAINTAINER:
+		return "maintainer"
+	case covev1.PrincipalRole_PRINCIPAL_ROLE_MEMBER:
+		return "member"
+	case covev1.PrincipalRole_PRINCIPAL_ROLE_EXTERNAL_GUEST:
+		return "external_guest"
+	case covev1.PrincipalRole_PRINCIPAL_ROLE_ROLE_AGENT:
+		return "role_agent"
+	default:
+		return "unknown"
 	}
-	if out != nil && len(respBytes) > 0 {
-		return json.Unmarshal(respBytes, out)
+}
+
+func presenceFromProto(status covev1.PresenceStatus) string {
+	switch status {
+	case covev1.PresenceStatus_PRESENCE_STATUS_ONLINE:
+		return "online"
+	case covev1.PresenceStatus_PRESENCE_STATUS_THINKING:
+		return "thinking"
+	case covev1.PresenceStatus_PRESENCE_STATUS_WORKING:
+		return "working"
+	case covev1.PresenceStatus_PRESENCE_STATUS_IDLE:
+		return "idle"
+	case covev1.PresenceStatus_PRESENCE_STATUS_OFFLINE:
+		return "offline"
+	default:
+		return "online"
 	}
-	return nil
+}
+
+func bridgeOriginFromProto(origin covev1.BridgeOrigin) string {
+	switch origin {
+	case covev1.BridgeOrigin_BRIDGE_ORIGIN_COVE_NATIVE:
+		return "cove_native"
+	case covev1.BridgeOrigin_BRIDGE_ORIGIN_TELEGRAM:
+		return "telegram"
+	case covev1.BridgeOrigin_BRIDGE_ORIGIN_DISCORD:
+		return "discord"
+	case covev1.BridgeOrigin_BRIDGE_ORIGIN_MARLIN_GATEWAY:
+		return "marlin_gateway"
+	default:
+		return "cove_native"
+	}
+}
+
+func gateDecisionFromProto(decision covev1.GateDecision) string {
+	switch decision {
+	case covev1.GateDecision_GATE_DECISION_PENDING:
+		return "pending"
+	case covev1.GateDecision_GATE_DECISION_APPROVED:
+		return "approved"
+	case covev1.GateDecision_GATE_DECISION_DENIED:
+		return "denied"
+	default:
+		return "pending"
+	}
+}
+
+func governanceFromProto(pb *covev1.RoomGovernanceEnvelope) CoveGovernanceEnvelope {
+	if pb == nil {
+		return CoveGovernanceEnvelope{}
+	}
+	return CoveGovernanceEnvelope{
+		RoomID:          pb.GetRoomId(),
+		ChannelID:       pb.GetChannelId(),
+		ActorID:         pb.GetActorId(),
+		ActorKind:       principalKindFromProto(pb.GetActorKind()),
+		ActorRole:       principalRoleFromProto(pb.GetActorRole()),
+		GrantedScopes:   append([]string(nil), pb.GetGrantedScopes()...),
+		Origin:          bridgeOriginFromProto(pb.GetOrigin()),
+		TaintedExternal: pb.GetTaintedExternal(),
+	}
+}
+
+func participantFromProto(pb *covev1.RoomParticipant) CoveParticipant {
+	if pb == nil {
+		return CoveParticipant{}
+	}
+	return CoveParticipant{
+		ID:          pb.GetId(),
+		DisplayName: pb.GetDisplayName(),
+		Handle:      pb.GetHandle(),
+		Kind:        principalKindFromProto(pb.GetKind()),
+		Role:        principalRoleFromProto(pb.GetRole()),
+		Scopes:      append([]string(nil), pb.GetScopes()...),
+		Presence:    presenceFromProto(pb.GetPresence()),
+	}
+}
+
+func inviteFromProto(pb *covev1.RoomInvite) CoveInvite {
+	if pb == nil {
+		return CoveInvite{}
+	}
+	return CoveInvite{
+		Token:       pb.GetToken(),
+		RoomID:      pb.GetRoomId(),
+		IssuedBy:    pb.GetIssuedBy(),
+		GrantRole:   principalRoleFromProto(pb.GetGrantRole()),
+		GrantScopes: append([]string(nil), pb.GetGrantScopes()...),
+		MaxUses:     pb.GetMaxUses(),
+		Uses:        pb.GetUses(),
+	}
+}
+
+func messageFromProto(pb *covev1.RoomMessage) CoveMessage {
+	if pb == nil {
+		return CoveMessage{}
+	}
+	return CoveMessage{
+		ID:            pb.GetId(),
+		RoomID:        pb.GetRoomId(),
+		ChannelID:     pb.GetChannelId(),
+		ThreadRootID:  pb.GetThreadRootId(),
+		AuthorID:      pb.GetAuthorId(),
+		AuthorKind:    principalKindFromProto(pb.GetAuthorKind()),
+		Body:          pb.GetBody(),
+		Mentions:      append([]string(nil), pb.GetMentions()...),
+		GateID:        pb.GetGateId(),
+		Origin:        bridgeOriginFromProto(pb.GetOrigin()),
+		BotChainDepth: uint8(pb.GetBotChainDepth()),
+		CreatedAtUnix: int64(pb.GetCreatedAtUnix()),
+	}
+}
+
+func gateFromProto(pb *covev1.RoomGate) CoveGate {
+	if pb == nil {
+		return CoveGate{}
+	}
+	return CoveGate{
+		ID:          pb.GetId(),
+		RoomID:      pb.GetRoomId(),
+		ChannelID:   pb.GetChannelId(),
+		RequestedBy: pb.GetRequestedBy(),
+		Summary:     pb.GetSummary(),
+		Capability:  pb.GetCapability(),
+		Decision:    gateDecisionFromProto(pb.GetDecision()),
+	}
+}
+
+func receiptFromProto(pb *covev1.GateApprovalReceipt) CoveGateReceipt {
+	if pb == nil {
+		return CoveGateReceipt{}
+	}
+	return CoveGateReceipt{
+		GateID:         pb.GetGateId(),
+		ResolvedBy:     pb.GetResolvedBy(),
+		Decision:       gateDecisionFromProto(pb.GetDecision()),
+		Reason:         pb.GetReason(),
+		ResolvedAtUnix: int64(pb.GetResolvedAtUnix()),
+	}
+}
+
+func snapshotFromProto(pb *covev1.RoomSnapshot) CoveRoomSnapshot {
+	if pb == nil {
+		return CoveRoomSnapshot{}
+	}
+	channels := make([]CoveChannel, 0, len(pb.GetChannels()))
+	for _, ch := range pb.GetChannels() {
+		channels = append(channels, CoveChannel{
+			ID:       ch.GetId(),
+			Name:     ch.GetName(),
+			Topic:    ch.GetTopic(),
+			IsDirect: ch.GetIsDirect(),
+		})
+	}
+	participants := make([]CoveParticipant, 0, len(pb.GetParticipants()))
+	for _, p := range pb.GetParticipants() {
+		participants = append(participants, participantFromProto(p))
+	}
+	messages := make([]CoveMessage, 0, len(pb.GetMessages()))
+	for _, m := range pb.GetMessages() {
+		messages = append(messages, messageFromProto(m))
+	}
+	gates := make([]CoveGate, 0, len(pb.GetGates()))
+	for _, g := range pb.GetGates() {
+		gates = append(gates, gateFromProto(g))
+	}
+	return CoveRoomSnapshot{
+		RoomID:       pb.GetRoomId(),
+		Title:        pb.GetTitle(),
+		LatestSeq:    pb.GetLatestSeq(),
+		Channels:     channels,
+		Participants: participants,
+		Messages:     messages,
+		Gates:        gates,
+	}
+}
+
+func eventFromProto(pb *covev1.RoomEvent) CoveRoomEvent {
+	out := CoveRoomEvent{
+		Seq:    pb.GetSeq(),
+		RoomID: pb.GetRoomId(),
+	}
+	switch kind := pb.GetKind().(type) {
+	case *covev1.RoomEvent_MessagePosted:
+		msg := messageFromProto(kind.MessagePosted)
+		out.Kind = CoveRoomEventKind{Type: "message_posted", Message: &msg}
+	case *covev1.RoomEvent_ParticipantJoined:
+		p := participantFromProto(kind.ParticipantJoined)
+		out.Kind = CoveRoomEventKind{Type: "participant_joined", Participant: &p}
+	case *covev1.RoomEvent_GateRequested:
+		g := gateFromProto(kind.GateRequested)
+		out.Kind = CoveRoomEventKind{Type: "gate_requested", Gate: &g}
+	case *covev1.RoomEvent_GateResolved:
+		r := receiptFromProto(kind.GateResolved)
+		out.Kind = CoveRoomEventKind{Type: "gate_resolved", Receipt: &r}
+	}
+	return out
 }

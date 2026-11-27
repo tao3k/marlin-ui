@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/tao3k/marlin-mygo/runtime/async"
 )
@@ -55,12 +58,12 @@ func locateMarlinCoveBinary() string {
 	return ""
 }
 
-// TestLiveCrossProcessCoveRelayEndToEnd verifies the complete live chain across
-// real TCP sockets:
+// TestLiveCrossProcessCoveRelayEndToEnd verifies the complete gRPC over HTTP/2
+// cross-process chain over real TCP sockets:
 //
-//	marlin-ui (Go CoveClient + SSE WatchEvents)
-//	  <-> real Rust `marlin-cove serve` binary (TOML config + auth + webhooks)
-//	  <-> live Marlin Gateway HTTP adapter (`POST /message` with RoomGovernanceEnvelope)
+//	marlin-ui (Go gRPC HTTP/2 CoveClient + WatchRoomEvents stream)
+//	  <-> real Rust `marlin-cove serve` binary (tonic gRPC HTTP/2 + external webhooks)
+//	  <-> live Go gRPC HTTP/2 MarlinGatewayService (`RoomGovernanceEnvelope`)
 func TestLiveCrossProcessCoveRelayEndToEnd(t *testing.T) {
 	bin := locateMarlinCoveBinary()
 	if bin == "" {
@@ -74,30 +77,37 @@ func TestLiveCrossProcessCoveRelayEndToEnd(t *testing.T) {
 		dcSecret     = "e2e-discord-secret"
 	)
 
-	// 1. Start live Marlin Gateway HTTP adapter verifying Bearer auth and RoomGovernanceEnvelope.
+	// 1. Start live gRPC HTTP/2 Marlin Gateway server verifying Bearer metadata and RoomGovernanceEnvelope.
 	var (
-		gwMu          sync.Mutex
-		capturedEnvs  []CoveGovernanceEnvelope
+		gwMu         sync.Mutex
+		capturedEnvs []CoveGovernanceEnvelope
 	)
-	gatewaySrv := httptest.NewServer(NewMarlinGatewayHTTPHandler(gatewayToken, func(_ context.Context, req MarlinGatewayTurnRequest) (string, error) {
+	gwListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen marlin gateway gRPC: %v", err)
+	}
+	gwServer := grpc.NewServer()
+	RegisterMarlinGatewayGRPCServer(gwServer, gatewayToken, func(_ context.Context, req MarlinGatewayTurnRequest) (string, error) {
 		gwMu.Lock()
 		capturedEnvs = append(capturedEnvs, req.Governance)
 		gwMu.Unlock()
-		return fmt.Sprintf("Marlin Gateway reply for @%s (actor=%s tainted=%v)", req.TargetAgentHandle, req.Governance.ActorID, req.Governance.TaintedExternal), nil
-	}))
-	defer gatewaySrv.Close()
+		return fmt.Sprintf("Marlin Gateway gRPC reply for @%s (actor=%s tainted=%v)", req.TargetAgentHandle, req.Governance.ActorID, req.Governance.TaintedExternal), nil
+	})
+	go func() { _ = gwServer.Serve(gwListener) }()
+	defer gwServer.Stop()
 
 	// 2. Write real TOML configuration for `marlin-cove serve`.
-	coveAddr := reserveLocalAddr(t)
+	grpcAddr := reserveLocalAddr(t)
+	webhookAddr := reserveLocalAddr(t)
 	cfgPath := filepath.Join(t.TempDir(), "cove.toml")
 	tomlCfg := fmt.Sprintf(`
 [relay]
 state = "enabled"
-bind_addr = %q
+grpc_bind_addr = %q
+webhook_bind_addr = %q
 auth_token = %q
-allowed_origins = []
 default_room_id = "cove-main"
-default_room_title = "Marlin Cove E2E"
+default_room_title = "Marlin Cove gRPC E2E"
 default_channel_id = "general"
 max_bot_chain_depth = 2
 
@@ -108,11 +118,11 @@ max_invites = 32
 max_messages_per_room = 128
 max_gates_per_room = 32
 max_bridge_dedup_entries = 128
-max_body_bytes = 65536
+max_grpc_message_bytes = 65536
 max_message_bytes = 16384
 
 [marlin_gateway]
-base_url = %q
+grpc_endpoint = %q
 bearer_token = %q
 
 [telegram]
@@ -126,7 +136,7 @@ bot_token = "e2e-dc-bot-token"
 bot_user_id = "bot-e2e"
 ingress_secret = %q
 mention_policy = "required"
-`, coveAddr, coveToken, gatewaySrv.URL, gatewayToken, tgSecret, dcSecret)
+`, grpcAddr, webhookAddr, coveToken, "http://"+gwListener.Addr().String(), gatewayToken, tgSecret, dcSecret)
 	if err := os.WriteFile(cfgPath, []byte(tomlCfg), 0o600); err != nil {
 		t.Fatalf("write cove.toml: %v", err)
 	}
@@ -146,11 +156,12 @@ mention_policy = "required"
 		_ = cmd.Wait()
 	}()
 
-	baseURL := "http://" + coveAddr
-	client := NewCoveClient(baseURL, coveToken)
-	unauthClient := NewCoveClient(baseURL, "")
+	client := NewCoveClient(grpcAddr, coveToken)
+	defer func() { _ = client.Close() }()
+	unauthClient := NewCoveClient(grpcAddr, "")
+	defer func() { _ = unauthClient.Close() }()
 
-	// Wait until /v1/health is live.
+	// Wait until gRPC HTTP/2 CoveRelayService/Health is live.
 	var health CoveHealth
 	var healthErr error
 	for range 40 {
@@ -161,42 +172,43 @@ mention_policy = "required"
 		time.Sleep(50 * time.Millisecond)
 	}
 	if healthErr != nil {
-		t.Fatalf("marlin-cove failed to become healthy: %v (stderr: %s)", healthErr, stderrBuf.String())
+		t.Fatalf("marlin-cove gRPC failed to become healthy: %v (stderr: %s)", healthErr, stderrBuf.String())
 	}
 
-	// 4. Verify protected read fails without bearer token (401).
-	if _, err := unauthClient.FetchSnapshot(ctx, "cove-main"); err == nil {
-		t.Fatalf("expected unauthenticated FetchSnapshot to fail with 401")
+	// 4. Verify protected RPC fails without bearer metadata (Unauthenticated).
+	if _, err := unauthClient.FetchSnapshot(ctx, "cove-main"); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated FetchSnapshot to fail with Unauthenticated, got: %v", err)
 	}
 
-	// 5. Subscribe to real SSE stream using StructuredScope.
-	sseEvents := make(chan CoveRoomEvent, 32)
+	// 5. Subscribe to real gRPC HTTP/2 server-streaming WatchRoomEvents inside StructuredScope.
+	streamEvents := make(chan CoveRoomEvent, 32)
 	scope := async.NewStructuredScope(ctx)
 	defer scope.CloseAndDrain()
 	scope.Go(func(runCtx context.Context) {
 		_ = client.WatchEvents(runCtx, "cove-main", func(evt CoveRoomEvent) {
 			select {
-			case sseEvents <- evt:
+			case streamEvents <- evt:
 			default:
 			}
 		})
 	})
 	time.Sleep(80 * time.Millisecond)
 
-	// 6. Scoped invite + Quint-verified anti-hijack protection.
+	// 6. Scoped invite + Quint-verified anti-hijack protection (AlreadyExists).
 	invite, err := client.CreateInvite(ctx, "cove-main", "human:owner", "external_guest", []string{"public"}, 2)
 	if err != nil {
 		t.Fatalf("CreateInvite failed: %v", err)
 	}
-	if _, err := unauthClient.RedeemInvite(ctx, invite.Token, "human:owner", "Hijack", "hijack", "human"); err == nil {
-		t.Fatalf("expected hijacking existing human:owner via invite to fail with 409")
+	if _, err := unauthClient.RedeemInvite(ctx, invite.Token, "human:owner", "Hijack", "hijack", "human"); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected hijacking existing human:owner via invite to fail with AlreadyExists, got: %v", err)
 	}
 	if _, err := unauthClient.RedeemInvite(ctx, invite.Token, "human:guest-e2e", "Guest E2E", "guest", "human"); err != nil {
 		t.Fatalf("RedeemInvite for new guest failed: %v", err)
 	}
 
-	// 7. Fire real Telegram Webhook & Discord Ingress into live marlin-cove.
-	tgReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/bridges/telegram/webhook", strings.NewReader(`{
+	// 7. Fire real external third-party Telegram & Discord HTTP webhooks into webhook_bind_addr.
+	webhookBaseURL := "http://" + webhookAddr
+	tgReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, webhookBaseURL+"/v1/bridges/telegram/webhook", strings.NewReader(`{
 		"update_id": 777,
 		"message": {
 			"message_id": 901,
@@ -214,7 +226,7 @@ mention_policy = "required"
 	}
 	_ = tgResp.Body.Close()
 
-	dcReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/bridges/discord/ingress", strings.NewReader(`{
+	dcReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, webhookBaseURL+"/v1/bridges/discord/ingress", strings.NewReader(`{
 		"message_id": "dc-e2e-1",
 		"guild_id": "g1",
 		"channel_id": "c1",
@@ -233,43 +245,43 @@ mention_policy = "required"
 	}
 	_ = dcResp.Body.Close()
 
-	// 8. Dispatch live turn from marlin-ui -> marlin-cove -> Marlin Gateway -> marlin-cove room!
-	dispatched, err := client.DispatchTurn(ctx, "cove-main", "architecture", "human:owner", "architect", "@architect inspect live bridge")
+	// 8. Dispatch live turn over gRPC HTTP/2: marlin-ui -> marlin-cove -> MarlinGatewayService -> marlin-cove!
+	dispatched, err := client.DispatchTurn(ctx, "cove-main", "architecture", "human:owner", "architect", "@architect inspect live gRPC bridge")
 	if err != nil {
 		t.Fatalf("DispatchTurn failed: %v", err)
 	}
-	if dispatched.AgentReply.Origin != "marlin_gateway" || !strings.Contains(dispatched.AgentReply.Body, "Marlin Gateway reply for @architect") {
-		t.Fatalf("unexpected live Marlin Gateway reply: %+v", dispatched.AgentReply)
+	if dispatched.AgentReply.Origin != "marlin_gateway" || !strings.Contains(dispatched.AgentReply.Body, "Marlin Gateway gRPC reply for @architect") {
+		t.Fatalf("unexpected live Marlin Gateway gRPC reply: %+v", dispatched.AgentReply)
 	}
 	gwMu.Lock()
 	gwCount := len(capturedEnvs)
 	gwMu.Unlock()
 	if gwCount != 1 {
-		t.Fatalf("expected Marlin Gateway to receive 1 verified RoomGovernanceEnvelope, got %d", gwCount)
+		t.Fatalf("expected Marlin Gateway gRPC server to receive 1 verified RoomGovernanceEnvelope, got %d", gwCount)
 	}
 
-	// 9. Tier-0 Gate: Agent denied (403), Human Owner approves (200), replay denied (409).
+	// 9. Tier-0 Gate: Agent denied (PermissionDenied), Human Owner approves, replay denied (AlreadyExists).
 	gate, err := client.RequestGate(ctx, "cove-main", "security", "agent:architect", "Deploy prod", "shell:deploy")
 	if err != nil {
 		t.Fatalf("RequestGate failed: %v", err)
 	}
-	if _, err := client.ResolveGate(ctx, "cove-main", gate.ID, "agent:architect", true, "self"); err == nil {
-		t.Fatalf("expected agent Tier-0 gate resolution to fail with 403")
+	if _, err := client.ResolveGate(ctx, "cove-main", gate.ID, "agent:architect", true, "self"); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected agent Tier-0 gate resolution to fail with PermissionDenied, got: %v", err)
 	}
 	receipt, err := client.ResolveGate(ctx, "cove-main", gate.ID, "human:owner", true, "human approved")
 	if err != nil || receipt.Decision != "approved" {
 		t.Fatalf("expected human owner ResolveGate to succeed: err=%v receipt=%+v", err, receipt)
 	}
-	if _, err := client.ResolveGate(ctx, "cove-main", gate.ID, "human:owner", false, "replay"); err == nil {
-		t.Fatalf("expected replaying resolved gate to fail with 409")
+	if _, err := client.ResolveGate(ctx, "cove-main", gate.ID, "human:owner", false, "replay"); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected replaying resolved gate to fail with AlreadyExists, got: %v", err)
 	}
 
-	// 10. Confirm live SSE stream received Telegram, Discord, Marlin Gateway, and GateResolved events!
+	// 10. Confirm live gRPC HTTP/2 stream received Telegram, Discord, Marlin Gateway, and GateResolved events!
 	var sawTG, sawDC, sawGW, sawGateResolved bool
 	deadline := time.After(3 * time.Second)
 	for !(sawTG && sawDC && sawGW && sawGateResolved) {
 		select {
-		case evt := <-sseEvents:
+		case evt := <-streamEvents:
 			if evt.Kind.Type == "message_posted" && evt.Kind.Message != nil {
 				switch evt.Kind.Message.Origin {
 				case "telegram":
@@ -284,7 +296,7 @@ mention_policy = "required"
 				sawGateResolved = true
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for live SSE events: tg=%v dc=%v gw=%v gate=%v", sawTG, sawDC, sawGW, sawGateResolved)
+			t.Fatalf("timed out waiting for live gRPC HTTP/2 stream events: tg=%v dc=%v gw=%v gate=%v", sawTG, sawDC, sawGW, sawGateResolved)
 		}
 	}
 

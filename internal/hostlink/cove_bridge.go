@@ -9,74 +9,85 @@ package hostlink
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
-	"net/http"
 	"strings"
 	"sync"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/tao3k/marlin-mygo/runtime/async"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
+	covev1 "github.com/tao3k/marlin-ui/gen/marlin/cove/v1"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 )
 
-// MarlinGatewayTurnRequest mirrors marlin-cove's MarlinGatewayTurnRequest JSON
-// envelope dispatched to Marlin Gateway (`marlin-agent-core`).
+// MarlinGatewayTurnRequest mirrors marlin.cove.v1.MarlinGatewayTurnRequest
+// dispatched over gRPC HTTP/2 to Marlin Gateway (`marlin-agent-core`).
 type MarlinGatewayTurnRequest struct {
-	SessionID         string                 `json:"session_id"`
-	Governance        CoveGovernanceEnvelope `json:"governance"`
-	TargetAgentHandle string                 `json:"target_agent_handle,omitempty"`
-	Message           string                 `json:"message"`
+	SessionID         string
+	Governance        CoveGovernanceEnvelope
+	TargetAgentHandle string
+	Message           string
 }
 
-// MarlinGatewayTurnResponse mirrors marlin-cove's MarlinGatewayTurnResponse.
-type MarlinGatewayTurnResponse struct {
-	Response string `json:"response"`
+type marlinGatewayGRPCServer struct {
+	covev1.UnimplementedMarlinGatewayServiceServer
+	expectedToken string
+	responder     func(ctx context.Context, req MarlinGatewayTurnRequest) (string, error)
 }
 
-// NewMarlinGatewayHTTPHandler builds an authenticated HTTP `/message` handler
-// that bridges Marlin Cove's verified RoomGovernanceEnvelope directly to a
-// Marlin Agent Core responder (e.g. gRPC TurnStreamController).
-func NewMarlinGatewayHTTPHandler(
+func (s *marlinGatewayGRPCServer) DispatchTurn(
+	ctx context.Context,
+	req *covev1.MarlinGatewayTurnRequest,
+) (*covev1.MarlinGatewayTurnResponse, error) {
+	if s.expectedToken != "" {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing authorization metadata")
+		}
+		authVals := md.Get("authorization")
+		if len(authVals) == 0 {
+			return nil, status.Error(codes.Unauthenticated, "missing bearer token")
+		}
+		got := strings.TrimSpace(strings.TrimPrefix(authVals[0], "Bearer "))
+		if subtle.ConstantTimeCompare([]byte(s.expectedToken), []byte(got)) != 1 {
+			return nil, status.Error(codes.Unauthenticated, "invalid bearer token")
+		}
+	}
+	if s.responder == nil {
+		return nil, status.Error(codes.Unavailable, "gateway responder unavailable")
+	}
+	reply, err := s.responder(ctx, MarlinGatewayTurnRequest{
+		SessionID:         req.GetSessionId(),
+		Governance:        governanceFromProto(req.GetGovernance()),
+		TargetAgentHandle: req.GetTargetAgentHandle(),
+		Message:           req.GetMessage(),
+	})
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &covev1.MarlinGatewayTurnResponse{Response: reply}, nil
+}
+
+// RegisterMarlinGatewayGRPCServer mounts an authenticated gRPC HTTP/2
+// `marlin.cove.v1.MarlinGatewayService` onto server, bridging Cove's verified
+// RoomGovernanceEnvelope directly to a Marlin Agent Core responder.
+func RegisterMarlinGatewayGRPCServer(
+	server *grpc.Server,
 	bearerToken string,
 	responder func(ctx context.Context, req MarlinGatewayTurnRequest) (string, error),
-) http.Handler {
-	mux := http.NewServeMux()
-	expected := strings.TrimSpace(bearerToken)
-	mux.HandleFunc("/message", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if expected != "" {
-			got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-			if subtle.ConstantTimeCompare([]byte(expected), []byte(got)) != 1 {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		var req MarlinGatewayTurnRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
-			http.Error(w, "invalid json payload", http.StatusBadRequest)
-			return
-		}
-		if responder == nil {
-			http.Error(w, "gateway responder unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		reply, err := responder(r.Context(), req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(MarlinGatewayTurnResponse{Response: reply})
+) {
+	covev1.RegisterMarlinGatewayServiceServer(server, &marlinGatewayGRPCServer{
+		expectedToken: strings.TrimSpace(bearerToken),
+		responder:     responder,
 	})
-	return mux
 }
 
 // CoveRelayBridge binds marlin-ui's Agent Room directly to a live Marlin Cove
-// Cloud Relay using structured SSE streaming (`async.StructuredScope`).
+// Cloud Relay over gRPC HTTP/2 server-streaming (`async.StructuredScope`).
 type CoveRelayBridge struct {
 	client *CoveClient
 	roomID string
@@ -91,7 +102,7 @@ type CoveRelayBridge struct {
 }
 
 // AttachCoveRelayBridge connects marlin-ui's Agent Room to a live marlin-cove
-// server when cfg.CoveURL is configured, returning nil otherwise.
+// gRPC HTTP/2 server when cfg.CoveURL is configured, returning nil otherwise.
 func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty func()) *CoveRelayBridge {
 	client := NewCoveClientFromConfig(cfg)
 	if client == nil {
@@ -131,12 +142,17 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 	return bridge
 }
 
-// Close cancels and drains the structured SSE stream subscription cleanly.
+// Close cancels and drains the gRPC HTTP/2 event stream and closes the client connection.
 func (b *CoveRelayBridge) Close() {
-	if b == nil || b.scope == nil {
+	if b == nil {
 		return
 	}
-	b.scope.CloseAndDrain()
+	if b.scope != nil {
+		b.scope.CloseAndDrain()
+	}
+	if b.client != nil {
+		_ = b.client.Close()
+	}
 }
 
 func (b *CoveRelayBridge) setSnapshot(snap CoveRoomSnapshot) {
