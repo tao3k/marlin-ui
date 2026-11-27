@@ -132,3 +132,52 @@ func TestWorkspaceIsolationAndDoomPopupLifecycle(t *testing.T) {
 		t.Fatalf("expected RestorePerspectives to hydrate lab workspace, got %+v", restored)
 	}
 }
+
+func TestDoomMultiWindowTreeWinumDedicatedAndWinnerMode(t *testing.T) {
+	mgr := NewManager([]buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets})
+
+	// 1. Nested splits build a 3-window tree with deterministic reading-order winum 1, 2, 3.
+	_ = mgr.SplitVertical(buffer.Conversation)
+	snap := mgr.SplitHorizontal(buffer.Sessions)
+	if snap.Active.WindowCount() != 3 || snap.Active.FocusedWindowNumber() != 3 {
+		t.Fatalf("expected 3-window split focused on window 3, got count=%d focus=%d",
+			snap.Active.WindowCount(), snap.Active.FocusedWindowNumber())
+	}
+
+	// 2. Direct winum selection (SPC w 1) + Emacs 30 toggle-window-dedicated (SPC w t).
+	leaf, ok, _ := mgr.SelectWindowNumber(1)
+	if !ok || leaf.Buffer != buffer.Dashboard {
+		t.Fatalf("expected SelectWindowNumber(1) -> *Dashboard*, got ok=%v leaf=%+v", ok, leaf)
+	}
+	ded, _ := mgr.ToggleWindowDedicated()
+	if !ded {
+		t.Fatalf("expected ToggleWindowDedicated -> true")
+	}
+	// Opening *Targets* while window 1 is dedicated MUST preserve *Dashboard* in window 1.
+	_, afterOpen := mgr.OpenBuffer(buffer.Targets)
+	wins := afterOpen.Active.Windows()
+	if wins[0].Buffer != buffer.Dashboard || afterOpen.Active.FocusedBuffer() != buffer.Targets {
+		t.Fatalf("expected dedicated window 1 preserved (*Dashboard*) and *Targets* routed to sibling, got %+v", wins)
+	}
+
+	// 3. DeleteOtherWindows collapses to 1 window; per-workspace winner-undo/redo restores 3 windows!
+	collapsed := mgr.DeleteOtherWindows()
+	if collapsed.Active.WindowCount() != 1 {
+		t.Fatalf("expected DeleteOtherWindows -> 1 window, got %d", collapsed.Active.WindowCount())
+	}
+	undone, afterUndo := mgr.WinnerUndo()
+	if !undone || afterUndo.Active.WindowCount() != 3 {
+		t.Fatalf("expected WinnerUndo -> 3 windows, got undone=%v count=%d", undone, afterUndo.Active.WindowCount())
+	}
+	redone, afterRedo := mgr.WinnerRedo()
+	if !redone || afterRedo.Active.WindowCount() != 1 {
+		t.Fatalf("expected WinnerRedo -> 1 window, got redone=%v count=%d", redone, afterRedo.Active.WindowCount())
+	}
+
+	// 4. Doom +workspace/close-window-or-workspace kills a non-main workspace when closing its last window.
+	_ = mgr.CreateWorkspace("scratch", "")
+	act, afterClose := mgr.CloseWindowOrWorkspace()
+	if act != "killed-workspace" || afterClose.ActiveID != "main" {
+		t.Fatalf("expected CloseWindowOrWorkspace on single-window scratch workspace to kill it, got act=%q active=%q", act, afterClose.ActiveID)
+	}
+}

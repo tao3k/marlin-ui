@@ -440,16 +440,80 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyV)
 	tt.Frame()
-	if !tt.HasText("[1] *Dashboard*") || !tt.HasText("[2] *conversation*") {
-		t.Fatalf("expected vertical split panes rendered, got %q", strings.Join(tt.Texts(), " | "))
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 2 || !tt.HasText("1") || !tt.HasText("2") || !tt.HasText("*Dashboard*") || !tt.HasText("*conversation*") {
+		t.Fatalf("expected vertical split with per-window Doom modeline numbers 1 & 2, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
-	// 1b. Resize & swap panes via SPC w l and SPC w x.
+	// 1b. Resize & swap panes via SPC w l and SPC w x, plus nested 3rd window (SPC w s),
+	// direct winum jump (SPC w 1), dedicated pin (SPC w t), and winner-mode undo/redo (SPC w u / SPC w U).
 	fr.ResizeSplit(0.10)
 	fr.SwapSplitPanes()
 	tt.Frame()
-	if !tt.HasText("[1] *conversation*") || !tt.HasText("[2] *Dashboard*") {
-		t.Fatalf("expected swapped split panes rendered, got %q", strings.Join(tt.Texts(), " | "))
+	winsAfterSwap := fr.WorkspaceSnapshot().Active.Windows()
+	if len(winsAfterSwap) != 2 || winsAfterSwap[0].Buffer != buffer.Conversation || winsAfterSwap[1].Buffer != buffer.Dashboard {
+		t.Fatalf("expected swapped split panes (*conversation* <-> *Dashboard*), got %+v", winsAfterSwap)
+	}
+	fr.SplitHorizontal(buffer.Sessions)
+	tt.Frame()
+	if got := fr.WorkspaceSnapshot().Active.WindowCount(); got != 3 {
+		t.Fatalf("expected nested 3-window split tree, got %d windows", got)
+	}
+	if !tt.HasText("3") {
+		t.Fatalf("expected window number 3 in per-window Doom modeline, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	fr.SelectWindowNumber(1)
+	if got := fr.WorkspaceSnapshot().Active.FocusedWindowNumber(); got != 1 {
+		t.Fatalf("expected SPC w 1 to focus window 1, got %d", got)
+	}
+	fr.ToggleWindowDedicated()
+	tt.Frame()
+	if !fr.WorkspaceSnapshot().Active.FocusedLeaf().Dedicated || !tt.HasText("D") {
+		t.Fatalf("expected dedicated pin indicator on focused window modeline")
+	}
+	fr.ToggleWindowDedicated()
+	// Undo the 3rd split back to 2 windows via Doom winner-mode (SPC w u) and redo via SPC w U.
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyW)
+	tt.Frame()
+	tt.Key(0, ui.KeyU)
+	tt.Frame()
+	if got := fr.WorkspaceSnapshot().Active.WindowCount(); got != 2 {
+		t.Fatalf("expected SPC w u (winner-undo) to restore 2-window layout, got %d", got)
+	}
+	tt.Key(ui.Shift, ui.KeyU)
+	tt.Frame()
+	if got := fr.WorkspaceSnapshot().Active.WindowCount(); got != 3 {
+		t.Fatalf("expected Shift+U (winner-redo) in SPC w hydra to restore 3-window layout, got %d", got)
+	}
+	tt.Key(0, ui.KeyU)
+	tt.Frame()
+	tt.Key(0, ui.KeyQ)
+	tt.Frame()
+
+	// 1c. Canonical Doom SPC TAB (+workspaces) muscle-memory check:
+	// SPC TAB n creates a workspace, SPC TAB [ switches back to main!
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if fr.KeypadPrefix() != "SPC TAB" {
+		t.Fatalf("expected Doom canonical SPC TAB workspace hydra, got %q", fr.KeypadPrefix())
+	}
+	tt.Key(0, ui.KeyN)
+	tt.Frame()
+	if got := len(fr.WorkspaceSnapshot().Workspaces); got != 2 {
+		t.Fatalf("expected SPC TAB n to create 2nd workspace, got %d", got)
+	}
+	// Cleanly kill the ephemeral workspace via SPC TAB d so step 2 tests named creation cleanly.
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	tt.Key(0, ui.KeyD)
+	tt.Frame()
+	if got := len(fr.WorkspaceSnapshot().Workspaces); got != 1 {
+		t.Fatalf("expected SPC TAB d to kill workspace and return to main, got %d", got)
 	}
 
 	// 2. SPC l c opens named workspace Minibuffer; creating "research @/repo/lab"

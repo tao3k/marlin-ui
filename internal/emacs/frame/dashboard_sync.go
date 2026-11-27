@@ -220,9 +220,7 @@ func (f *Frame) applyThemeBundleLocked(bundle appconfig.UIThemeBundle, preferred
 		if extra, err := parseKeymapsTOML(bundle.KeymapsTOML); err != nil {
 			warnings = append(warnings, fmt.Sprintf("keymaps.toml: %v", err))
 		} else {
-			for pref, def := range extra {
-				hydras[pref] = def
-			}
+			hydras = mergeHydraOverlay(hydras, extra)
 		}
 	}
 	f.tomlHydras = hydras
@@ -469,6 +467,32 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.DeleteOtherWindows()
 	case "cmd:win-other":
 		f.CycleFocusPane()
+	case "cmd:win-prev":
+		f.CycleFocusWindow(-1)
+	case "cmd:win-1":
+		f.SelectWindowNumber(1)
+	case "cmd:win-2":
+		f.SelectWindowNumber(2)
+	case "cmd:win-3":
+		f.SelectWindowNumber(3)
+	case "cmd:win-4":
+		f.SelectWindowNumber(4)
+	case "cmd:win-5":
+		f.SelectWindowNumber(5)
+	case "cmd:win-6":
+		f.SelectWindowNumber(6)
+	case "cmd:win-7":
+		f.SelectWindowNumber(7)
+	case "cmd:win-8":
+		f.SelectWindowNumber(8)
+	case "cmd:win-9":
+		f.SelectWindowNumber(9)
+	case "cmd:win-dedicated":
+		f.ToggleWindowDedicated()
+	case "cmd:win-undo":
+		f.WinnerUndo()
+	case "cmd:win-redo":
+		f.WinnerRedo()
 	case "cmd:win-swap":
 		f.SwapSplitPanes()
 	case "cmd:win-widen":
@@ -501,6 +525,13 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.SwitchWorkspaceIndex(2)
 	case "cmd:ws-4":
 		f.SwitchWorkspaceIndex(3)
+	case "cmd:ws-final":
+		if f.wsMgr != nil {
+			snap := f.wsMgr.Snapshot()
+			if n := len(snap.Workspaces); n > 0 {
+				f.SwitchWorkspaceIndex(n - 1)
+			}
+		}
 	default:
 		f.Echo("Widget action: " + act)
 	}
@@ -836,8 +867,11 @@ func (f *Frame) closeArtifactStage() {
 }
 
 func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {
+	return f.buildModelineStatusForBuffer(snap, snap.ActiveBuffer, modelLbl, sessLbl)
+}
+
+func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffer.ID, modelLbl, sessLbl string) modeline.Status {
 	th := snap.Theme
-	activeBuf := snap.ActiveBuffer
 	actLabel := "Ready"
 	actCol := th.Success
 	remoteHost := ""

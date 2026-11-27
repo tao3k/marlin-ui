@@ -2,59 +2,24 @@
 #
 # SPDX-License-Identifier: Apache-2.0 AND LGPL-2.1-or-later
 
-# Default declarative SPC Doom Leader / Hydra keymap catalog for Marlin UI.
-# Users may customize or extend bindings in ~/.config/marlin/ui/keymaps.toml
-# and hot-reload live with SPC t r / M-x reload-theme.
-
-[[hydras]]
-prefix = "SPC"
-id = "leader"
-title = "Doom Leader / Hydra"
-
-[[heads]]
-prefix = "SPC"
-key = "SPC"
-label = "Execute command (M-x)"
-column = "Commands"
-exit = "true"
-action = "cmd:mx"
-
-[[heads]]
-prefix = "SPC"
-key = "x"
-label = "M-x command palette"
-column = "Commands"
-exit = "true"
-action = "cmd:mx"
-
-[[heads]]
-prefix = "SPC"
-key = "s"
-label = "Helm live search"
-column = "Commands"
-exit = "true"
-action = "cmd:helm"
-
-[[heads]]
-prefix = "SPC"
-key = "b"
-label = "+buffers"
-column = "Navigation"
-is_prefix = "true"
-action = "hydra:SPC b"
-
-[[heads]]
-prefix = "SPC"
-key = "w"
-label = "+windows & popups"
-column = "Navigation"
-is_prefix = "true"
-action = "hydra:SPC w"
+# Desktop-Special Extension Overlay for Marlin UI keymaps.
+#
+# Layering order (downstream users may override or extend any key in
+# ~/.config/marlin/ui/keymaps.toml and hot-reload with SPC t r):
+#   1. Authoritative Doom Emacs Base (`scheme/ui-meow/key-bindings.ss`):
+#      SPC, SPC b, SPC w (splits / winum 1..9 / winner-mode / dedicated),
+#      SPC TAB (persp-mode workspaces), SPC ~ (popup toggle).
+#   2. Desktop-Special Extensions (this file):
+#      Liquid Glass / Motion / Zen / Theme packs (SPC t), Packages (SPC p),
+#      Settings (SPC ,), Marlin Session (SPC m), Desktop buffer shortcuts (SPC b),
+#      and legacy SPC l alias for +workspaces.
+#   3. User Overlay (`~/.config/marlin/ui/keymaps.toml`):
+#      Per-(prefix, key) merge — overrides matching keys and appends new ones.
 
 [[heads]]
 prefix = "SPC"
 key = "l"
-label = "+workspaces"
+label = "+workspaces (alias)"
 column = "Navigation"
 is_prefix = "true"
 action = "hydra:SPC l"
@@ -85,14 +50,6 @@ action = "cmd:insert"
 
 [[heads]]
 prefix = "SPC"
-key = "h"
-label = "Documentation (*Help*)"
-column = "System"
-exit = "true"
-action = "buffer:*Help*"
-
-[[heads]]
-prefix = "SPC"
 key = ","
 label = "Private config (*Settings*)"
 column = "System"
@@ -107,19 +64,7 @@ column = "System"
 exit = "true"
 action = "buffer:*Packages*"
 
-[[hydras]]
-prefix = "SPC b"
-id = "buffers"
-title = "+buffers"
-
-[[heads]]
-prefix = "SPC b"
-key = "b"
-label = "Switch buffer (Vertico)"
-column = "Buffers"
-exit = "true"
-action = "cmd:switch-buffer"
-
+# Desktop-special buffer shortcuts layered onto Scheme's SPC b base.
 [[heads]]
 prefix = "SPC b"
 key = "d"
@@ -184,18 +129,10 @@ column = "Diagnostics"
 exit = "true"
 action = "buffer:*Help*"
 
-[[heads]]
-prefix = "SPC b"
-key = "q"
-label = "Quit hydra"
-column = "Diagnostics"
-exit = "true"
-action = ""
-
 [[hydras]]
 prefix = "SPC t"
 id = "themes"
-title = "+themes & toggles"
+title = "+themes & toggles (Desktop)"
 
 [[heads]]
 prefix = "SPC t"
@@ -304,7 +241,7 @@ action = ""
 [[hydras]]
 prefix = "SPC m"
 id = "session"
-title = "+marlin session"
+title = "+marlin session (Desktop)"
 
 [[heads]]
 prefix = "SPC m"
@@ -346,111 +283,11 @@ column = "Federation"
 exit = "true"
 action = ""
 
-[[hydras]]
-prefix = "SPC w"
-id = "windows"
-title = "+windows & Doom popups"
-
-[[heads]]
-prefix = "SPC w"
-key = "v"
-label = "Split vertical (left | right)"
-column = "Splits"
-exit = "true"
-action = "cmd:win-split-right"
-
-[[heads]]
-prefix = "SPC w"
-key = "s"
-label = "Split horizontal (top / bottom)"
-column = "Splits"
-exit = "true"
-action = "cmd:win-split-below"
-
-[[heads]]
-prefix = "SPC w"
-key = "w"
-label = "Cycle focused pane"
-column = "Splits"
-exit = "false"
-action = "cmd:win-other"
-
-[[heads]]
-prefix = "SPC w"
-key = "x"
-label = "Swap split panes"
-column = "Splits"
-exit = "false"
-action = "cmd:win-swap"
-
-[[heads]]
-prefix = "SPC w"
-key = "l"
-label = "Widen primary pane"
-column = "Splits"
-exit = "false"
-action = "cmd:win-widen"
-
-[[heads]]
-prefix = "SPC w"
-key = "h"
-label = "Narrow primary pane"
-column = "Splits"
-exit = "false"
-action = "cmd:win-narrow"
-
-[[heads]]
-prefix = "SPC w"
-key = "e"
-label = "Balance panes (50/50)"
-column = "Splits"
-exit = "true"
-action = "cmd:win-balance"
-
-[[heads]]
-prefix = "SPC w"
-key = "d"
-label = "Close focused split pane"
-column = "Splits"
-exit = "true"
-action = "cmd:win-delete"
-
-[[heads]]
-prefix = "SPC w"
-key = "o"
-label = "Only this pane (delete others)"
-column = "Splits"
-exit = "true"
-action = "cmd:win-only"
-
-[[heads]]
-prefix = "SPC w"
-key = "p"
-label = "Toggle Doom popup drawer"
-column = "Popups"
-exit = "true"
-action = "cmd:popup-toggle"
-
-[[heads]]
-prefix = "SPC w"
-key = "r"
-label = "Raise popup to main window"
-column = "Popups"
-exit = "true"
-action = "cmd:popup-raise"
-
-[[heads]]
-prefix = "SPC w"
-key = "q"
-label = "Quit hydra"
-column = "Popups"
-exit = "true"
-action = ""
-
+# Legacy SPC l alias alongside Doom's canonical SPC TAB (+workspaces).
 [[hydras]]
 prefix = "SPC l"
-id = "workspaces"
-title = "+workspaces (persp-mode)"
+id = "workspaces-legacy"
+title = "+workspaces (persp-mode · canonical: SPC TAB)"
 
 [[heads]]
 prefix = "SPC l"

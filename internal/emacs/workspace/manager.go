@@ -66,8 +66,9 @@ const (
 	SplitHorizontal SplitMode = "horizontal" // top / bottom (SPC w s)
 )
 
-// Perspective holds one workspace's isolated window state, split layout,
-// open tabs, and workspace-local popup drawer state (matching Doom persp-mode).
+// Perspective holds one workspace's isolated window tree, split layout,
+// open tabs, per-workspace winner-mode history, and workspace-local popup
+// drawer state (matching Doom persp-mode + winum + winner-mode).
 type Perspective struct {
 	ID              string
 	Name            string
@@ -76,7 +77,12 @@ type Perspective struct {
 	SplitMode       SplitMode
 	SecondaryBuffer buffer.ID
 	SplitRatio      float32 // primary pane ratio in [0.25, 0.75], default 0.50
-	FocusedPane     int     // 0 = primary pane, 1 = secondary pane
+	FocusedPane     int     // 0-based index of focused leaf in winum reading order
+	WindowTree      *WindowNode
+	FocusedWindowID string
+	NextWindowSeq   int
+	winnerUndo      []windowLayoutSnap
+	winnerRedo      []windowLayoutSnap
 	Buffers         []buffer.ID
 	PopupBuffer     buffer.ID
 	PopupRule       *PopupRule
@@ -113,12 +119,15 @@ func NewManager(initialTabs []buffer.ID) *Manager {
 		activeID: "main",
 		workspaces: []Perspective{
 			{
-				ID:           "main",
-				Name:         "main",
-				ActiveBuffer: tabs[0],
-				SplitMode:    SplitSingle,
-				SplitRatio:   0.50,
-				Buffers:      tabs,
+				ID:              "main",
+				Name:            "main",
+				ActiveBuffer:    tabs[0],
+				SplitMode:       SplitSingle,
+				SplitRatio:      0.50,
+				WindowTree:      &WindowNode{ID: "w1", Buffer: tabs[0]},
+				FocusedWindowID: "w1",
+				NextWindowSeq:   1,
+				Buffers:         tabs,
 			},
 		},
 		rules:   DefaultPopupRules(),
@@ -199,13 +208,16 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 		}
 	}
 	ws := Perspective{
-		ID:           id,
-		Name:         cleanName,
-		ProjectRoot:  strings.TrimSpace(projectRoot),
-		ActiveBuffer: buffer.Conversation,
-		SplitMode:    SplitSingle,
-		SplitRatio:   0.50,
-		Buffers:      []buffer.ID{buffer.Dashboard, buffer.Conversation},
+		ID:              id,
+		Name:            cleanName,
+		ProjectRoot:     strings.TrimSpace(projectRoot),
+		ActiveBuffer:    buffer.Conversation,
+		SplitMode:       SplitSingle,
+		SplitRatio:      0.50,
+		WindowTree:      &WindowNode{ID: "w1", Buffer: buffer.Conversation},
+		FocusedWindowID: "w1",
+		NextWindowSeq:   1,
+		Buffers:         []buffer.ID{buffer.Dashboard, buffer.Conversation},
 	}
 	m.workspaces = append(m.workspaces, ws)
 	m.activeID = ws.ID
@@ -287,12 +299,100 @@ func (m *Manager) KillWorkspace(id string) (killed bool, snap Snapshot) {
 	return true, m.snapshotLocked()
 }
 
-// SplitVertical splits the active workspace left | right (Doom SPC w v).
+func ensureWindowTree(ws *Perspective) {
+	if ws.WindowTree == nil {
+		baseBuf := ws.ActiveBuffer
+		if baseBuf == "" {
+			baseBuf = buffer.Dashboard
+		}
+		if (ws.SplitMode == SplitVertical || ws.SplitMode == SplitHorizontal) && ws.SecondaryBuffer != "" {
+			ratio := ws.SplitRatio
+			if ratio < 0.25 || ratio > 0.75 {
+				ratio = 0.50
+			}
+			ws.WindowTree = &WindowNode{
+				Direction: ws.SplitMode,
+				Ratio:     ratio,
+				First:     &WindowNode{ID: "w1", Buffer: baseBuf},
+				Second:    &WindowNode{ID: "w2", Buffer: ws.SecondaryBuffer},
+			}
+			ws.NextWindowSeq = 2
+			if ws.FocusedPane == 1 {
+				ws.FocusedWindowID = "w2"
+			} else {
+				ws.FocusedWindowID = "w1"
+			}
+		} else {
+			ws.WindowTree = &WindowNode{ID: "w1", Buffer: baseBuf}
+			ws.FocusedWindowID = "w1"
+			ws.NextWindowSeq = 1
+		}
+	}
+	if ws.NextWindowSeq <= 0 {
+		ws.NextWindowSeq = len(ws.Windows())
+		if ws.NextWindowSeq <= 0 {
+			ws.NextWindowSeq = 1
+		}
+	}
+	if findWindowLeaf(ws.WindowTree, ws.FocusedWindowID) == nil {
+		if first := firstWindowLeaf(ws.WindowTree); first != nil {
+			ws.FocusedWindowID = first.ID
+		}
+	}
+	syncLegacySplitFields(ws)
+}
+
+func syncLegacySplitFields(ws *Perspective) {
+	leaves := ws.Windows()
+	if len(leaves) == 0 {
+		return
+	}
+	if findWindowLeaf(ws.WindowTree, ws.FocusedWindowID) == nil {
+		ws.FocusedWindowID = leaves[0].ID
+		leaves = ws.Windows()
+	}
+	ws.ActiveBuffer = leaves[0].Buffer
+	ws.FocusedPane = 0
+	for i, l := range leaves {
+		if l.ID == ws.FocusedWindowID {
+			ws.FocusedPane = i
+			break
+		}
+	}
+	if ws.WindowTree != nil && ws.WindowTree.IsSplit() {
+		ws.SplitMode = ws.WindowTree.Direction
+		ws.SplitRatio = clampSplitRatio(ws.WindowTree.Ratio)
+		if len(leaves) >= 2 {
+			ws.SecondaryBuffer = leaves[1].Buffer
+		}
+	} else {
+		ws.SplitMode = SplitSingle
+		ws.SplitRatio = 0.50
+		ws.SecondaryBuffer = ""
+	}
+}
+
+func recordWinnerSnapshot(ws *Perspective) {
+	const maxWinnerHistory = 24
+	if ws.WindowTree == nil {
+		return
+	}
+	ws.winnerUndo = append(ws.winnerUndo, windowLayoutSnap{
+		tree:            cloneWindowTree(ws.WindowTree),
+		focusedWindowID: ws.FocusedWindowID,
+	})
+	if len(ws.winnerUndo) > maxWinnerHistory {
+		ws.winnerUndo = ws.winnerUndo[len(ws.winnerUndo)-maxWinnerHistory:]
+	}
+	ws.winnerRedo = nil
+}
+
+// SplitVertical splits the focused window left | right (Doom SPC w v).
 func (m *Manager) SplitVertical(secondary buffer.ID) Snapshot {
 	return m.applySplit(SplitVertical, secondary)
 }
 
-// SplitHorizontal splits the active workspace top / bottom (Doom SPC w s).
+// SplitHorizontal splits the focused window top / bottom (Doom SPC w s).
 func (m *Manager) SplitHorizontal(secondary buffer.ID) Snapshot {
 	return m.applySplit(SplitHorizontal, secondary)
 }
@@ -305,23 +405,38 @@ func (m *Manager) applySplit(mode SplitMode, secondary buffer.ID) Snapshot {
 		return Snapshot{}
 	}
 	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	recordWinnerSnapshot(ws)
+
+	focusLeaf := findWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	if focusLeaf == nil {
+		focusLeaf = firstWindowLeaf(ws.WindowTree)
+	}
 	if secondary == "" {
-		secondary = defaultSecondaryBuffer(ws.ActiveBuffer)
+		secondary = defaultSecondaryBuffer(focusLeaf.Buffer)
 	}
-	ws.SplitMode = mode
-	ws.SecondaryBuffer = secondary
-	if ws.SplitRatio < 0.25 || ws.SplitRatio > 0.75 {
-		ws.SplitRatio = 0.50
-	}
-	ws.FocusedPane = 1
+	ws.NextWindowSeq++
+	newID := fmt.Sprintf("w%d", ws.NextWindowSeq)
+	newLeaf := &WindowNode{ID: newID, Buffer: secondary}
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, focusLeaf.ID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		return &WindowNode{
+			Direction: mode,
+			Ratio:     0.50,
+			First:     &cp,
+			Second:    newLeaf,
+		}
+	})
+	ws.FocusedWindowID = newID
 	if !containsBuf(ws.Buffers, secondary) {
 		ws.Buffers = append(ws.Buffers, secondary)
 	}
+	syncLegacySplitFields(ws)
 	return m.snapshotLocked()
 }
 
-// ResizeSplit adjusts the active workspace's primary/secondary split ratio by
-// delta, clamped to [0.25, 0.75] (Doom SPC w l / SPC w h).
+// ResizeSplit adjusts the enclosing split ratio of the focused window by delta,
+// clamped to [0.25, 0.75] (Doom SPC w l / SPC w h).
 func (m *Manager) ResizeSplit(delta float32) (ratio float32, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -330,21 +445,18 @@ func (m *Manager) ResizeSplit(delta float32) (ratio float32, snap Snapshot) {
 		return 0.50, Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitRatio < 0.25 || ws.SplitRatio > 0.75 {
-		ws.SplitRatio = 0.50
+	ensureWindowTree(ws)
+	nextTree, nextRatio, handled := resizeEnclosingSplit(ws.WindowTree, ws.FocusedWindowID, delta)
+	if handled {
+		ws.WindowTree = nextTree
+		syncLegacySplitFields(ws)
+		return nextRatio, m.snapshotLocked()
 	}
-	next := ws.SplitRatio + delta
-	if next < 0.25 {
-		next = 0.25
-	} else if next > 0.75 {
-		next = 0.75
-	}
-	ws.SplitRatio = next
 	return ws.SplitRatio, m.snapshotLocked()
 }
 
-// BalanceSplit resets the active workspace's split panes to an equal 50/50
-// ratio (Doom SPC w e / C-x +).
+// BalanceSplit resets all split ratios in the active workspace to 50/50
+// (Doom SPC w e / C-x +).
 func (m *Manager) BalanceSplit() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -352,12 +464,18 @@ func (m *Manager) BalanceSplit() Snapshot {
 	if idx < 0 {
 		return Snapshot{}
 	}
-	m.workspaces[idx].SplitRatio = 0.50
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if ws.WindowCount() > 1 {
+		recordWinnerSnapshot(ws)
+		ws.WindowTree = balanceWindowTree(ws.WindowTree)
+		syncLegacySplitFields(ws)
+	}
 	return m.snapshotLocked()
 }
 
-// SwapSplitPanes swaps the primary and secondary buffers in an active split
-// (Doom SPC w x).
+// SwapSplitPanes swaps the focused window's buffer with the next window in
+// reading order (Doom SPC w x).
 func (m *Manager) SwapSplitPanes() (swapped bool, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -366,10 +484,29 @@ func (m *Manager) SwapSplitPanes() (swapped bool, snap Snapshot) {
 		return false, Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" {
+	ensureWindowTree(ws)
+	leaves := ws.Windows()
+	if len(leaves) < 2 {
 		return false, m.snapshotLocked()
 	}
-	ws.ActiveBuffer, ws.SecondaryBuffer = ws.SecondaryBuffer, ws.ActiveBuffer
+	recordWinnerSnapshot(ws)
+	curIdx := ws.FocusedPane
+	if curIdx < 0 || curIdx >= len(leaves) {
+		curIdx = 0
+	}
+	nextIdx := (curIdx + 1) % len(leaves)
+	a, b := leaves[curIdx], leaves[nextIdx]
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, a.ID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = b.Buffer
+		return &cp
+	})
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, b.ID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = a.Buffer
+		return &cp
+	})
+	syncLegacySplitFields(ws)
 	return true, m.snapshotLocked()
 }
 
@@ -408,7 +545,7 @@ func (m *Manager) RestorePerspectives(activeID string, saved []Perspective) Snap
 		if ratio < 0.25 || ratio > 0.75 {
 			ratio = 0.50
 		}
-		restored = append(restored, Perspective{
+		p := Perspective{
 			ID:              id,
 			Name:            name,
 			ProjectRoot:     strings.TrimSpace(w.ProjectRoot),
@@ -416,8 +553,13 @@ func (m *Manager) RestorePerspectives(activeID string, saved []Perspective) Snap
 			SplitMode:       mode,
 			SecondaryBuffer: w.SecondaryBuffer,
 			SplitRatio:      ratio,
+			WindowTree:      cloneWindowTree(w.WindowTree),
+			FocusedWindowID: w.FocusedWindowID,
+			NextWindowSeq:   w.NextWindowSeq,
 			Buffers:         bufs,
-		})
+		}
+		ensureWindowTree(&p)
+		restored = append(restored, p)
 	}
 	if len(restored) == 0 {
 		return m.snapshotLocked()
@@ -434,8 +576,8 @@ func (m *Manager) RestorePerspectives(activeID string, saved []Perspective) Snap
 	return m.snapshotLocked()
 }
 
-// DeleteOtherWindows collapses any active split into a single window keeping
-// the focused pane's buffer active (Doom SPC w o / C-x 1).
+// DeleteOtherWindows collapses any active splits into a single window keeping
+// the focused window's buffer active (Doom SPC w o / C-x 1).
 func (m *Manager) DeleteOtherWindows() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -444,16 +586,22 @@ func (m *Manager) DeleteOtherWindows() Snapshot {
 		return Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitMode != SplitSingle && ws.FocusedPane == 1 && ws.SecondaryBuffer != "" {
-		ws.ActiveBuffer = ws.SecondaryBuffer
+	ensureWindowTree(ws)
+	if ws.WindowCount() > 1 {
+		recordWinnerSnapshot(ws)
+		focusLeaf := ws.FocusedLeaf()
+		ws.WindowTree = &WindowNode{
+			ID:        focusLeaf.ID,
+			Buffer:    focusLeaf.Buffer,
+			Dedicated: focusLeaf.Dedicated,
+		}
+		ws.FocusedWindowID = focusLeaf.ID
+		syncLegacySplitFields(ws)
 	}
-	ws.SplitMode = SplitSingle
-	ws.SecondaryBuffer = ""
-	ws.FocusedPane = 0
 	return m.snapshotLocked()
 }
 
-// CloseFocusedPane closes the currently focused pane when split (Doom SPC w d).
+// CloseFocusedPane closes the currently focused window when split (Doom SPC w d).
 func (m *Manager) CloseFocusedPane() (closed bool, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -462,41 +610,104 @@ func (m *Manager) CloseFocusedPane() (closed bool, snap Snapshot) {
 		return false, Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitMode == SplitSingle {
+	ensureWindowTree(ws)
+	leaves := ws.Windows()
+	if len(leaves) <= 1 {
 		return false, m.snapshotLocked()
 	}
-	if ws.FocusedPane == 0 && ws.SecondaryBuffer != "" {
-		ws.ActiveBuffer = ws.SecondaryBuffer
+	recordWinnerSnapshot(ws)
+	curIdx := ws.FocusedPane
+	ws.WindowTree = deleteWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	nextLeaves := ws.Windows()
+	if len(nextLeaves) > 0 {
+		if curIdx >= len(nextLeaves) {
+			curIdx = len(nextLeaves) - 1
+		}
+		if curIdx < 0 {
+			curIdx = 0
+		}
+		ws.FocusedWindowID = nextLeaves[curIdx].ID
 	}
-	ws.SplitMode = SplitSingle
-	ws.SecondaryBuffer = ""
-	ws.FocusedPane = 0
+	syncLegacySplitFields(ws)
 	return true, m.snapshotLocked()
 }
 
-// CycleFocusPane alternates focus between pane 0 and pane 1 (Doom SPC w w).
+// CloseWindowOrWorkspace implements Doom Emacs `+workspace/close-window-or-workspace`:
+// closes the focused window if > 1 exist, otherwise kills the current workspace
+// if it is non-main and other workspaces remain.
+func (m *Manager) CloseWindowOrWorkspace() (action string, snap Snapshot) {
+	if closed, s := m.CloseFocusedPane(); closed {
+		return "closed-window", s
+	}
+	m.mu.Lock()
+	idx := m.activeIndexLocked()
+	canKillWS := idx >= 0 && len(m.workspaces) > 1 && m.workspaces[idx].ID != "main"
+	targetID := ""
+	if canKillWS {
+		targetID = m.workspaces[idx].ID
+	}
+	m.mu.Unlock()
+	if canKillWS {
+		if killed, s := m.KillWorkspace(targetID); killed {
+			return "killed-workspace", s
+		}
+	}
+	return "noop", m.Snapshot()
+}
+
+// CycleFocusPane cycles focus to the next window in winum reading order (Doom SPC w w).
 func (m *Manager) CycleFocusPane() (focused int, snap Snapshot) {
+	leaf, s := m.CycleFocusWindow(1)
+	if leaf.Number > 0 {
+		return leaf.Number - 1, s
+	}
+	return 0, s
+}
+
+// CycleFocusWindow cycles focus by delta (+1 next, -1 prev) in Doom winum order.
+func (m *Manager) CycleFocusWindow(delta int) (focused WindowLeafView, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	idx := m.activeIndexLocked()
 	if idx < 0 {
-		return 0, Snapshot{}
+		return WindowLeafView{}, Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" {
-		ws.FocusedPane = 0
-		return 0, m.snapshotLocked()
+	ensureWindowTree(ws)
+	leaves := ws.Windows()
+	if len(leaves) <= 1 {
+		return ws.FocusedLeaf(), m.snapshotLocked()
 	}
-	if ws.FocusedPane == 0 {
-		ws.FocusedPane = 1
-	} else {
-		ws.FocusedPane = 0
+	nextIdx := (ws.FocusedPane + delta) % len(leaves)
+	if nextIdx < 0 {
+		nextIdx += len(leaves)
 	}
-	return ws.FocusedPane, m.snapshotLocked()
+	ws.FocusedWindowID = leaves[nextIdx].ID
+	syncLegacySplitFields(ws)
+	return ws.FocusedLeaf(), m.snapshotLocked()
 }
 
-// FocusPane explicitly focuses pane 0 (primary) or pane 1 (secondary).
-func (m *Manager) FocusPane(pane int) Snapshot {
+// SelectWindowNumber jumps directly to the 1-based Doom `winum` window (SPC w 1..9).
+func (m *Manager) SelectWindowNumber(num int) (focused WindowLeafView, ok bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return WindowLeafView{}, false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	leaves := ws.Windows()
+	if num < 1 || num > len(leaves) {
+		return ws.FocusedLeaf(), false, m.snapshotLocked()
+	}
+	ws.FocusedWindowID = leaves[num-1].ID
+	syncLegacySplitFields(ws)
+	return ws.FocusedLeaf(), true, m.snapshotLocked()
+}
+
+// FocusWindowID explicitly focuses the window leaf matching id.
+func (m *Manager) FocusWindowID(id string) Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	idx := m.activeIndexLocked()
@@ -504,12 +715,94 @@ func (m *Manager) FocusPane(pane int) Snapshot {
 		return Snapshot{}
 	}
 	ws := &m.workspaces[idx]
-	if ws.SplitMode == SplitSingle || ws.SecondaryBuffer == "" || pane <= 0 {
-		ws.FocusedPane = 0
-	} else {
-		ws.FocusedPane = 1
+	ensureWindowTree(ws)
+	if findWindowLeaf(ws.WindowTree, id) != nil {
+		ws.FocusedWindowID = id
+		syncLegacySplitFields(ws)
 	}
 	return m.snapshotLocked()
+}
+
+// FocusPane explicitly focuses the 0-based pane index in reading order.
+func (m *Manager) FocusPane(pane int) Snapshot {
+	if pane < 0 {
+		pane = 0
+	}
+	_, _, snap := m.SelectWindowNumber(pane + 1)
+	return snap
+}
+
+// ToggleWindowDedicated toggles Emacs 30 `toggle-window-dedicated` on the
+// focused window (SPC w t), protecting its buffer from accidental replacement.
+func (m *Manager) ToggleWindowDedicated() (dedicated bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Dedicated = !cp.Dedicated
+		dedicated = cp.Dedicated
+		return &cp
+	})
+	syncLegacySplitFields(ws)
+	return dedicated, m.snapshotLocked()
+}
+
+// WinnerUndo restores the previous window configuration in the active workspace
+// (Doom per-workspace `winner-mode` / SPC w u).
+func (m *Manager) WinnerUndo() (ok bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.winnerUndo) == 0 {
+		return false, m.snapshotLocked()
+	}
+	prev := ws.winnerUndo[len(ws.winnerUndo)-1]
+	ws.winnerUndo = ws.winnerUndo[:len(ws.winnerUndo)-1]
+	ws.winnerRedo = append(ws.winnerRedo, windowLayoutSnap{
+		tree:            cloneWindowTree(ws.WindowTree),
+		focusedWindowID: ws.FocusedWindowID,
+	})
+	ws.WindowTree = cloneWindowTree(prev.tree)
+	ws.FocusedWindowID = prev.focusedWindowID
+	syncLegacySplitFields(ws)
+	return true, m.snapshotLocked()
+}
+
+// WinnerRedo re-applies an undone window configuration in the active workspace
+// (Doom per-workspace `winner-mode` / SPC w U).
+func (m *Manager) WinnerRedo() (ok bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.winnerRedo) == 0 {
+		return false, m.snapshotLocked()
+	}
+	nxt := ws.winnerRedo[len(ws.winnerRedo)-1]
+	ws.winnerRedo = ws.winnerRedo[:len(ws.winnerRedo)-1]
+	ws.winnerUndo = append(ws.winnerUndo, windowLayoutSnap{
+		tree:            cloneWindowTree(ws.WindowTree),
+		focusedWindowID: ws.FocusedWindowID,
+	})
+	ws.WindowTree = cloneWindowTree(nxt.tree)
+	ws.FocusedWindowID = nxt.focusedWindowID
+	syncLegacySplitFields(ws)
+	return true, m.snapshotLocked()
 }
 
 func defaultSecondaryBuffer(primary buffer.ID) buffer.ID {
@@ -523,11 +816,13 @@ func defaultSecondaryBuffer(primary buffer.ID) buffer.ID {
 	}
 }
 
-// OpenBuffer routes buf through Doom popup rules:
+// OpenBuffer routes buf through Doom popup rules and dedicated-window protection:
 //   - If buf matches a popup rule AND is not already promoted into this workspace's
-//     main buffer tabs, it opens non-destructively in the Popup Drawer (returning openedAsPopup=true).
-//   - Otherwise it focuses buf in the active pane (primary or secondary when split)
-//     and records it strictly in this workspace's isolated buffer list.
+//     main buffer tabs, it opens non-destructively in the Popup Drawer.
+//   - If the focused window is dedicated to another buffer, opens buf in an
+//     undedicated sibling window (or splits vertically if all windows are dedicated).
+//   - Otherwise focuses buf in the active window and records it in this
+//     workspace's isolated buffer list.
 func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -536,6 +831,7 @@ func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) 
 		return false, Snapshot{}
 	}
 	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
 	alreadyMainTab := containsBuf(ws.Buffers, buf)
 	if rule, ok := m.matchRuleLocked(buf); ok && !alreadyMainTab {
 		rc := rule
@@ -545,14 +841,43 @@ func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) 
 		ws.LastPopup = buf
 		return true, m.snapshotLocked()
 	}
-	if ws.SplitMode != SplitSingle && ws.FocusedPane == 1 {
-		ws.SecondaryBuffer = buf
-	} else {
-		ws.ActiveBuffer = buf
-	}
 	if !alreadyMainTab {
 		ws.Buffers = append(ws.Buffers, buf)
 	}
+	focusLeaf := findWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	if focusLeaf != nil && focusLeaf.Dedicated && focusLeaf.Buffer != buf {
+		if other := firstUndedicatedLeaf(ws.WindowTree); other != nil {
+			ws.WindowTree = mapWindowLeaf(ws.WindowTree, other.ID, func(leaf *WindowNode) *WindowNode {
+				cp := *leaf
+				cp.Buffer = buf
+				return &cp
+			})
+			ws.FocusedWindowID = other.ID
+			syncLegacySplitFields(ws)
+			return false, m.snapshotLocked()
+		}
+		recordWinnerSnapshot(ws)
+		ws.NextWindowSeq++
+		newID := fmt.Sprintf("w%d", ws.NextWindowSeq)
+		ws.WindowTree = mapWindowLeaf(ws.WindowTree, focusLeaf.ID, func(leaf *WindowNode) *WindowNode {
+			cp := *leaf
+			return &WindowNode{
+				Direction: SplitVertical,
+				Ratio:     0.50,
+				First:     &cp,
+				Second:    &WindowNode{ID: newID, Buffer: buf},
+			}
+		})
+		ws.FocusedWindowID = newID
+		syncLegacySplitFields(ws)
+		return false, m.snapshotLocked()
+	}
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = buf
+		return &cp
+	})
+	syncLegacySplitFields(ws)
 	return false, m.snapshotLocked()
 }
 
@@ -614,7 +939,14 @@ func (m *Manager) RaisePopup() (promoted buffer.ID, snap Snapshot) {
 	ws.PopupBuffer = ""
 	ws.PopupRule = nil
 	ws.LastPopup = ""
-	ws.ActiveBuffer = promoted
+	ensureWindowTree(ws)
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = promoted
+		cp.Dedicated = false
+		return &cp
+	})
+	syncLegacySplitFields(ws)
 	if !containsBuf(ws.Buffers, promoted) {
 		ws.Buffers = append(ws.Buffers, promoted)
 	}
@@ -653,6 +985,9 @@ func (m *Manager) snapshotLocked() Snapshot {
 func clonePerspective(p Perspective) Perspective {
 	cp := p
 	cp.Buffers = append([]buffer.ID(nil), p.Buffers...)
+	cp.WindowTree = cloneWindowTree(p.WindowTree)
+	cp.winnerUndo = nil
+	cp.winnerRedo = nil
 	if p.PopupRule != nil {
 		r := *p.PopupRule
 		cp.PopupRule = &r

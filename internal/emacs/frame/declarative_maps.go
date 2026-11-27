@@ -35,6 +35,7 @@ type declarativeHydraDef struct {
 type declarativeHeadDef struct {
 	Key      string
 	KeyCode  ui.Key
+	KeyMods  ui.Modifiers
 	Label    string
 	Column   string
 	Exit     bool
@@ -55,15 +56,58 @@ func loadDefaultCommands() []declarativeCommand {
 }
 
 func loadDefaultKeymaps() map[string]declarativeHydraDef {
+	base := loadSchemeBaseKeymaps()
 	raw, err := defaultTOMLFS.ReadFile("defaults/keymaps.toml")
 	if err != nil {
 		panic(fmt.Sprintf("frame: missing embedded defaults/keymaps.toml: %v", err))
 	}
-	km, err := parseKeymapsTOML(string(raw))
+	overlay, err := parseKeymapsTOML(string(raw))
 	if err != nil {
 		panic(fmt.Sprintf("frame: invalid embedded defaults/keymaps.toml: %v", err))
 	}
-	return km
+	return mergeHydraOverlay(base, overlay)
+}
+
+// mergeHydraOverlay layers TOML desktop extensions or downstream user overrides
+// onto the authoritative Scheme Doom keymap base: matching (prefix, key) heads
+// override in-place while new heads extend the prefix cleanly.
+func mergeHydraOverlay(base, overlay map[string]declarativeHydraDef) map[string]declarativeHydraDef {
+	out := make(map[string]declarativeHydraDef, len(base)+len(overlay))
+	for pref, def := range base {
+		cp := def
+		cp.Heads = append([]declarativeHeadDef(nil), def.Heads...)
+		out[pref] = cp
+	}
+	for pref, over := range overlay {
+		cur, exists := out[pref]
+		if !exists {
+			cp := over
+			cp.Heads = append([]declarativeHeadDef(nil), over.Heads...)
+			out[pref] = cp
+			continue
+		}
+		if over.ID != "" && over.ID != pref {
+			cur.ID = over.ID
+		}
+		if over.Title != "" && over.Title != pref {
+			cur.Title = over.Title
+		}
+		for _, oh := range over.Heads {
+			replaced := false
+			for i := range cur.Heads {
+				if cur.Heads[i].Key == oh.Key {
+					cur.Heads[i] = oh
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				cur.Heads = append(cur.Heads, oh)
+			}
+		}
+		out[pref] = cur
+	}
+	return out
 }
 
 func parseCommandsTOML(raw string) ([]declarativeCommand, error) {
@@ -116,7 +160,7 @@ func parseKeymapsTOML(raw string) (map[string]declarativeHydraDef, error) {
 			if pref == "" || key == "" {
 				return nil, fmt.Errorf("keymaps.toml: [[heads]] requires prefix and key")
 			}
-			code, ok := parseUIKey(key)
+			code, mods, ok := parseUIKeyWithMods(key)
 			if !ok {
 				return nil, fmt.Errorf("keymaps.toml: unsupported key %q", key)
 			}
@@ -129,6 +173,7 @@ func parseKeymapsTOML(raw string) (map[string]declarativeHydraDef, error) {
 			def.Heads = append(def.Heads, declarativeHeadDef{
 				Key:      key,
 				KeyCode:  code,
+				KeyMods:  mods,
 				Label:    strings.TrimSpace(sec.kv["label"]),
 				Column:   strings.TrimSpace(sec.kv["column"]),
 				Exit:     strings.EqualFold(sec.kv["exit"], "true"),
@@ -152,6 +197,7 @@ func (f *Frame) materializeHydra(def declarativeHydraDef) hydra.Body {
 		heads = append(heads, hydra.Head{
 			Key:      h.Key,
 			KeyCode:  h.KeyCode,
+			KeyMods:  h.KeyMods,
 			Label:    h.Label,
 			Column:   h.Column,
 			Exit:     h.Exit,
@@ -205,6 +251,38 @@ func parseTOMLArraySections(raw string) ([]tomlArraySection, error) {
 		sections[len(sections)-1].kv[key] = val
 	}
 	return sections, nil
+}
+
+func parseUIKeyWithMods(raw string) (ui.Key, ui.Modifiers, bool) {
+	trimmed := strings.TrimSpace(raw)
+	switch trimmed {
+	case "~":
+		return ui.KeyBackquote, ui.Shift, true
+	case "`":
+		return ui.KeyBackquote, 0, true
+	case "[":
+		return ui.KeyBracketLeft, 0, true
+	case "]":
+		return ui.KeyBracketRight, 0, true
+	case "=":
+		return ui.KeyEqual, 0, true
+	case "-":
+		return ui.KeyMinus, 0, true
+	case ".":
+		return ui.KeyPeriod, 0, true
+	case "/":
+		return ui.KeySlash, 0, true
+	}
+	lower := strings.ToLower(trimmed)
+	if lower == "tab" {
+		return ui.KeyTab, 0, true
+	}
+	var mods ui.Modifiers
+	if len(trimmed) == 1 && trimmed[0] >= 'A' && trimmed[0] <= 'Z' {
+		mods = ui.Shift
+	}
+	code, ok := parseUIKey(lower)
+	return code, mods, ok
 }
 
 func parseUIKey(k string) (ui.Key, bool) {

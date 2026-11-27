@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
@@ -260,22 +262,27 @@ func (f *Frame) DeleteOtherWindows() {
 	f.Echo("Single window: " + string(snap.Active.ActiveBuffer))
 }
 
-// CloseFocusedPane closes the active split pane (Doom SPC w d).
+// CloseFocusedPane implements Doom `+workspace/close-window-or-workspace` (SPC w d).
 func (f *Frame) CloseFocusedPane() {
 	if f.wsMgr == nil {
 		return
 	}
-	closed, snap := f.wsMgr.CloseFocusedPane()
-	if !closed {
+	action, snap := f.wsMgr.CloseWindowOrWorkspace()
+	switch action {
+	case "closed-window":
+		f.syncSplitStateLocked(snap.Active)
+		f.persistWorkspaces()
+		f.Echo("Closed window -> " + string(snap.Active.FocusedBuffer()))
+	case "killed-workspace":
+		f.syncFromWorkspaceLocked(snap.Active)
+		f.persistWorkspaces()
+		f.Echo("Closed workspace -> " + snap.Active.Name)
+	default:
 		f.Echo("Only one window open")
-		return
 	}
-	f.syncSplitStateLocked(snap.Active)
-	f.persistWorkspaces()
-	f.Echo("Closed split pane -> " + string(snap.Active.ActiveBuffer))
 }
 
-// ResizeSplit widens (+delta) or narrows (-delta) the primary split pane.
+// ResizeSplit widens (+delta) or narrows (-delta) the enclosing split pane.
 func (f *Frame) ResizeSplit(delta float32) {
 	if f.wsMgr == nil {
 		return
@@ -286,7 +293,7 @@ func (f *Frame) ResizeSplit(delta float32) {
 	f.Echo(fmt.Sprintf("Split ratio: %d%% / %d%%", int(ratio*100+0.5), 100-int(ratio*100+0.5)))
 }
 
-// BalanceSplit resets split panes to an equal 50/50 split (Doom SPC w e).
+// BalanceSplit resets all splits in the active workspace to 50/50 (Doom SPC w e).
 func (f *Frame) BalanceSplit() {
 	if f.wsMgr == nil {
 		return
@@ -294,10 +301,10 @@ func (f *Frame) BalanceSplit() {
 	snap := f.wsMgr.BalanceSplit()
 	f.syncSplitStateLocked(snap.Active)
 	f.persistWorkspaces()
-	f.Echo("Balanced panes (50% / 50%)")
+	f.Echo("Balanced windows (50% / 50%)")
 }
 
-// SwapSplitPanes swaps the primary and secondary split pane buffers (Doom SPC w x).
+// SwapSplitPanes swaps the focused window's buffer with the next window (Doom SPC w x).
 func (f *Frame) SwapSplitPanes() {
 	if f.wsMgr == nil {
 		return
@@ -309,20 +316,48 @@ func (f *Frame) SwapSplitPanes() {
 	}
 	f.syncSplitStateLocked(snap.Active)
 	f.persistWorkspaces()
-	f.Echo(fmt.Sprintf("Swapped panes: %s <-> %s", snap.Active.ActiveBuffer, snap.Active.SecondaryBuffer))
+	f.Echo("Swapped windows")
 }
 
-// CycleFocusPane alternates focus between split panes (Doom SPC w w).
+// CycleFocusPane advances focus to the next window in Doom winum order (SPC w w).
 func (f *Frame) CycleFocusPane() {
+	f.CycleFocusWindow(1)
+}
+
+// CycleFocusWindow steps window focus by delta (+1 next, -1 previous).
+func (f *Frame) CycleFocusWindow(delta int) {
 	if f.wsMgr == nil {
 		return
 	}
-	pane, snap := f.wsMgr.CycleFocusPane()
+	leaf, snap := f.wsMgr.CycleFocusWindow(delta)
 	f.syncSplitStateLocked(snap.Active)
-	f.Echo(fmt.Sprintf("Focused window [%d]", pane+1))
+	f.Echo(fmt.Sprintf("Window %d: %s", leaf.Number, leaf.Buffer))
 }
 
-// FocusPane explicitly focuses pane 0 (primary) or pane 1 (secondary).
+// SelectWindowNumber jumps directly to Doom winum window 1..9 (SPC w 1..9).
+func (f *Frame) SelectWindowNumber(num int) {
+	if f.wsMgr == nil {
+		return
+	}
+	leaf, ok, snap := f.wsMgr.SelectWindowNumber(num)
+	if !ok {
+		f.Echo(fmt.Sprintf("No window %d", num))
+		return
+	}
+	f.syncSplitStateLocked(snap.Active)
+	f.Echo(fmt.Sprintf("Window %d: %s", leaf.Number, leaf.Buffer))
+}
+
+// FocusWindowID focuses a specific split window leaf by ID (e.g. clicking its modeline).
+func (f *Frame) FocusWindowID(id string) {
+	if f.wsMgr == nil {
+		return
+	}
+	snap := f.wsMgr.FocusWindowID(id)
+	f.syncSplitStateLocked(snap.Active)
+}
+
+// FocusPane explicitly focuses a 0-based pane index in reading order.
 func (f *Frame) FocusPane(pane int) {
 	if f.wsMgr == nil {
 		return
@@ -331,9 +366,54 @@ func (f *Frame) FocusPane(pane int) {
 	f.syncSplitStateLocked(snap.Active)
 }
 
+// ToggleWindowDedicated toggles Emacs 30 `toggle-window-dedicated` on the
+// focused window (Doom SPC w t).
+func (f *Frame) ToggleWindowDedicated() {
+	if f.wsMgr == nil {
+		return
+	}
+	dedicated, snap := f.wsMgr.ToggleWindowDedicated()
+	f.syncSplitStateLocked(snap.Active)
+	if dedicated {
+		f.Echo("Window dedicated to " + string(snap.Active.FocusedBuffer()))
+	} else {
+		f.Echo("Window undedicated")
+	}
+}
+
+// WinnerUndo restores the previous window tree in this workspace (Doom SPC w u).
+func (f *Frame) WinnerUndo() {
+	if f.wsMgr == nil {
+		return
+	}
+	ok, snap := f.wsMgr.WinnerUndo()
+	if !ok {
+		f.Echo("No earlier window layout in this workspace")
+		return
+	}
+	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
+	f.Echo(fmt.Sprintf("Winner undo (%d window(s))", snap.Active.WindowCount()))
+}
+
+// WinnerRedo re-applies an undone window tree in this workspace (Doom SPC w U).
+func (f *Frame) WinnerRedo() {
+	if f.wsMgr == nil {
+		return
+	}
+	ok, snap := f.wsMgr.WinnerRedo()
+	if !ok {
+		f.Echo("No later window layout in this workspace")
+		return
+	}
+	f.syncSplitStateLocked(snap.Active)
+	f.persistWorkspaces()
+	f.Echo(fmt.Sprintf("Winner redo (%d window(s))", snap.Active.WindowCount()))
+}
+
 func (f *Frame) syncSplitStateLocked(ws workspace.Perspective) {
 	f.mu.Lock()
-	f.activeBuffer = ws.ActiveBuffer
+	f.activeBuffer = ws.FocusedBuffer()
 	f.activeFeatureID = ""
 	f.activeExtID = ""
 	f.activePluginID = ""
@@ -372,19 +452,30 @@ func (f *Frame) SelectModel(alias, displayLabel string) {
 	f.requestFrame()
 }
 
-func (f *Frame) buildSplitProps(wsSnap workspace.Snapshot) window.SplitProps {
+func (f *Frame) buildSplitProps(
+	wsSnap workspace.Snapshot,
+	showChrome bool,
+	renderPaneModeline func(c *ui.Context, leaf workspace.WindowLeafView),
+) window.SplitProps {
 	act := wsSnap.Active
-	if act.SplitMode == "" || act.SplitMode == workspace.SplitSingle || act.SecondaryBuffer == "" {
-		return window.SplitProps{Mode: workspace.SplitSingle}
+	winCount := act.WindowCount()
+	if winCount <= 1 || act.WindowTree == nil {
+		return window.SplitProps{Mode: workspace.SplitSingle, WindowCount: 1}
 	}
 	return window.SplitProps{
-		Mode:            act.SplitMode,
-		SecondaryBuffer: act.SecondaryBuffer,
-		FocusedPane:     act.FocusedPane,
-		Ratio:           act.SplitRatio,
-		OnFocusPane:     f.FocusPane,
-		OnSwapPanes:     f.SwapSplitPanes,
-		OnCloseSplit:    f.CloseFocusedPane,
+		Mode:               act.SplitMode,
+		SecondaryBuffer:    act.SecondaryBuffer,
+		FocusedPane:        act.FocusedPane,
+		Ratio:              act.SplitRatio,
+		Tree:               act.WindowTree,
+		FocusedWindowID:    act.FocusedWindowID,
+		WindowCount:        winCount,
+		ShowChrome:         showChrome,
+		RenderPaneModeline: renderPaneModeline,
+		OnFocusWindow:      f.FocusWindowID,
+		OnFocusPane:        f.FocusPane,
+		OnSwapPanes:        f.SwapSplitPanes,
+		OnCloseSplit:       f.CloseFocusedPane,
 	}
 }
 

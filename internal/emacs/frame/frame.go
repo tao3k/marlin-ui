@@ -861,19 +861,43 @@ func (f *Frame) View(c *ui.Context) {
 			}
 		}
 
+		multiPaneActive := showChrome && activeExt == nil && activeFeat == "" && activePlugin == nil && snap.Workspaces.Active.WindowCount() > 1
+		renderPaneModeline := func(ctx *ui.Context, leaf workspace.WindowLeafView) {
+			st := f.buildModelineStatusForBuffer(snap, leaf.Buffer, modelLbl, sessLbl)
+			st.WorkspaceName = snap.Workspaces.Active.Name
+			st.Glass = mods.Glass
+			st.GlassOpacity = chromeOp
+			st.PendingGates = pendingGateCount
+			st.OnReviewGate = f.OpenGateReview
+			st.WindowNumber = leaf.Number
+			st.WindowCount = snap.Workspaces.Active.WindowCount()
+			st.Focused = leaf.Focused
+			st.Dedicated = leaf.Dedicated
+			st.KeyPrefix = leaf.ID
+			if !leaf.Focused {
+				id := leaf.ID
+				st.OnFocus = func() { f.FocusWindowID(id) }
+			}
+			modeline.Render(ctx, st)
+		}
+
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
-				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, f.buildSplitProps(snap.Workspaces), f.buildPopupProps(snap.Workspaces))
+				splitProps := f.buildSplitProps(snap.Workspaces, showChrome, renderPaneModeline)
+				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, splitProps, f.buildPopupProps(snap.Workspaces))
 			}
 			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
 		})
-		if showChrome {
+		if showChrome && !multiPaneActive {
 			st := f.buildModelineStatus(snap, modelLbl, sessLbl)
 			st.WorkspaceName = snap.Workspaces.Active.Name
 			st.Glass = mods.Glass
 			st.GlassOpacity = chromeOp
 			st.PendingGates = pendingGateCount
 			st.OnReviewGate = f.OpenGateReview
+			st.WindowCount = 1
+			st.Focused = true
+			st.Dedicated = snap.Workspaces.Active.FocusedLeaf().Dedicated
 			modeline.Render(c, st)
 		}
 		if showMini {

@@ -143,8 +143,38 @@ action = "cmd:win-only"
 
 [[commands]]
 name = "other-window"
-desc = "Cycle focus between active split panes (SPC w w)"
+desc = "Cycle focus between active split windows (SPC w w)"
 action = "cmd:win-other"
+
+[[commands]]
+name = "winum-select-window-1"
+desc = "Jump directly to window 1 (SPC w 1)"
+action = "cmd:win-1"
+
+[[commands]]
+name = "winum-select-window-2"
+desc = "Jump directly to window 2 (SPC w 2)"
+action = "cmd:win-2"
+
+[[commands]]
+name = "winum-select-window-3"
+desc = "Jump directly to window 3 (SPC w 3)"
+action = "cmd:win-3"
+
+[[commands]]
+name = "winner-undo"
+desc = "Restore previous window layout in active workspace (SPC w u)"
+action = "cmd:win-undo"
+
+[[commands]]
+name = "winner-redo"
+desc = "Redo undone window layout in active workspace (SPC w U)"
+action = "cmd:win-redo"
+
+[[commands]]
+name = "toggle-window-dedicated"
+desc = "Pin/unpin focused window to its buffer (SPC w t)"
+action = "cmd:win-dedicated"
 
 [[commands]]
 name = "swap-window-panes"

@@ -24,12 +24,13 @@ const (
 
 // Head defines one keybinding entry inside a Hydra body (mirrors scheme/ui-hydra).
 type Head struct {
-	Key      string // display keycap: "SPC", "b", "s", "t", "1", "q"
-	KeyCode  ui.Key // matching MyGo keyboard key
-	Label    string // short description (e.g. "+buffers", "Helm search")
-	Column   string // visual column heading (e.g. "Commands", "Buffers", "Theme")
-	Exit     bool   // true = close hydra after running; false = repeatable red head
-	IsPrefix bool   // true = transitions to a nested Hydra prefix
+	Key      string       // display keycap: "SPC", "TAB", "w", "W", "1", "~", "q"
+	KeyCode  ui.Key       // matching MyGo keyboard key
+	KeyMods  ui.Modifiers // optional modifiers (e.g. ui.Shift for "W", "U", "N", "~")
+	Label    string       // short description (e.g. "+buffers", "Helm search")
+	Column   string       // visual column heading (e.g. "Commands", "Buffers", "Theme")
+	Exit     bool         // true = close hydra after running; false = repeatable red head
+	IsPrefix bool         // true = transitions to a nested Hydra prefix
 	Run      func()
 }
 
@@ -81,17 +82,21 @@ func (b Body) MatchKeyInScope(c *ui.Context, scope ui.Element) (Head, bool) {
 	if c == nil || c.FocusTakesText() {
 		return Head{}, false
 	}
-	for _, h := range b.Heads {
-		if h.KeyCode == 0 {
-			continue
-		}
-		scoped := false
-		if scope != (ui.Element{}) {
-			scoped = scope.Shortcut(0, h.KeyCode)
-		}
-		global := c.Shortcut(0, h.KeyCode)
-		if scoped || global {
-			return h, true
+	// Check modified heads (e.g. Shift+W, Shift+U, Shift+N, ~) before unmodified heads
+	// so uppercase Doom bindings never get shadowed by their lowercase sibling.
+	for _, wantMod := range []bool{true, false} {
+		for _, h := range b.Heads {
+			if h.KeyCode == 0 || (h.KeyMods != 0) != wantMod {
+				continue
+			}
+			scoped := false
+			if scope != (ui.Element{}) {
+				scoped = scope.Shortcut(h.KeyMods, h.KeyCode)
+			}
+			global := c.Shortcut(h.KeyMods, h.KeyCode)
+			if scoped || global {
+				return h, true
+			}
 		}
 	}
 	return Head{}, false
