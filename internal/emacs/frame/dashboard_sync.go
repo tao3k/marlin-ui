@@ -433,6 +433,18 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.OpenBufferSwitch()
 	case "cmd:new-session":
 		f.newSession()
+	case "cmd:new-chat-buffer":
+		f.NewChatBuffer("")
+	case "cmd:clone-window":
+		f.CloneCurrentWindow()
+	case "cmd:toggle-deep-think":
+		f.ToggleDeepThink()
+	case "cmd:buffer-refresh":
+		if f.ActiveBuffer() == buffer.Magit {
+			f.handleMagitAction("refresh", "")
+		} else {
+			f.ReloadThemes()
+		}
 	case "cmd:reload-theme":
 		f.ReloadThemes()
 	case "cmd:switch-theme":
@@ -468,12 +480,90 @@ func (f *Frame) dispatchWidgetAction(action string) {
 	case "cmd:review-gate":
 		f.OpenGateReview()
 	case "cmd:insert":
-		f.SelectBuffer(buffer.Conversation)
+		if !buffer.IsChatBuffer(f.ActiveBuffer()) {
+			f.SelectBuffer(buffer.Conversation)
+		}
 		f.EnterInsert()
 	case "cmd:probe-targets":
 		f.probeTargets()
 	case "cmd:refresh-packages":
 		f.RefreshPackagesAsync()
+	case "cmd:magit-status":
+		f.OpenMagit()
+	case "cmd:magit-refresh":
+		f.handleMagitAction("refresh", "")
+	case "cmd:magit-stage":
+		f.handleMagitAction("stage", "")
+	case "cmd:magit-unstage":
+		f.handleMagitAction("unstage", "")
+	case "cmd:magit-stage-all":
+		f.handleMagitAction("stage-all", "")
+	case "cmd:magit-unstage-all":
+		f.handleMagitAction("unstage-all", "")
+	case "cmd:magit-discard":
+		f.handleMagitAction("discard", "")
+	case "cmd:magit-commit-prompt":
+		f.handleMagitAction("commit-prompt", "")
+	case "cmd:magit-amend-prompt":
+		f.handleMagitAction("amend-prompt", "")
+	case "cmd:magit-describe-prompt":
+		f.handleMagitAction("describe-prompt", "")
+	case "cmd:magit-branch-prompt":
+		f.handleMagitAction("branch-prompt", "")
+	case "cmd:magit-branch-create-prompt":
+		f.handleMagitAction("branch-create-prompt", "")
+	case "cmd:magit-branch-delete-prompt":
+		f.handleMagitAction("branch-delete-prompt", "")
+	case "cmd:magit-extend":
+		f.handleMagitAction("extend", "")
+	case "cmd:magit-stash-push":
+		f.handleMagitAction("stash-push", "")
+	case "cmd:magit-stash-pop":
+		f.handleMagitAction("stash-pop", "")
+	case "cmd:magit-stash-apply":
+		f.handleMagitAction("stash-apply", "")
+	case "cmd:magit-stash-drop":
+		f.handleMagitAction("stash-drop", "")
+	case "cmd:magit-fetch-upstream":
+		f.handleMagitAction("fetch-upstream", "")
+	case "cmd:magit-fetch-all":
+		f.handleMagitAction("fetch-all", "")
+	case "cmd:magit-pull":
+		f.handleMagitAction("pull", "")
+	case "cmd:magit-pull-rebase":
+		f.handleMagitAction("pull-rebase", "")
+	case "cmd:magit-push":
+		f.handleMagitAction("push", "")
+	case "cmd:magit-reset-soft":
+		f.handleMagitAction("reset-soft", "")
+	case "cmd:magit-reset-mixed":
+		f.handleMagitAction("reset-mixed", "")
+	case "cmd:magit-cherry-pick-prompt":
+		f.handleMagitAction("cherry-pick-prompt", "")
+	case "cmd:magit-revert-prompt":
+		f.handleMagitAction("revert-prompt", "")
+	case "cmd:magit-jj-new":
+		f.handleMagitAction("jj-new", "")
+	case "cmd:magit-jj-squash":
+		f.handleMagitAction("jj-squash", "")
+	case "cmd:magit-jj-undo":
+		f.handleMagitAction("jj-undo", "")
+	case "cmd:magit-toggle-oplog":
+		f.handleMagitAction("toggle-oplog", "")
+	case "cmd:magit-level-3":
+		f.handleMagitAction("level-3", "")
+	case "cmd:magit-level-4":
+		f.handleMagitAction("level-4", "")
+	case "cmd:magit-ai-audit":
+		f.handleMagitAction("ai-audit", "")
+	case "cmd:magit-ai-triage":
+		f.handleMagitAction("ai-triage", "")
+	case "cmd:magit-ai-commit":
+		f.handleMagitAction("ai-commit", "")
+	case "cmd:magit-ai-split":
+		f.handleMagitAction("ai-split", "")
+	case "cmd:magit-ai-resolve":
+		f.handleMagitAction("ai-resolve", "")
 	case "cmd:win-split-right":
 		f.SplitVertical("")
 	case "cmd:win-split-below":
@@ -765,6 +855,14 @@ func (f *Frame) renderEdgeSidebar(
 			Tone:    th.Accent,
 			Active:  activeBuf == buffer.Conversation && activeFeat == "",
 			OnClick: func() { f.SelectBuffer(buffer.Conversation) },
+		},
+		{
+			ID:      "magit",
+			Icon:    "code",
+			Label:   "Magit (jj + Git · SPC g g)",
+			Tone:    th.Success,
+			Active:  activeBuf == buffer.Magit && activeFeat == "",
+			OnClick: f.OpenMagit,
 		},
 	}
 	for _, fb := range featBufs {

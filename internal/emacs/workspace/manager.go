@@ -192,15 +192,38 @@ func (m *Manager) matchRuleLocked(buf buffer.ID) (PopupRule, bool) {
 }
 
 // CreateWorkspace creates and switches to a fresh isolated workspace with its
-// own independent buffer list and clean popup state.
+// own independent buffer list, its own dedicated *chat:<id>* buffer instance,
+// and clean popup state (never hijacking another workspace's *conversation*).
 func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.nextSeq++
+	cleanRoot := strings.TrimSpace(projectRoot)
 	cleanName := strings.TrimSpace(name)
-	if cleanName == "" {
-		cleanName = fmt.Sprintf("ws-%d", m.nextSeq)
+	if cleanName == "" && cleanRoot != "" {
+		trimmed := strings.TrimRight(cleanRoot, "/")
+		if idx := strings.LastIndex(trimmed, "/"); idx >= 0 && idx+1 < len(trimmed) {
+			cleanName = trimmed[idx+1:]
+		}
 	}
+	if cleanName == "" {
+		// Pick the lowest unused workspace slot (ws-2, ws-3, ...) instead of
+		// jumping to stale persisted sequence numbers like ws-5.
+		for n := 2; ; n++ {
+			cand := fmt.Sprintf("ws-%d", n)
+			taken := false
+			for _, w := range m.workspaces {
+				if w.ID == cand || w.Name == cand {
+					taken = true
+					break
+				}
+			}
+			if !taken {
+				cleanName = cand
+				break
+			}
+		}
+	}
+	m.nextSeq++
 	id := strings.ToLower(strings.ReplaceAll(cleanName, " ", "-"))
 	for _, w := range m.workspaces {
 		if w.ID == id {
@@ -208,18 +231,19 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 			break
 		}
 	}
+	wsChatBuf := buffer.NewChatBufferID(id)
 	ws := Perspective{
 		ID:              id,
 		Name:            cleanName,
-		ProjectRoot:     strings.TrimSpace(projectRoot),
+		ProjectRoot:     cleanRoot,
 		SessionID:       "marlin-" + id,
-		ActiveBuffer:    buffer.Conversation,
+		ActiveBuffer:    buffer.Dashboard,
 		SplitMode:       SplitSingle,
 		SplitRatio:      0.50,
-		WindowTree:      &WindowNode{ID: "w1", Buffer: buffer.Conversation},
+		WindowTree:      &WindowNode{ID: "w1", Buffer: buffer.Dashboard},
 		FocusedWindowID: "w1",
 		NextWindowSeq:   1,
-		Buffers:         []buffer.ID{buffer.Dashboard, buffer.Conversation},
+		Buffers:         []buffer.ID{buffer.Dashboard, wsChatBuf},
 	}
 	m.workspaces = append(m.workspaces, ws)
 	m.activeID = ws.ID

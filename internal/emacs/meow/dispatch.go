@@ -34,6 +34,9 @@ type Handlers struct {
 	OnFocusMinibuffer    func()
 	// OnHydraKey dispatches a keypress to the active Hydra body; returns true if handled.
 	OnHydraKey func(c *ui.Context, scope ui.Element, prefix string) bool
+	// OnBufferKey dispatches major-mode single-key bindings (e.g. *magit* s/u/x/c/d/TAB/1-4/?/g/q)
+	// in Normal mode when no Hydra keypad or text input is active; returns true if handled.
+	OnBufferKey func(c *ui.Context, scope ui.Element) bool
 }
 
 func modalShortcut(c *ui.Context, scope ui.Element, mods ui.Modifiers, key ui.Key) bool {
@@ -220,6 +223,13 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 	switch {
 	case modalShortcut(c, h.Scope, 0, ui.KeySpace):
 		s.SetKeypad("SPC")
+		return
+	}
+	// Major-mode buffer-local keys (e.g. Magit s/S/u/U/x/TAB/1-4/c/d/b/l/r/z/m/?/g/q/v/!).
+	if h.OnBufferKey != nil && h.OnBufferKey(c, h.Scope) {
+		return
+	}
+	switch {
 	case modalShortcut(c, h.Scope, 0, ui.KeyI), modalShortcut(c, h.Scope, 0, ui.KeyA):
 		s.EnterInsert()
 		if h.OnFocusMinibuffer != nil {

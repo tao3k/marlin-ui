@@ -102,10 +102,18 @@ package MarlinEmacsWorkbench {
                        declarative popup window rule engine (set-popup-rule!),
                        mirrored 1:1 with scheme/ui-workspaces/. */
             }
+
+            part <'MUI-EMACS-A12'> emacsModes {
+                doc /* internal/emacs/modes: Emacs-authentic Major Mode inheritance,
+                       orthogonal Minor Modes, Mode Hooks, display-buffer-alist
+                       policies, and modern zero-indirect-buffer Span-driven Polymode
+                       (Host Mode + Inner Modes) runtime mirrored from scheme/ui-modes/. */
+            }
         }
 
         dependency frameUsesTheme from emacsFrame to emacsFrame::emacsTheme;
         dependency frameUsesMeow from emacsFrame to emacsFrame::emacsMeow;
+        dependency frameUsesModes from emacsFrame to emacsFrame::emacsModes;
         dependency frameUsesWidgets from emacsFrame to emacsFrame::emacsWidgets;
         dependency frameUsesWorkspace from emacsFrame to emacsFrame::emacsWorkspace;
         dependency windowUsesWorkspace from emacsFrame::emacsWindow to emacsFrame::emacsWorkspace;

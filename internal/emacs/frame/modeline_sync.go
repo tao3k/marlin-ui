@@ -10,6 +10,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/modeline"
+	"github.com/tao3k/marlin-ui/internal/emacs/modes"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
@@ -115,10 +116,12 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 		}
 	}
 
+	eff := f.EffectiveModeStack(activeBuf)
+
 	preset := modeline.PresetMain
 	if f.miniState.IsCompletionActive() {
 		preset = modeline.PresetHelm
-	} else if activeBuf == buffer.Dashboard || (activeBuf == buffer.Conversation && turns == 0) {
+	} else if eff.HasSegment["dashboard-preset"] || (eff.HostMode == "marlin-chat-mode" && turns == 0) {
 		preset = modeline.PresetDashboard
 	}
 
@@ -131,6 +134,7 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 		wsPath = pr
 	}
 	bufName := string(activeBuf)
+	majorTitle := eff.DisplayTitle
 	if strings.HasPrefix(bufName, "scheme-ext:") {
 		extID := strings.TrimPrefix(bufName, "scheme-ext:")
 		for _, ext := range snap.SchemeExts {
@@ -139,6 +143,7 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 				break
 			}
 		}
+		majorTitle = "Scheme-Ext"
 	}
 	return modeline.Status{
 		Preset:            preset,
@@ -146,21 +151,21 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 		MiniMode:          f.miniState.Mode(),
 		Keypad:            f.meowState.Keypad(),
 		BufferName:        bufName,
-		MajorMode:         majorModeName(activeBuf),
+		MajorMode:         majorTitle,
 		WorkspacePath:     wsPath,
 		RemoteHost:        remoteHost,
 		ActivityLabel:     actLabel,
 		ActivityColor:     actCol,
 		AgentWorking:      agentWorking,
-		HasUnsavedDraft:   activeBuf == buffer.Conversation && strings.TrimSpace(f.convComposerDraft) != "",
+		HasUnsavedDraft:   eff.HasSegment["composer-dock"] && strings.TrimSpace(f.convComposerDraft) != "",
 		DeepThink:         deepThink,
-		ShowDeepThink:     activeBuf == buffer.Conversation,
+		ShowDeepThink:     eff.HasSegment["deep-think"],
 		ModelLabel:        modelLbl,
 		StatusItems:       snap.StatusItems,
 		SessionID:         sessID,
 		RowCount:          turns,
 		HelmTotal:         helmTotal,
-		ShowGateBadge:     activeBuf != buffer.Dashboard,
+		ShowGateBadge:     eff.HasSegment["gate-badge"],
 		OnOpenModels:      func() { f.SelectBuffer(buffer.Models) },
 		OnOpenWorkspaces:  func() { f.OpenHydra("SPC TAB") },
 		OnToggleDeepThink: f.ToggleDeepThink,
@@ -170,27 +175,12 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 }
 
 func majorModeName(id buffer.ID) string {
-	switch id {
-	case buffer.Dashboard:
-		return "Bento-Dashboard"
-	case buffer.Sessions, buffer.Targets, buffer.Processes, buffer.Models:
-		return "Tabulated-List"
-	case buffer.Preview:
-		return "Preview-Mode"
-	case buffer.Help:
-		return "Help"
-	case buffer.Messages:
-		return "Messages"
-	case buffer.Settings:
-		return "Customize"
-	case buffer.Packages:
-		return "Package-Menu"
-	default:
-		if strings.HasPrefix(string(id), "scheme-ext:") {
-			return "Scheme-Ext"
-		}
-		return "Marlin-Chat"
+	reg := modes.DefaultRegistry()
+	st := reg.MakeBufferState(string(id))
+	if strings.HasPrefix(string(id), "scheme-ext:") {
+		return "Scheme-Ext"
 	}
+	return reg.EffectiveStack(st).DisplayTitle
 }
 
 func (f *Frame) newSession() {

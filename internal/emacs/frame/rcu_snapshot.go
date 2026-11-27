@@ -57,6 +57,7 @@ type frameSnapshot struct {
 	MessagesLog     []string
 	LocalTasks      []widgets.TaskItem
 	TomlHydras      map[string]declarativeHydraDef
+	Magit           *buffer.MagitViewState
 }
 
 func (f *Frame) initAsyncRuntime() {
@@ -88,6 +89,7 @@ func (f *Frame) initAsyncRuntime() {
 			f.commitGRPCWorkbenchSnapshot(snap)
 		},
 	)
+	f.initMagitLane()
 }
 
 func (f *Frame) captureSnapshotLocked() frameSnapshot {
@@ -131,6 +133,7 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		MessagesLog:     append([]string(nil), f.messagesLog...),
 		LocalTasks:      append([]widgets.TaskItem(nil), f.localTasks...),
 		TomlHydras:      hydras,
+		Magit:           f.captureMagitViewLocked(),
 	}
 }
 

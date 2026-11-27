@@ -10,6 +10,8 @@
 package buffer
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/control/marketplace"
@@ -29,6 +31,7 @@ type ID string
 const (
 	Dashboard    ID = "*Dashboard*"
 	Conversation ID = "*conversation*"
+	Magit        ID = "*magit*"
 	Sessions     ID = "*Sessions*"
 	Targets      ID = "*Targets*"
 	Processes    ID = "*Processes*"
@@ -39,6 +42,23 @@ const (
 	Packages     ID = "*Packages*"
 	Preview      ID = "*Preview*"
 )
+
+// IsChatBuffer reports whether id is a marlin-chat-mode buffer (*conversation*
+// or any multi-instance LLM conversation buffer *chat:<name>*).
+func IsChatBuffer(id ID) bool {
+	return id == Conversation || strings.HasPrefix(string(id), "*chat:")
+}
+
+// NewChatBufferID constructs a canonical multi-instance LLM chat buffer ID
+// (e.g. "*chat:auth-fix*") governed by `marlin-chat-mode` + `poly-marlin-chat-mode`.
+func NewChatBufferID(name string) ID {
+	clean := strings.TrimSpace(strings.Trim(name, "*"))
+	if clean == "" {
+		return Conversation
+	}
+	clean = strings.TrimPrefix(clean, "chat:")
+	return ID("*chat:" + clean + "*")
+}
 
 // Descriptor describes a registered built-in Emacs buffer for switch-buffer completion.
 type Descriptor struct {
@@ -51,6 +71,7 @@ func Catalog() []Descriptor {
 	return []Descriptor{
 		{ID: Dashboard, Description: "EWW Bento widget desktop dashboard"},
 		{ID: Conversation, Description: "Conversation buffer"},
+		{ID: Magit, Description: "AI-Native Emacs Magit (jj + Git + Aitia code audit)"},
 		{ID: Sessions, Description: "Recorded sessions table"},
 		{ID: Targets, Description: "Federation Rust gRPC targets table"},
 		{ID: Processes, Description: "Managed runtime processes"},
@@ -110,6 +131,7 @@ type Context struct {
 	Customize        *CustomizeState
 	PackageSnap     marketplace.PackageStoreSnapshot
 	PackageFilter   string
+	Magit           *MagitViewState
 
 	OnSelectBuffer      func(ID)
 	OnSetTheme          func(themeID string)
@@ -144,6 +166,7 @@ type Context struct {
 	OnComposerHover     func(hovered bool)
 	OnComposerFocus     func(focused bool)
 	OnToggleComposerPin func()
+	OnMagitAction       func(action, target string)
 }
 
 // Render dispatches rendering to the active buffer's major mode.
@@ -151,6 +174,8 @@ func Render(c *ui.Context, id ID, th theme.Theme, bc *Context) {
 	switch id {
 	case Dashboard:
 		renderDashboard(c, th, bc)
+	case Magit:
+		renderMagit(c, th, bc)
 	case Sessions:
 		renderSessions(c, th, bc)
 	case Targets:

@@ -56,16 +56,15 @@ type Props struct {
 	Glass             bool
 	GlassOpacity      float32
 
-	OnSelectWorkspace func(id string)
-	OnKillWorkspace   func(id string)
-	OnNewWorkspace    func()
-	OnTogglePopup     func()
-	OnSelectBuffer    func(buffer.ID)
-	OnSelectFeature   func(featureBufferID string)
-	OnNewSession      func()
-	OnOpenHelm        func()
-	OnOpenThemes      func()
-	OnOpenSettings    func()
+	OnSelectWorkspace  func(id string)
+	OnKillWorkspace    func(id string)
+	OnTogglePopup      func()
+	OnSelectBuffer     func(buffer.ID)
+	OnSelectFeature    func(featureBufferID string)
+	OnOpenBufferPicker func()
+	OnOpenHelm         func()
+	OnOpenThemes       func()
+	OnOpenSettings     func()
 }
 
 type tabVisualMeta struct {
@@ -137,11 +136,6 @@ func Render(c *ui.Context, p Props) {
 						if theme.ActionLink(c, "wsp-close-"+w.ID, "×", th.InkMuted, th).Clicked() {
 							p.OnKillWorkspace(w.ID)
 						}
-					}
-				}
-				if p.OnNewWorkspace != nil {
-					if theme.ActionLink(c, "wsp-new", "+ws", th.InkMuted, th).Clicked() {
-						p.OnNewWorkspace()
 					}
 				}
 			})
@@ -218,8 +212,10 @@ func Render(c *ui.Context, p Props) {
 			ui.Box(c).Width(4)
 		}
 
-		if theme.ActionLink(c, "ctab-new", "+", th.TabInactiveFg, th).Clicked() && p.OnNewSession != nil {
-			p.OnNewSession()
+		if p.OnOpenBufferPicker != nil {
+			if theme.ActionLink(c, "ctab-new", "+", th.TabInactiveFg, th).Clicked() {
+				p.OnOpenBufferPicker()
+			}
 		}
 	})
 }

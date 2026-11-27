@@ -29,6 +29,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/meow"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/modes"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
@@ -131,6 +132,9 @@ type Frame struct {
 
 	meowState      *meow.State
 	miniState      *minibuffer.State
+	modeReg        *modes.Registry
+	bufModes       map[buffer.ID]modes.BufferState
+	chatSeq        int
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
 	thinkingMu          sync.RWMutex
@@ -153,6 +157,18 @@ type Frame struct {
 	packageFilter  string
 	mountedPlugins []marketplace.ManagedPackage
 	activePluginID string
+
+	magitSnap        hostlink.MagitSnapshot
+	magitLoading     bool
+	magitErr         string
+	magitCursor      int
+	magitVisLevel    int
+	magitFolded      map[string]bool
+	magitAuditMap    map[string]string
+	magitPromptKind  string
+	magitPromptLabel string
+	magitRefreshLane *async.FencedLane[struct{}, hostlink.MagitSnapshot]
+	magitExecLane    *async.FencedLane[string, string]
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)
@@ -265,15 +281,20 @@ func (f *Frame) ApplyWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 	f.commitGRPCWorkbenchSnapshot(snap)
 }
 
-// rebuildEffectiveHydrasLocked composes the 4-tier Doom keymap hierarchy:
-//  1. Static Scheme Base (`scheme/ui-meow/key-bindings.ss` canonical mirror)
-//  2. Live Scheme gRPC (`marlin.ui.v1` `snap.Keymap` + `snap.Transients`)
-//  3. Desktop-Special Extension (`defaults/keymaps.toml`)
-//  4. Downstream User Overlay (`~/.config/marlin/ui/keymaps.toml`)
+// rebuildEffectiveHydrasLocked composes the 3-tier Doom/Emacs keymap hierarchy:
+//  1. Authoritative Scheme gRPC (`marlin.ui.v1` `snap.Keymap` + `snap.Transients`
+//     from `scheme/ui-meow` & `scheme/ui-magit`), falling back to `loadSchemeBaseKeymaps()`
+//     only when running standalone without a live Rust authority host.
+//  2. Desktop-Special Extension (`defaults/keymaps.toml`) — strictly Desktop-only
+//     GUI toggles (Liquid Glass, Motion, Settings, Packages), never duplicating Scheme.
+//  3. Downstream User Override (`~/.config/marlin/ui/keymaps.toml`) — overrides or
+//     extends any Scheme or Desktop key, keypad, or transient.
 func (f *Frame) rebuildEffectiveHydrasLocked() {
-	eff := loadSchemeBaseKeymaps()
+	var eff map[string]declarativeHydraDef
 	if len(f.liveSchemeHydras) > 0 {
-		eff = mergeHydraOverlay(eff, f.liveSchemeHydras)
+		eff = mergeHydraOverlay(loadSchemeBaseKeymaps(), f.liveSchemeHydras)
+	} else {
+		eff = loadSchemeBaseKeymaps()
 	}
 	if len(f.desktopTOMLOverlay) > 0 {
 		eff = mergeHydraOverlay(eff, f.desktopTOMLOverlay)

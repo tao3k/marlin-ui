@@ -46,10 +46,10 @@ func TestCentaurTabsWindowBadgesBusyDraftAndGroupOverflow(t *testing.T) {
 			PopupLabel:      "*Messages*",
 			PopupVisible:    false,
 			Theme:           theme.DoomOne(),
-			OnSelectBuffer:  func(id buffer.ID) { selectedBuf = id },
-			OnSelectFeature: func(id string) { selectedFeat = id },
-			OnTogglePopup:   func() {},
-			OnNewSession:    func() {},
+			OnSelectBuffer:     func(id buffer.ID) { selectedBuf = id },
+			OnSelectFeature:    func(id string) { selectedFeat = id },
+			OnTogglePopup:      func() {},
+			OnOpenBufferPicker: func() {},
 		})
 	}
 

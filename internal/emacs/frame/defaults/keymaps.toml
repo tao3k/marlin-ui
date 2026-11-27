@@ -4,17 +4,20 @@
 
 # Desktop-Special Extension Overlay for Marlin UI keymaps.
 #
-# Layering order (downstream users may override or extend any key in
-# ~/.config/marlin/ui/keymaps.toml and hot-reload with SPC t r):
-#   1. Authoritative Doom Emacs Base (`scheme/ui-meow/key-bindings.ss`):
-#      SPC, SPC b, SPC w (splits / winum 1..9 / winner-mode / dedicated),
-#      SPC TAB (persp-mode workspaces), SPC ~ (popup toggle).
-#   2. Desktop-Special Extensions (this file):
-#      Liquid Glass / Motion / Zen / Theme packs (SPC t), Packages (SPC p),
-#      Settings (SPC ,), Marlin Session (SPC m), Desktop buffer shortcuts (SPC b),
-#      and legacy SPC l alias for +workspaces.
-#   3. User Overlay (`~/.config/marlin/ui/keymaps.toml`):
-#      Per-(prefix, key) merge — overrides matching keys and appends new ones.
+# IMPORTANT — Single Source of Truth Architecture:
+#   1. Authoritative Scheme Keymaps & Transients (`marlin.ui.v1` gRPC):
+#      `scheme/ui-meow/key-bindings.ss` and `scheme/ui-magit/objects.ss` own ALL
+#      Doom `SPC` leader maps, `SPC g` (+git / Magit), all 14 `magit:*` transients,
+#      and canonical native Emacs chords (`C-x g`, `C-x M-g`, `C-c g`, `C-c M-g`,
+#      `C-x 0..3/o/b/p/t/w/z`, `C-c u/U`, `C-h r/?`). They are streamed live over
+#      gRPC (`UiWorkbenchSnapshot.{keymap, transients}`) — NEVER duplicate them here.
+#   2. Desktop-Special Extensions (this file ONLY):
+#      Desktop-only GUI surfaces that Scheme/TUI does not own: Liquid Glass / Motion /
+#      Theme packs (`SPC t`), Packages (`SPC p`), Settings (`SPC ,`), Marlin Desktop
+#      session (`SPC m`), Desktop buffer shortcuts (`SPC b`), and legacy `SPC l` alias.
+#   3. Downstream User Override (`~/.config/marlin/ui/keymaps.toml`):
+#      Users may override or extend ANY Scheme or Desktop key, keypad, or transient
+#      and hot-reload live with `SPC t r` / `M-x reload-theme`.
 
 [[heads]]
 prefix = "SPC"
@@ -80,6 +83,14 @@ label = "*conversation*"
 column = "Buffers"
 exit = "true"
 action = "buffer:*conversation*"
+
+[[heads]]
+prefix = "SPC b"
+key = "g"
+label = "*magit* (AI Magit)"
+column = "Buffers"
+exit = "true"
+action = "cmd:magit-status"
 
 [[heads]]
 prefix = "SPC b"

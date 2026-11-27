@@ -94,9 +94,11 @@ var allowedEmacsInternalDeps = map[string]map[string]bool{
 	"internal/emacs/workspace": {
 		"internal/emacs/buffer": true,
 	},
+	"internal/emacs/modes": {},
 	"internal/emacs/frame": {
 		"internal/emacs/theme":      true,
 		"internal/emacs/meow":       true,
+		"internal/emacs/modes":      true,
 		"internal/emacs/hydra":      true,
 		"internal/emacs/tabs":       true,
 		"internal/emacs/window":     true,

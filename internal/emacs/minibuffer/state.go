@@ -31,6 +31,7 @@ const (
 	ModeThemeSwitch
 	ModeGateReview
 	ModeWorkspaceCreate
+	ModeMagitPrompt
 )
 
 // Candidate represents one Vertico / Marginalia completion candidate.

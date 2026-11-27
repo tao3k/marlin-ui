@@ -38,15 +38,16 @@ var schemePrefixMeta = map[string]struct {
 }{
 	"SPC":     {id: "leader", label: "Leader", title: "Doom Leader / Hydra"},
 	"SPC b":   {id: "buffers", label: "+buffers", title: "+buffers"},
+	"SPC g":   {id: "git-magit", label: "+git / Magit", title: "+git / Magit (Doom Emacs · jj + git + Aitia)"},
 	"SPC w":   {id: "windows", label: "+windows", title: "+windows (Doom / winum / winner-mode)"},
 	"SPC TAB": {id: "workspaces", label: "+workspaces", title: "+workspaces (Doom persp-mode)"},
 	"SPC t":   {id: "themes", label: "+themes", title: "+themes & toggles"},
 	"SPC m":   {id: "session", label: "+marlin", title: "+marlin session"},
 	"SPC q":   {id: "quit", label: "+quit", title: "+quit / session"},
-	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · tabs · zen)"},
+	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · Magit · tabs · zen)"},
 	"C-x t":   {id: "emacs-ctl-x-t", label: "+tab-bar", title: "Emacs C-x t (+workspaces / tab-bar)"},
 	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state)"},
-	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · mode)"},
+	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit)"},
 	"C-h":     {id: "emacs-ctl-h", label: "C-h", title: "Emacs C-h (help)"},
 }
 
@@ -126,6 +127,86 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:zen-fullscreen", "Toggle Zen Fullscreen", false
 	case "quit", "save-buffers-kill-terminal":
 		return "cmd:quit", "Exit Marlin", false
+	case "magit-status":
+		return "cmd:magit-status", "Magit status (*magit*)", false
+	case "magit-dispatch":
+		return "hydra:magit:?", "Magit dispatch (?)", false
+	case "magit-file-dispatch":
+		return "hydra:magit:d", "Magit diff & Aitia audit", false
+	case "magit-refresh":
+		return "cmd:magit-refresh", "Refresh & Aitia re-audit", false
+	case "magit-stage":
+		return "cmd:magit-stage", "Stage file or hunk", false
+	case "magit-unstage":
+		return "cmd:magit-unstage", "Unstage file or hunk", false
+	case "magit-ai-audit":
+		return "cmd:magit-ai-audit", "AI Code Audit (50/50 split)", false
+	case "magit-ai-triage":
+		return "cmd:magit-ai-triage", "AI Full Evidence-Chain Triage", false
+	case "magit-ai-commit":
+		return "cmd:magit-ai-commit", "AI Commit Draft (Aitia trailer)", false
+	case "magit-ai-split":
+		return "cmd:magit-ai-split", "AI Semantic Split Proposal", false
+	case "magit-ai-resolve":
+		return "cmd:magit-ai-resolve", "AI 3-Way Conflict Resolution", false
+	case "magit-commit-prompt":
+		return "cmd:magit-commit-prompt", "Commit staged", false
+	case "magit-amend-prompt":
+		return "cmd:magit-amend-prompt", "Amend HEAD", false
+	case "magit-extend":
+		return "cmd:magit-extend", "Extend HEAD (no edit)", false
+	case "magit-describe-prompt":
+		return "cmd:magit-describe-prompt", "Reword / jj describe (@)", false
+	case "magit-jj-new":
+		return "cmd:magit-jj-new", "jj new (next change)", false
+	case "magit-jj-squash":
+		return "cmd:magit-jj-squash", "jj squash into parent", false
+	case "magit-jj-undo":
+		return "cmd:magit-jj-undo", "jj undo (revert last op)", false
+	case "magit-toggle-oplog":
+		return "cmd:magit-toggle-oplog", "Toggle jj Operation Log", false
+	case "magit-level-3":
+		return "cmd:magit-level-3", "Hunks summary (Level 3)", false
+	case "magit-level-4":
+		return "cmd:magit-level-4", "Expand full diff (Level 4)", false
+	case "magit-branch-prompt":
+		return "cmd:magit-branch-prompt", "Checkout branch", false
+	case "magit-branch-create-prompt":
+		return "cmd:magit-branch-create-prompt", "Create & checkout branch", false
+	case "magit-branch-delete-prompt":
+		return "cmd:magit-branch-delete-prompt", "Delete branch", false
+	case "magit-fetch-upstream":
+		return "cmd:magit-fetch-upstream", "Fetch from upstream", false
+	case "magit-fetch-all":
+		return "cmd:magit-fetch-all", "Fetch all remotes", false
+	case "magit-pull":
+		return "cmd:magit-pull", "Pull from upstream", false
+	case "magit-pull-rebase":
+		return "cmd:magit-pull-rebase", "Pull --rebase", false
+	case "magit-push":
+		return "cmd:magit-push", "Push to upstream", false
+	case "magit-stash-push":
+		return "cmd:magit-stash-push", "Stash both (index + worktree)", false
+	case "magit-stash-pop":
+		return "cmd:magit-stash-pop", "Pop latest stash", false
+	case "magit-stash-apply":
+		return "cmd:magit-stash-apply", "Apply latest stash", false
+	case "magit-stash-drop":
+		return "cmd:magit-stash-drop", "Drop latest stash", false
+	case "magit-reset-soft":
+		return "cmd:magit-reset-soft", "Soft reset HEAD~1 (keep staged)", false
+	case "magit-reset-mixed":
+		return "cmd:magit-reset-mixed", "Mixed reset HEAD~1 (unstage)", false
+	case "magit-cherry-pick-prompt":
+		return "cmd:magit-cherry-pick-prompt", "Cherry-pick revision...", false
+	case "magit-revert-prompt":
+		return "cmd:magit-revert-prompt", "Revert revision...", false
+	}
+	if strings.HasPrefix(cmd, "hydra:") {
+		return cmd, strings.TrimPrefix(cmd, "hydra:"), false
+	}
+	if strings.HasPrefix(cmd, "cmd:") {
+		return cmd, strings.TrimPrefix(cmd, "cmd:"), false
 	}
 	if strings.HasPrefix(cmd, "winum-select-window-") {
 		n := strings.TrimPrefix(cmd, "winum-select-window-")
@@ -219,26 +300,36 @@ func ProjectKeymapAndTransients(
 		leafPref := strings.Join(kb.Sequence[:len(kb.Sequence)-1], " ")
 		leafKey := kb.Sequence[len(kb.Sequence)-1]
 		col := inferColumn(leafPref, leafKey, cmd)
+		isPref := strings.HasPrefix(action, "hydra:")
 		upsertHead(leafPref, MappedHead{
-			Key:    leafKey,
-			Label:  label,
-			Column: col,
-			Exit:   !repeatable,
-			Action: action,
+			Key:      leafKey,
+			Label:    label,
+			Column:   col,
+			Exit:     !repeatable && !isPref,
+			IsPrefix: isPref,
+			Action:   action,
 		})
 	}
 
-	// Project explicit Scheme Hydra transient bodies (`scheme/ui-hydra`).
+	// Project explicit Scheme Hydra / Magit transient bodies (`scheme/ui-hydra`, `scheme/ui-magit`).
 	for _, tr := range transients {
 		if strings.TrimSpace(tr.ID) == "" || len(tr.Heads) == 0 {
 			continue
 		}
 		pref := "hydra:" + tr.ID
+		if strings.Contains(tr.ID, ":") {
+			pref = tr.ID
+		}
+		hintTxt := extractHintText(tr.Hint)
+		title := fmt.Sprintf("Hydra · %s", tr.ID)
+		if hintTxt != "" {
+			title = hintTxt
+		}
 		h := MappedHydra{
 			ID:     tr.ID,
 			Prefix: pref,
-			Title:  fmt.Sprintf("Hydra · %s", tr.ID),
-			Hint:   extractHintText(tr.Hint),
+			Title:  title,
+			Hint:   hintTxt,
 		}
 		for _, th := range tr.Heads {
 			action, defLbl, _ := ResolveSchemeAction(th.CommandName)
@@ -252,12 +343,14 @@ func ProjectKeymapAndTransients(
 					lbl = "Quit"
 				}
 			}
+			isPref := strings.HasPrefix(action, "hydra:")
 			h.Heads = append(h.Heads, MappedHead{
-				Key:    th.Key,
-				Label:  lbl,
-				Column: "Hydra",
-				Exit:   th.Exit || action == "",
-				Action: action,
+				Key:      th.Key,
+				Label:    lbl,
+				Column:   "Transient",
+				Exit:     (th.Exit || action == "") && !isPref,
+				IsPrefix: isPref,
+				Action:   action,
 			})
 		}
 		out[pref] = h

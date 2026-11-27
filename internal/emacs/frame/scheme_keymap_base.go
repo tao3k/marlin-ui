@@ -119,6 +119,8 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 				{Key: "+", KeyCode: ui.KeyEqual, KeyMods: ui.Shift, Label: "Balance windows", Column: "Windows", Exit: true, Action: "cmd:win-balance"},
 				{Key: "b", KeyCode: ui.KeyB, Label: "Switch buffer", Column: "Buffers", Exit: true, Action: "cmd:switch-buffer"},
 				{Key: "p", KeyCode: ui.KeyP, Label: "Toggle popup drawer", Column: "Buffers", Exit: true, Action: "cmd:popup-toggle"},
+				{Key: "g", KeyCode: ui.KeyG, Label: "Magit status (*magit*)", Column: "Magit", Exit: true, Action: "cmd:magit-status"},
+				{Key: "M-g", KeyCode: ui.KeyG, KeyMods: ui.Alt, Label: "Magit dispatch (?)", Column: "Magit", IsPrefix: true, Action: "hydra:magit:?"},
 				{Key: "w", KeyCode: ui.KeyW, Label: "+window-state", Column: "Emacs", IsPrefix: true, Action: "hydra:C-x w"},
 				{Key: "t", KeyCode: ui.KeyT, Label: "+tab-bar workspaces", Column: "Emacs", IsPrefix: true, Action: "hydra:C-x t"},
 				{Key: "z", KeyCode: ui.KeyZ, Label: "Toggle Zen Writeroom", Column: "Emacs", Exit: true, Action: "cmd:zen-mode"},
@@ -148,10 +150,12 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 		"C-c": {
 			ID:     "emacs-ctl-c",
 			Prefix: "C-c",
-			Title:  "Emacs C-c (winner-mode)",
+			Title:  "Emacs C-c (winner-mode · Magit AI audit)",
 			Heads: []declarativeHeadDef{
 				{Key: "u", KeyCode: ui.KeyU, Label: "Winner undo layout", Column: "Emacs", Exit: true, Action: "cmd:win-undo"},
 				{Key: "U", KeyCode: ui.KeyU, KeyMods: ui.Shift, Label: "Winner redo layout", Column: "Emacs", Exit: true, Action: "cmd:win-redo"},
+				{Key: "g", KeyCode: ui.KeyG, Label: "Magit AI Code Audit (50/50 split)", Column: "Magit", Exit: true, Action: "cmd:magit-ai-audit"},
+				{Key: "M-g", KeyCode: ui.KeyG, KeyMods: ui.Alt, Label: "Magit diff & Aitia audit", Column: "Magit", IsPrefix: true, Action: "hydra:magit:d"},
 			},
 		},
 		"C-h": {

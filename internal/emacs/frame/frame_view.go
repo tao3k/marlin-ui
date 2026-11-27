@@ -171,7 +171,8 @@ func (f *Frame) View(c *ui.Context) {
 		}
 	}
 
-	isDashboard := activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
+	activeMode := f.EffectiveModeStack(activeBuf)
+	isDashboard := activeMode.HostMode == "marlin-dashboard-mode" && activeFeat == "" && activeExt == nil && activePlugin == nil
 	overlayActive := f.miniState.IsCompletionActive() || f.meowState.Keypad() != ""
 	if f.pacer != nil {
 		f.pacer.SetLiveClockVisible(isDashboard && mods.Motion && !overlayActive)
@@ -210,6 +211,7 @@ func (f *Frame) View(c *ui.Context) {
 		Customize:           f.customize,
 		PackageSnap:         f.packageSnapshot(),
 		PackageFilter:       snap.PackageFilter,
+		Magit:               snap.Magit,
 		OnSelectBuffer:      f.SelectBuffer,
 		OnSetTheme:          f.SetTheme,
 		OnReloadThemes:      f.ReloadThemesAsync,
@@ -253,6 +255,7 @@ func (f *Frame) View(c *ui.Context) {
 		OnCiteInComposer:    f.CiteInComposer,
 		OnOpenFilePreview:   f.OpenFilePreview,
 		OnToggleComposerPin: f.ToggleComposerOpen,
+		OnMagitAction:       f.handleMagitAction,
 	}
 
 	winCount := snap.Workspaces.Active.WindowCount()
@@ -350,36 +353,43 @@ func (f *Frame) View(c *ui.Context) {
 			}
 			var busyBufs map[buffer.ID]bool
 			if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.Transcript != nil && f.Adaptive.Desktop.Transcript.InFlight() {
-				busyBufs = map[buffer.ID]bool{buffer.Conversation: true}
+				chatKey := buffer.Conversation
+				if buffer.IsChatBuffer(activeBuf) {
+					chatKey = activeBuf
+				}
+				busyBufs = map[buffer.ID]bool{chatKey: true}
 			}
 			var draftBufs map[buffer.ID]bool
 			if strings.TrimSpace(f.convComposerDraft) != "" {
-				draftBufs = map[buffer.ID]bool{buffer.Conversation: true}
+				chatKey := buffer.Conversation
+				if buffer.IsChatBuffer(activeBuf) {
+					chatKey = activeBuf
+				}
+				draftBufs = map[buffer.ID]bool{chatKey: true}
 			}
 			tabs.Render(c, tabs.Props{
-				Workspaces:        f.buildWorkspaceTabs(snap.Workspaces),
-				OpenTabs:          openTabs,
-				ActiveBuffer:      activeBuf,
-				ActiveFeatureID:   activeTabKey,
-				FeatureBuffers:    featBufs,
-				WindowBadges:      winBadges,
-				BusyBuffers:       busyBufs,
-				DraftBuffers:      draftBufs,
-				PopupLabel:        popLbl,
-				PopupVisible:      snap.Workspaces.Active.PopupVisible,
-				Theme:             th,
-				Glass:             mods.Glass,
-				GlassOpacity:      chromeOp,
-				OnSelectWorkspace: func(id string) { f.SwitchWorkspace(id) },
-				OnKillWorkspace:   func(id string) { f.KillWorkspaceByID(id) },
-				OnNewWorkspace:    func() { f.CreateWorkspace("", "") },
-				OnTogglePopup:     f.TogglePopup,
-				OnSelectBuffer:    f.SelectBuffer,
-				OnSelectFeature:   f.SelectFeature,
-				OnNewSession:      f.newSession,
-				OnOpenHelm:        f.OpenHelm,
-				OnOpenThemes:      f.OpenThemeSwitch,
-				OnOpenSettings:    f.OpenSettings,
+				Workspaces:         f.buildWorkspaceTabs(snap.Workspaces),
+				OpenTabs:           openTabs,
+				ActiveBuffer:       activeBuf,
+				ActiveFeatureID:    activeTabKey,
+				FeatureBuffers:     featBufs,
+				WindowBadges:       winBadges,
+				BusyBuffers:        busyBufs,
+				DraftBuffers:       draftBufs,
+				PopupLabel:         popLbl,
+				PopupVisible:       snap.Workspaces.Active.PopupVisible,
+				Theme:              th,
+				Glass:              mods.Glass,
+				GlassOpacity:       chromeOp,
+				OnSelectWorkspace:  func(id string) { f.SwitchWorkspace(id) },
+				OnKillWorkspace:    func(id string) { f.KillWorkspaceByID(id) },
+				OnTogglePopup:      f.TogglePopup,
+				OnSelectBuffer:     f.SelectBuffer,
+				OnSelectFeature:    f.SelectFeature,
+				OnOpenBufferPicker: f.OpenBufferSwitch,
+				OnOpenHelm:         f.OpenHelm,
+				OnOpenThemes:       f.OpenThemeSwitch,
+				OnOpenSettings:     f.OpenSettings,
 			})
 		} else if tb := c.TitleBar(); tb.Height > 0 {
 			ui.Row(c.Key("zen-titlebar-drag")).Height(tb.Height).Background(ui.Transparent).DragWindow()
@@ -402,7 +412,8 @@ func (f *Frame) View(c *ui.Context) {
 				}
 			}
 			_, activePlugin = f.appendMountedPluginTabs(snap, nil)
-			isDashboard = activeBuf == buffer.Dashboard && activeFeat == "" && activeExt == nil && activePlugin == nil
+			activeMode = f.EffectiveModeStack(activeBuf)
+			isDashboard = activeMode.HostMode == "marlin-dashboard-mode" && activeFeat == "" && activeExt == nil && activePlugin == nil
 			if f.pacer != nil {
 				f.pacer.SetLiveClockVisible(isDashboard && mods.Motion && !overlayActive)
 			}
@@ -481,9 +492,11 @@ func (f *Frame) View(c *ui.Context) {
 				CommandCandidates: f.commandCandidates,
 				BufferCandidates:  f.bufferCandidates,
 				ThemeCandidates:   f.themeCandidates,
-				OnSubmitPrompt:    f.submitPrompt,
-				OnCreateWorkspace: f.CreateWorkspaceFromSpec,
-				OnHelmPreview:     f.OpenFilePreview,
+				OnSubmitPrompt:      f.submitPrompt,
+				OnCreateWorkspace:   f.CreateWorkspaceFromSpec,
+				MagitPromptLabel:    f.currentMagitPromptLabel(),
+				OnSubmitMagitPrompt: f.submitMagitPrompt,
+				OnHelmPreview:       f.OpenFilePreview,
 				OnHelmCite:        f.CiteInComposer,
 				OnEnterInsert:     f.EnterInsert,
 				OnExitHydra:       func() { f.meowState.ClearKeypad(); f.requestRefocusFrame(); f.invalidate() },
@@ -499,7 +512,7 @@ func (f *Frame) View(c *ui.Context) {
 		// Transparent hanging-pendant Marlin water overlay straddling the entire
 		// ModeLine bar and overhanging slightly below its bottom lip (hidden
 		// whenever Helm / M-x / Hydra completion drawers are active).
-		if showChrome && !overlayActive && activeBuf == buffer.Conversation && activeFeat == "" && activeExt == nil && activePlugin == nil {
+		if showChrome && !overlayActive && activeMode.HasSegment["composer-dock"] && activeFeat == "" && activeExt == nil && activePlugin == nil {
 			bottomOffset := float32(0)
 			if showMini {
 				bottomOffset = theme.MinibufferHeight - theme.MarlinOceanOverhang
@@ -637,5 +650,6 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 			}
 			return true
 		},
+		OnBufferKey: f.dispatchBufferModeKey,
 	})
 }

@@ -36,9 +36,11 @@ type RenderProps struct {
 	CommandCandidates func(query string) []Candidate
 	BufferCandidates  func(query string) []Candidate
 	ThemeCandidates   func(query string) []Candidate
-	OnSubmitPrompt    func(prompt string)
-	OnCreateWorkspace func(spec string)
-	OnHelmPreview     func(title, path, snippet string, line int)
+	OnSubmitPrompt      func(prompt string)
+	OnCreateWorkspace   func(spec string)
+	MagitPromptLabel    string
+	OnSubmitMagitPrompt func(text string)
+	OnHelmPreview       func(title, path, snippet string, line int)
 	OnHelmCite        func(ref string)
 	OnEnterInsert     func()
 	OnExitHydra       func()
@@ -149,6 +151,12 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeWorkspaceCreate:
 			prompt = "New workspace: "
 			placeholder = "name or name @/path/to/project (Enter to create)"
+		case ModeMagitPrompt:
+			prompt = p.MagitPromptLabel
+			if strings.TrimSpace(prompt) == "" {
+				prompt = "Magit: "
+			}
+			placeholder = "Enter message or branch name (Enter to execute, Esc to cancel)"
 		default:
 			if p.KeyMode == meow.ModeInsert {
 				placeholder = "Type message and press Enter..."
@@ -242,6 +250,11 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 		s.Close()
 		if p.OnCreateWorkspace != nil {
 			p.OnCreateWorkspace(trimmed)
+		}
+	case ModeMagitPrompt:
+		s.Close()
+		if trimmed != "" && p.OnSubmitMagitPrompt != nil {
+			p.OnSubmitMagitPrompt(trimmed)
 		}
 	default:
 		s.mu.Lock()

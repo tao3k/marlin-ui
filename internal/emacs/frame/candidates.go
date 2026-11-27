@@ -185,14 +185,17 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 	}
 
 	var inWS, popups, other []minibuffer.Candidate
+	seenBuf := make(map[buffer.ID]bool, len(cat)+len(wsBufs))
 	for _, b := range cat {
 		bid := b.ID
+		seenBuf[bid] = true
 		desc := b.Description
+		modeTitle := f.EffectiveModeStack(bid).DisplayTitle
 		if wsBufs[bid] {
 			inWS = append(inWS, minibuffer.Candidate{
 				ID:         string(bid),
 				Name:       string(bid),
-				Desc:       "[" + wsName + "] " + desc,
+				Desc:       "[" + wsName + " · " + modeTitle + "] " + desc,
 				Annotation: winBadge(bid),
 				Run:        func() { f.SelectBuffer(bid) },
 			})
@@ -203,7 +206,7 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 				popups = append(popups, minibuffer.Candidate{
 					ID:         string(bid),
 					Name:       string(bid),
-					Desc:       "[popup:" + string(rule.Side) + "] " + desc,
+					Desc:       "[popup:" + string(rule.Side) + " · " + modeTitle + "] " + desc,
 					Annotation: "C-x p",
 					Run:        func() { f.SelectBuffer(bid) },
 				})
@@ -213,9 +216,58 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 		other = append(other, minibuffer.Candidate{
 			ID:         string(bid),
 			Name:       string(bid),
-			Desc:       "[all] " + desc,
+			Desc:       "[" + modeTitle + "] " + desc,
 			Annotation: winBadge(bid),
 			Run:        func() { f.SelectBuffer(bid) },
+		})
+	}
+	// Include dynamic multi-instance buffers open in the active workspace (e.g. *chat:auth-fix*).
+	for bid := range wsBufs {
+		if seenBuf[bid] || strings.HasPrefix(string(bid), "feature:") || strings.HasPrefix(string(bid), uiframework.SchemeExtBufferPrefix) {
+			continue
+		}
+		id := bid
+		modeTitle := f.EffectiveModeStack(id).DisplayTitle
+		inWS = append(inWS, minibuffer.Candidate{
+			ID:         string(id),
+			Name:       string(id),
+			Desc:       "[" + wsName + " · " + modeTitle + "] Active buffer instance",
+			Annotation: winBadge(id),
+			Run:        func() { f.SelectBuffer(id) },
+		})
+	}
+
+	// Mode-driven buffer & window creation actions (powers Tab Bar "+" & SPC b b).
+	createCands := []minibuffer.Candidate{
+		{
+			ID:         "action:new-chat-buffer",
+			Name:       "+ New LLM Chat (*chat:*)",
+			Desc:       "[Marlin-Chat · Polymode] Open a fresh multi-instance LLM conversation buffer",
+			Annotation: "C-c C-n",
+			Run:        func() { f.NewChatBuffer("") },
+		},
+		{
+			ID:         "action:clone-window",
+			Name:       "+ Split / Clone Current Window",
+			Desc:       "[Emacs Window] Create a linked sibling window viewing the current buffer",
+			Annotation: "C-x 3 · SPC w v",
+			Run:        func() { f.CloneCurrentWindow() },
+		},
+	}
+	for _, rule := range f.ModeRegistry().CreatableBufferRules() {
+		if rule.CreateAction == "" || rule.CreateAction == "cmd:new-chat-buffer" {
+			continue
+		}
+		act := rule.CreateAction
+		lbl := rule.CreateLabel
+		if lbl == "" {
+			lbl = rule.Prefix
+		}
+		createCands = append(createCands, minibuffer.Candidate{
+			ID:   "create:" + rule.Prefix,
+			Name: "+ " + lbl,
+			Desc: "[" + rule.MajorMode + "] Open or switch in current window",
+			Run:  func() { f.dispatchWidgetAction(act) },
 		})
 	}
 
@@ -244,9 +296,10 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 		})
 	}
 
-	all := make([]minibuffer.Candidate, 0, len(cat)+len(extCands))
+	all := make([]minibuffer.Candidate, 0, len(cat)+len(extCands)+len(createCands))
 	all = append(all, inWS...)
 	all = append(all, extCands...)
+	all = append(all, createCands...)
 	all = append(all, popups...)
 	all = append(all, other...)
 	return minibuffer.FilterCandidates(all, query)
