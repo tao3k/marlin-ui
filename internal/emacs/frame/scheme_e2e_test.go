@@ -5,6 +5,8 @@
 package frame_test
 
 import (
+	"bytes"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/frame"
 	"github.com/tao3k/marlin-ui/internal/emacs/meow"
+	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/shellmanifest"
 )
 
@@ -445,5 +448,128 @@ func TestMarginaliaAnnotationsHydraCrossHintsAndCentaurBadges(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("· Review pending diff hunks") {
 		t.Fatalf("expected Hydra popup header to render Scheme UITransient.Hint, got %q", strings.Join(tt.Texts(), " | "))
+	}
+}
+
+func TestMarlinModelineDockHoverRevealAndAppIcons(t *testing.T) {
+	// 1. Verify macOS Dock squircle app icon & Menu Bar Marlin silhouette PNGs.
+	appPNG := theme.MarlinAppIconPNG()
+	img, err := png.Decode(bytes.NewReader(appPNG))
+	if err != nil {
+		t.Fatalf("MarlinAppIconPNG decode failed: %v", err)
+	}
+	if img.Bounds().Dx() != 256 || img.Bounds().Dy() != 256 {
+		t.Fatalf("expected 256x256 squircle app icon, got %v", img.Bounds())
+	}
+	if _, _, _, a := img.At(0, 0).RGBA(); a != 0 {
+		t.Fatalf("expected transparent HIG outer corner on squircle app icon, got alpha=%d", a)
+	}
+	if _, _, _, a := img.At(128, 128).RGBA(); a == 0 {
+		t.Fatalf("expected opaque center emblem on squircle app icon")
+	}
+	trayPNG := theme.MarlinTrayIconPNG()
+	trayImg, err := png.Decode(bytes.NewReader(trayPNG))
+	if err != nil {
+		t.Fatalf("MarlinTrayIconPNG decode failed: %v", err)
+	}
+	if trayImg.Bounds().Dx() != 44 || trayImg.Bounds().Dy() != 44 {
+		t.Fatalf("expected 44x44 Retina Marlin tray icon, got %v", trayImg.Bounds())
+	}
+
+	// 2. On *conversation*, formal ChatBox is hidden by default into the ModeLine Marlin dock.
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	sh.Desktop.Transcript.AppendUser("Keep chat clean")
+
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-marlin-dock"},
+	})
+	defer fr.Close()
+	fr.SelectBuffer(buffer.Conversation)
+
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	if tt.HasText("Deep Think") {
+		t.Fatalf("expected formal ChatBox collapsed into ModeLine Marlin dock by default, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 3. Hovering over the ModeLine-top Marlin crest surfaces 85-90% of the
+	//    colorful Marlin with ~1.0s breach + splash animation without popping ChatBox.
+	dockRect, ok := tt.Find("Marlin ChatBox")
+	if !ok {
+		t.Fatalf("expected ModeLine-top Marlin ChatBox crest button to be rendered")
+	}
+	if dockRect.W < 180 || dockRect.H < 48 {
+		t.Fatalf("expected generous Marlin ocean crest above ModeLine (not squished inside 26px bar), got %.0fx%.0f", dockRect.W, dockRect.H)
+	}
+	tt.Move(dockRect.X+dockRect.W/2, dockRect.Y+dockRect.H/2)
+	tt.Frame()
+	if !fr.ComposerDockHovered() || fr.ComposerOpen() || tt.HasText("Deep Think") {
+		t.Fatalf("expected hover to animate Marlin surfacing without auto-opening ChatBox, hovered=%v open=%v",
+			fr.ComposerDockHovered(), fr.ComposerOpen())
+	}
+
+	// 4. Clicking the ModeLine Marlin fish triggers dash+splash feedback and opens formal ChatBox!
+	if err := tt.Click("Marlin ChatBox"); err != nil {
+		t.Fatalf("expected ModeLine Marlin dock clickable: %v", err)
+	}
+	tt.Frame()
+	if !fr.ComposerOpen() || !tt.HasText("Deep Think") || !tt.HasText("Hide") {
+		t.Fatalf("expected clicking ModeLine Marlin dock to open formal ChatBox, open=%v texts=%q",
+			fr.ComposerOpen(), strings.Join(tt.Texts(), " | "))
+	}
+	if openDockRect, ok := tt.Find("Marlin ChatBox"); ok && openDockRect.H > 50 {
+		t.Fatalf("expected Marlin to dive underwater into compact ModeLine strip when ChatBox is open, got height %.0f", openDockRect.H)
+	}
+	if err := tt.Click("Hide"); err != nil {
+		t.Fatalf("expected Hide button inside formal ChatBox clickable: %v", err)
+	}
+	tt.Frame()
+	if fr.ComposerOpen() || tt.HasText("Deep Think") {
+		t.Fatalf("expected clicking Hide to fold formal ChatBox back into ModeLine Marlin")
+	}
+}
+
+func TestSingleWorkspaceStartupFiltersScratchAndSplitsExactFiftyFifty(t *testing.T) {
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-wm-5050"},
+		Prefs: appconfig.UserPrefs{
+			ActiveWorkspaceID: "ws-4",
+			Workspaces: []appconfig.SavedWorkspace{
+				{ID: "main", Name: "main", ActiveBuffer: string(buffer.Dashboard), Buffers: []string{string(buffer.Dashboard), string(buffer.Conversation)}},
+				{ID: "ws-2", Name: "ws-2", ActiveBuffer: string(buffer.Dashboard)},
+				{ID: "ws-3", Name: "ws-3", ActiveBuffer: string(buffer.Conversation)},
+				{ID: "ws-4", Name: "ws-4", ActiveBuffer: string(buffer.Conversation)},
+			},
+		},
+	})
+	defer fr.Close()
+
+	// 1. Ephemeral scratch ws-2..ws-4 are pruned on startup -> clean single 1:main!
+	wsSnap := fr.WorkspaceSnapshot()
+	if len(wsSnap.Workspaces) != 1 || wsSnap.ActiveID != "main" {
+		t.Fatalf("expected clean single main workspace on startup, got %+v", wsSnap.Workspaces)
+	}
+
+	// 2. Focus *conversation* and split right -> splits current *conversation* 50/50!
+	fr.SelectBuffer(buffer.Conversation)
+	fr.SplitVertical("")
+	wsAfter := fr.WorkspaceSnapshot()
+	wins := wsAfter.Active.Windows()
+	if len(wins) != 2 || wins[0].Buffer != buffer.Conversation || wins[1].Buffer != buffer.Conversation {
+		t.Fatalf("expected SplitVertical on *conversation* to split current window 50/50, got %+v", wins)
+	}
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	if !tt.HasText("1") || !tt.HasText("2") {
+		t.Fatalf("expected both split panes rendered with winum badges 1 & 2, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }

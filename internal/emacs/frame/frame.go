@@ -133,10 +133,15 @@ type Frame struct {
 	miniState      *minibuffer.State
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
-	thinkingMu     sync.RWMutex
-	thinkingOpened map[string]bool
-	activeArtifact *buffer.ArtifactSelection
-	filePreview    *buffer.FilePreviewState
+	thinkingMu          sync.RWMutex
+	thinkingOpened      map[string]bool
+	activeArtifact      *buffer.ArtifactSelection
+	filePreview         *buffer.FilePreviewState
+	composerMu          sync.Mutex
+	composerOpen        bool
+	composerDockHovered bool
+	composerHoverStart  time.Time
+	composerClickStart  time.Time
 
 	// Deterministic RCU render snapshot + coalesced off-lock reload lane + 120Hz frame pacer.
 	snapStore      *async.SnapshotStore[frameSnapshot]
@@ -189,11 +194,11 @@ func New(cfg Config) *Frame {
 		uiModules:           widgets.DefaultModules(),
 		startedAt:           time.Now(),
 		activeBuffer:        buffer.Dashboard,
-		openTabs:            []buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets},
+		openTabs:            []buffer.ID{buffer.Dashboard, buffer.Conversation},
 		meowState:           meow.New(),
 		miniState:           minibuffer.New(),
 		customize:           buffer.NewCustomizeState(cfg.AppConfig, cfg.Prefs),
-		wsMgr:               workspace.NewManager([]buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets}),
+		wsMgr:               workspace.NewManager([]buffer.ID{buffer.Dashboard, buffer.Conversation}),
 		thinkingOpened:      make(map[string]bool),
 		onReloadThemeBundle: cfg.OnReloadThemeBundle,
 		onGlassChanged:      cfg.OnGlassChanged,

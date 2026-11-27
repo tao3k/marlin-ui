@@ -8,6 +8,8 @@ package featurekit
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo/ui"
@@ -120,10 +122,11 @@ func RegisterUserIslands(islands map[string]string) {
 		}
 	}
 	pal := webIslandPalette
+	op := webIslandOpacity
 	for k, inst := range webViewCache {
 		if _, had := prev[k]; had {
 			if _, still := userIslandHTMLs[k]; !still && inst.ReloadHTML != nil {
-				jobs = append(jobs, reloadJob{fn: inst.ReloadHTML, html: kit.WorkflowStudioHTML(pal)})
+				jobs = append(jobs, reloadJob{fn: inst.ReloadHTML, html: workflowStudioThemedHTML(pal, op)})
 			}
 		}
 	}
@@ -225,10 +228,67 @@ func SyncWebIslandTheme(pal kit.Palette, glassOpacity float32) {
 	}
 	webIslandMu.Unlock()
 
-	script := kit.WebIslandThemeScript(pal, glassOpacity)
+	script := webIslandViewportThemeScript(pal, glassOpacity)
 	for _, lane := range lanes {
 		lane.Submit(script)
 	}
+}
+
+func rgbaCSS(c ui.Color, opacity float32) string {
+	if opacity < 0 {
+		opacity = 0
+	} else if opacity > 1 {
+		opacity = 1
+	}
+	return fmt.Sprintf("rgba(%d, %d, %d, %.3f)", c.R, c.G, c.B, opacity)
+}
+
+// workflowStudioThemedHTML injects the exact host Emacs viewport background
+// tint (rgba(pal.Canvas, viewportOpacity)) into WorkflowStudioHTML so the
+// native WKWebView matches *Dashboard*, *conversation*, and every other Window
+// on its very first paint with zero full-transparent flash.
+func workflowStudioThemedHTML(pal kit.Palette, viewportOpacity float32) string {
+	if viewportOpacity <= 0 {
+		viewportOpacity = kit.DefaultGlassOpacity
+	}
+	bg := rgbaCSS(pal.Canvas, viewportOpacity)
+	override := fmt.Sprintf("<style id=\"marlin-viewport-theme\">:root{--canvas:%s;--viewport-opacity:%.3f;--viewport-bg:%s;}html,body{background:var(--viewport-bg) !important;}</style>\n</head>",
+		hexRGB(pal.Canvas), viewportOpacity, bg)
+	raw := kit.WorkflowStudioHTML(pal)
+	if strings.Contains(raw, "</head>") {
+		return strings.Replace(raw, "</head>", override, 1)
+	}
+	return override + raw
+}
+
+// webIslandViewportThemeScript wraps kit.WebIslandThemeScript and also updates
+// --canvas, --marlin-canvas, --viewport-opacity, --viewport-bg, and the root
+// html/body background so switching themes, toggling Liquid Glass, or cycling
+// opacity keeps WebView islands visually identical to native GPU Windows.
+func webIslandViewportThemeScript(pal kit.Palette, viewportOpacity float32) string {
+	if viewportOpacity <= 0 {
+		viewportOpacity = kit.DefaultGlassOpacity
+	}
+	bg := rgbaCSS(pal.Canvas, viewportOpacity)
+	base := kit.WebIslandThemeScript(pal, viewportOpacity)
+	return base + fmt.Sprintf(`(function(){
+const bg=%q;
+const canvas=%q;
+const op=%.3f;
+function applyViewportBg(){
+  const r=document.documentElement.style;
+  r.setProperty("--canvas",canvas);
+  r.setProperty("--marlin-canvas",canvas);
+  r.setProperty("--viewport-opacity",String(op));
+  r.setProperty("--marlin-glass-opacity",String(op));
+  r.setProperty("--viewport-bg",bg);
+  r.setProperty("--marlin-viewport-bg",bg);
+  r.background=bg;
+  if(document.body){document.body.style.background=bg;}
+}
+applyViewportBg();
+if(document.readyState==="loading"){window.addEventListener("DOMContentLoaded",applyViewportBg,{once:true});}
+})();`, bg, hexRGB(pal.Canvas), viewportOpacity)
 }
 
 // DispatchWebIslandAction sends a structured `marlin:action` event into a
@@ -349,10 +409,10 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		tier = async.TrustTier2Untrusted
 	} else if islandID == BuiltinWorkflowStudioIslandID {
 		tier = async.TrustTier0FirstParty
-		html = kit.WorkflowStudioHTML(pal)
+		html = workflowStudioThemedHTML(pal, op)
 	} else if islandID == BuiltinArtifactStageIslandID {
 		tier = async.TrustTier2Untrusted
-		html = appleGeistArtifactStageHTML(pal)
+		html = appleGeistArtifactStageHTML(pal, op)
 	} else {
 		webIslandMu.Lock()
 		delete(webViewPending, islandID)
@@ -366,7 +426,7 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		webIslandMu.Unlock()
 		return nil
 	}
-	preload := kit.WebIslandThemeScript(pal, op)
+	preload := webIslandViewportThemeScript(pal, op)
 	lc := async.NewWebViewLifecycle(tier)
 	lc.RequestAsyncMount()
 
@@ -446,7 +506,7 @@ func (desktopWebIslandHost) Resolve(islandID string) ui.NativeWebView {
 		webViewPermits.Complete(permitID)
 		if err == nil && cached != nil {
 			if cached.evalLane != nil {
-				cached.evalLane.Submit(kit.WebIslandThemeScript(latestPal, latestOp))
+				cached.evalLane.Submit(webIslandViewportThemeScript(latestPal, latestOp))
 				if artScript != "" {
 					cached.evalLane.Submit(artScript)
 				}

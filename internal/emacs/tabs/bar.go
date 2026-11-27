@@ -57,6 +57,7 @@ type Props struct {
 	GlassOpacity      float32
 
 	OnSelectWorkspace func(id string)
+	OnKillWorkspace   func(id string)
 	OnNewWorkspace    func()
 	OnTogglePopup     func()
 	OnSelectBuffer    func(buffer.ID)
@@ -131,6 +132,11 @@ func Render(c *ui.Context, p Props) {
 					})
 					if pill.Clicked() && p.OnSelectWorkspace != nil {
 						p.OnSelectWorkspace(w.ID)
+					}
+					if len(p.Workspaces) > 1 && w.ID != "main" && w.Active && p.OnKillWorkspace != nil {
+						if theme.ActionLink(c, "wsp-close-"+w.ID, "×", th.InkMuted, th).Clicked() {
+							p.OnKillWorkspace(w.ID)
+						}
 					}
 				}
 				if p.OnNewWorkspace != nil {

@@ -173,6 +173,22 @@ func deleteWindowLeaf(n *WindowNode, id string) *WindowNode {
 	}
 }
 
+// axisLeafCount counts pane spans along the same split axis so auto-balancing
+// distributes space equally across N same-direction splits (Ghostty / tmux /
+// Emacs window-combination-resize policy: 2->50/50, 3->33.3/33.3/33.3, 4->25% each).
+func axisLeafCount(n *WindowNode, dir SplitMode) int {
+	if n == nil {
+		return 0
+	}
+	if n.IsLeaf() {
+		return 1
+	}
+	if n.Direction == dir {
+		return axisLeafCount(n.First, dir) + axisLeafCount(n.Second, dir)
+	}
+	return 1
+}
+
 func balanceWindowTree(n *WindowNode) *WindowNode {
 	if n == nil {
 		return nil
@@ -181,20 +197,28 @@ func balanceWindowTree(n *WindowNode) *WindowNode {
 		cp := *n
 		return &cp
 	}
+	left := balanceWindowTree(n.First)
+	right := balanceWindowTree(n.Second)
+	w1 := axisLeafCount(left, n.Direction)
+	w2 := axisLeafCount(right, n.Direction)
+	ratio := float32(0.50)
+	if w1+w2 > 0 {
+		ratio = clampSplitRatio(float32(w1) / float32(w1+w2))
+	}
 	return &WindowNode{
 		Direction: n.Direction,
-		Ratio:     0.50,
-		First:     balanceWindowTree(n.First),
-		Second:    balanceWindowTree(n.Second),
+		Ratio:     ratio,
+		First:     left,
+		Second:    right,
 	}
 }
 
 func clampSplitRatio(r float32) float32 {
-	if r < 0.25 {
-		return 0.25
+	if r < 0.15 {
+		return 0.15
 	}
-	if r > 0.75 {
-		return 0.75
+	if r > 0.85 {
+		return 0.85
 	}
 	return r
 }

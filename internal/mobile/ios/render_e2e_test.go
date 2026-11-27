@@ -248,17 +248,39 @@ func TestIOSNewChatIsolationAgentRoomsMarkdownAndGatesRendering(t *testing.T) {
 	}
 	close(gateCh)
 	<-doneCh
-	// Wait briefly for goroutine to post reply back into controller.
+	// Wait briefly for goroutine to post threaded reply under the user's @architect message.
 	deadline := time.Now().Add(2 * time.Second)
+	var threadedMsgID string
 	for time.Now().Before(deadline) {
-		tt.Frame()
-		if tt.HasText("Architect Review") {
+		snap := featurekit.AgentRoomSnapshot()
+		for _, m := range snap.Messages {
+			if strings.Contains(m.Body, "@architect audit boundary") && m.ThreadCount >= 1 {
+				threadedMsgID = m.ID
+				break
+			}
+		}
+		if threadedMsgID != "" {
 			break
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	if !tt.HasText("Architect Review") {
-		t.Fatalf("expected Architect live reply rendered in #workspace, got %q", strings.Join(tt.Texts(), " | "))
+	if threadedMsgID == "" {
+		t.Fatalf("expected Architect live reply threaded under @architect audit boundary")
+	}
+	if err := featurekit.OpenAgentRoomThread(threadedMsgID); err != nil {
+		t.Fatalf("OpenAgentRoomThread(%s) failed: %v", threadedMsgID, err)
+	}
+	tsnap := featurekit.AgentRoomSnapshot()
+	foundReply := false
+	for _, tm := range tsnap.ThreadMessages {
+		if strings.Contains(tm.Body, "Architect Review") {
+			foundReply = true
+			break
+		}
+	}
+	featurekit.CloseAgentRoomThread()
+	if !foundReply {
+		t.Fatalf("expected Architect live reply inside thread messages, got %+v", tsnap.ThreadMessages)
 	}
 
 	// 5c. Inline Tier-0 Bot Gate Embed directly inside Rooms feed -> 1-tap Approve resolves gate.

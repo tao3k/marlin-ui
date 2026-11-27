@@ -37,6 +37,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/frame"
+	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
@@ -131,400 +132,454 @@ func main() {
 		cfg.RealSession = *prefs.RealSession
 	}
 
-	mygo.App.SetName("Marlin")
-	mygo.App.SetVersion(appconfig.Version)
-	if !mygo.App.RequestSingleInstanceLock() {
-		os.Exit(0)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	bgScope := async.NewStructuredScope(ctx)
 
 	// Headless controllers from marlin-mygo (Transcript, Helm, Projection, Auth, PromptGate, WindowTree).
+	adaptive := newDesktopAdaptiveShell(cfg.SessionID)
+
+	rt, acquired := configureDesktopPreRun(desktopPreRunConfig{
+		AppConfig:                 cfg,
+		Prefs:                     prefs,
+		Cancel:                    cancel,
+		BGScope:                   bgScope,
+		Adaptive:                  adaptive,
+		AcquireSingleInstanceLock: true,
+		OnReady: func(rt *desktopRuntimeState, savePrefs func(appconfig.UserPrefs)) {
+			if iconPNG := theme.MarlinAppIconPNG(); len(iconPNG) > 0 {
+				if err := mygo.App.Dock.SetIcon(iconPNG); err != nil {
+					log.Printf("desktop dock icon warning: %v", err)
+				}
+			}
+			invalidate := func() {
+				if rt.win != nil {
+					rt.win.Invalidate()
+				}
+			}
+			focusWindow := func() {
+				mygo.App.Focus()
+				if rt.win != nil {
+					rt.win.Show()
+					rt.win.Focus()
+				}
+			}
+
+			var applyFeatures func(string)
+			authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
+				Config:   cfg,
+				Prefs:    rt.snapshotPrefs(),
+				CopyText: mygo.Clipboard.WriteText,
+				OnApplyFeatures: func(spec string) {
+					if applyFeatures != nil {
+						applyFeatures(spec)
+					}
+				},
+				Invalidate: invalidate,
+			})
+
+			var connErr error
+			rt.link, connErr = hostlink.Connect(
+				ctx,
+				cfg,
+				adaptive,
+				desktopTargetKind(),
+				invalidate,
+				hostlink.WithDesktopMyGoAdapters(),
+				hostlink.WithClipboardWriter(mygo.Clipboard.WriteText),
+				hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
+				hostlink.WithSavedRemotes(rt.snapshotPrefs().SavedRemotes),
+				hostlink.WithOnSessionChanged(func(sid string) {
+					snap := rt.snapshotPrefs()
+					snap.LastSessionID = sid
+					savePrefs(snap)
+				}),
+				hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
+					if rt.emacsWin != nil {
+						rt.emacsWin.SyncSavedRemote(r)
+					}
+				}),
+			)
+			if connErr != nil {
+				log.Fatalf("marlin-desktop host connection failed: %v", connErr)
+			}
+
+			reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, rt.link.OnDraftChanged, invalidate)
+			applyFeatures = func(spec string) {
+				reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
+				adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+			}
+
+			tr := adaptive.Desktop.Transcript
+			tr.OnPickAttachment = func() {
+				bgScope.Go(func(taskCtx context.Context) {
+					paths, err := composer.PickFilesNative(taskCtx, composer.NativePickerOptions{
+						Title:         "Attach files to Marlin",
+						AllowMultiple: true,
+					})
+					if err == nil && len(paths) > 0 {
+						_, _ = tr.StageLocalFiles(paths)
+						if rt.emacsWin != nil {
+							rt.emacsWin.Echo(fmt.Sprintf("Attached %d file(s)", len(paths)))
+						}
+						invalidate()
+					}
+				})
+			}
+			tr.OnPasteAttachment = func() {
+				bgScope.Go(func(taskCtx context.Context) {
+					if in, ok, err := composer.ReadClipboardAttachment(taskCtx); err == nil && ok {
+						_, _ = tr.AttachFile(in)
+						invalidate()
+					}
+				})
+			}
+			rt.stopVoice = wireDesktopVoice(bgScope, tr, invalidate)
+
+			var (
+				hasLastVibrancy bool
+				lastVibrancy    mygo.Vibrancy
+			)
+			applyWindowGlass := func(glassOn, isLight bool) {
+				if rt.win == nil {
+					return
+				}
+				vibMode := "auto"
+				if rt.emacsWin != nil {
+					vibMode = rt.emacsWin.VibrancyMode()
+					pal, op := rt.emacsWin.ActivePaletteAndOpacity()
+					featurekit.SyncWebIslandTheme(pal, op)
+				}
+				v := desktopVibrancy(glassOn, isLight, vibMode)
+				if !hasLastVibrancy || v != lastVibrancy {
+					hasLastVibrancy = true
+					lastVibrancy = v
+					rt.win.SetVibrancy(v)
+					rt.win.SetActiveAppearance(v != mygo.VibrancyNone)
+				}
+			}
+
+			featurekit.RegisterUserIslands(themeBundle.WebIslands)
+			syncCfg := marketplace.OfficialSyncConfig{
+				LocalRepoDir: strings.TrimSpace(os.Getenv("MARLIN_MARKETPLACE_DIR")),
+			}
+			syncClient, _ := marketplace.NewOfficialSyncClient(syncCfg)
+			pkgStore, pkgErr := marketplace.NewPackageStore(marketplace.PackageStoreConfig{
+				SyncClient: syncClient,
+				StateFile:  filepath.Join(themeDir, "packages-state.json"),
+				UIDir:      themeDir,
+			})
+			if pkgErr != nil {
+				log.Printf("marketplace package store warning: %v", pkgErr)
+			}
+			rt.emacsWin = frame.New(frame.Config{
+				Adaptive:              adaptive,
+				Link:                  rt.link,
+				AppConfig:             cfg,
+				Prefs:                 rt.snapshotPrefs(),
+				FeatureReg:            reg,
+				FeatureLedger:         ledger,
+				FeatureHost:           host,
+				PackageStore:          pkgStore,
+				WebHost:               featurekit.WebIslandHost(),
+				OnWebIslandAction:     featurekit.DispatchWebIslandAction,
+				OnWebIslandVisibility: featurekit.NotifyWebIslandVisibility,
+				OnPushArtifact:        featurekit.PushArtifactStagePayload,
+				InitialThemeID:        cfg.ThemeID,
+				ThemeBundle:           themeBundle,
+				OnReloadThemeBundle: func() appconfig.UIThemeBundle {
+					b := appconfig.LoadUIThemeBundle(themeDir)
+					featurekit.RegisterUserIslands(b.WebIslands)
+					return b
+				},
+				OnGlassChanged: func(on bool) {
+					isLight := false
+					if rt.emacsWin != nil {
+						isLight = rt.emacsWin.IsLightTheme()
+					}
+					applyWindowGlass(on, isLight)
+				},
+				OnThemeChanged: func(isLight bool) {
+					if rt.emacsWin != nil {
+						applyWindowGlass(rt.emacsWin.UIModules().Glass, isLight)
+					}
+				},
+				OnZenModeChanged: func(writeroom, fullscreen bool) {
+					featurekit.SetRoomWriteroom(writeroom)
+					if rt.win != nil {
+						rt.win.SetFullScreen(fullscreen)
+					}
+				},
+				OnQuit: func() {
+					mygo.App.Quit()
+				},
+				RoomStats: func() (int, int, int, int) {
+					st := featurekit.AgentRoomStats()
+					return st.TasksDone, st.TasksTotal, st.AgentsOnline, st.AgentsTotal
+				},
+				RoomTasks: func() []widgets.TaskItem {
+					raw := featurekit.AgentRoomTasks()
+					out := make([]widgets.TaskItem, 0, len(raw))
+					for _, r := range raw {
+						out = append(out, widgets.TaskItem{ID: r.ID, Title: r.Title, Status: r.Status, Owner: r.Owner})
+					}
+					return out
+				},
+				OnAddTask:       featurekit.AddAgentRoomTask,
+				OnCycleTask:     featurekit.CycleAgentRoomTask,
+				OnPrefsChanged:  savePrefs,
+				OnApplyFeatures: applyFeatures,
+				Invalidate:      invalidate,
+			})
+
+			mygo.App.SetMenu(buildDesktopMenu(rt.emacsWin, invalidate))
+			featurekit.SetRoomWriteroomExit(func() {
+				if rt.emacsWin != nil {
+					rt.emacsWin.ToggleZenMode()
+					invalidate()
+				}
+			})
+			rt.tray = setupDesktopTray(rt.emacsWin, focusWindow, invalidate)
+
+			initGlass := rt.emacsWin.UIModules().Glass
+			initVibrancy := desktopVibrancy(initGlass, rt.emacsWin.IsLightTheme(), rt.emacsWin.VibrancyMode())
+			initPal, initOp := rt.emacsWin.ActivePaletteAndOpacity()
+			featurekit.SyncWebIslandTheme(initPal, initOp)
+			title := fmt.Sprintf("Marlin — %s", rt.link.Endpoint)
+			rt.win = mygo.NewWindow(mygo.WindowOptions{
+				Title:         title,
+				Width:         1280,
+				Height:        820,
+				TitleBarStyle: mygo.TitleBarHiddenInset,
+				Transparent:   true,
+				Vibrancy:      initVibrancy,
+				StateKey:      "marlin-desktop-main",
+				Content:       ui.View(rt.emacsWin.View),
+			})
+			rt.win.SetActiveAppearance(initGlass)
+			if iconPNG := theme.MarlinAppIconPNG(); len(iconPNG) > 0 {
+				_ = rt.win.SetIcon(iconPNG)
+			}
+			featurekit.SetWebViewInvalidate(invalidate)
+			featurekit.SetWebViewFactory(func(islandID string, html, preloadJS string, tier async.TrustTier) (featurekit.WebViewInstance, error) {
+				if rt.win == nil {
+					return featurekit.WebViewInstance{}, fmt.Errorf("window unavailable")
+				}
+				pageOpts := mygo.PageOptions{
+					PreloadScript: preloadJS,
+					Untrusted:     tier != async.TrustTier0FirstParty,
+				}
+				wv, err := rt.win.NewWebView(mygo.WebViewOptions{
+					Transparent: true,
+					Page:        pageOpts,
+				})
+				if err != nil {
+					return featurekit.WebViewInstance{}, err
+				}
+				wv.Page().OnRenderProcessGone(func(_ string) {
+					featurekit.RecoverWebIsland(islandID)
+				})
+				wv.Page().LoadHTML(html, "")
+				return featurekit.WebViewInstance{
+					View: wv,
+					Tier: tier,
+					Eval: func(js string) {
+						if !wv.IsDestroyed() {
+							_, _ = wv.Page().Eval(js)
+						}
+					},
+					ReloadHTML: func(nextHTML string) {
+						if !wv.IsDestroyed() {
+							wv.Page().LoadHTML(nextHTML, "")
+						}
+					},
+					Destroy: func() {
+						if !wv.IsDestroyed() {
+							wv.Destroy()
+						}
+					},
+				}, nil
+			})
+			rt.win.Invalidate()
+
+			// Pre-warm the built-in *Workflow Canvas* WKWebView off the first-click
+			// critical path shortly after the initial Dashboard frame has painted,
+			// eliminating the 300ms+ WebKit cold-boot stall when switching tabs.
+			bgScope.Go(func(warmCtx context.Context) {
+				timer := time.NewTimer(350 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-warmCtx.Done():
+					return
+				case <-timer.C:
+					featurekit.PrewarmWebIsland(featurekit.BuiltinWorkflowStudioIslandID)
+				}
+			})
+
+			// Live auto-reload watcher inside StructuredScope (quiescence-drained on quit).
+			bgScope.Go(func(watchCtx context.Context) {
+				appconfig.WatchUIThemeDir(watchCtx, themeDir, 600*time.Millisecond, func() {
+					if rt.emacsWin != nil {
+						rt.emacsWin.ReloadThemesAsync()
+					}
+				})
+			})
+
+			// Demand-driven 1Hz live clock tick inside StructuredScope:
+			// automatically pauses when unfocused or viewing non-Dashboard buffers
+			// to eliminate macOS transparent-window idle GPU power residency.
+			bgScope.Go(func(loopCtx context.Context) {
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-loopCtx.Done():
+						return
+					case <-ticker.C:
+						if rt.emacsWin != nil && rt.emacsWin.ShouldTickIdle() && rt.win != nil {
+							rt.win.Invalidate()
+						}
+					}
+				}
+			})
+		},
+	})
+	if !acquired {
+		os.Exit(0)
+	}
+
+	if err := mygo.App.Run(); err != nil {
+		log.Fatal(err)
+	}
+	if rt.stopVoice != nil {
+		rt.stopVoice()
+	}
+	if rt.link != nil {
+		rt.link.Close()
+	}
+}
+
+type desktopRuntimeState struct {
+	prefsMu   sync.Mutex
+	prefs     appconfig.UserPrefs
+	win       *mygo.Window
+	tray      *mygo.Tray
+	emacsWin  *frame.Frame
+	link      *hostlink.Link
+	stopVoice func()
+}
+
+func (rt *desktopRuntimeState) snapshotPrefs() appconfig.UserPrefs {
+	rt.prefsMu.Lock()
+	defer rt.prefsMu.Unlock()
+	return rt.prefs
+}
+
+type desktopPreRunConfig struct {
+	AppConfig                 appconfig.Config
+	Prefs                     appconfig.UserPrefs
+	Cancel                    context.CancelFunc
+	BGScope                   *async.StructuredScope
+	Adaptive                  *mygoshell.AdaptiveShell
+	AcquireSingleInstanceLock bool
+	OnReady                   func(*desktopRuntimeState, func(appconfig.UserPrefs))
+}
+
+func newDesktopAdaptiveShell(sessionID string) *mygoshell.AdaptiveShell {
 	adaptive := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
 		BrandTitle:     "Marlin",
 		InitialThemeID: "midnight",
 		FormFactor:     mygoshell.FormFactorDesktop,
 	})
-	adaptive.Desktop.ActiveSessionID = cfg.SessionID
+	adaptive.Desktop.ActiveSessionID = sessionID
 	adaptive.Desktop.Sessions = []mygoshell.SessionSummaryView{
-		{SessionID: cfg.SessionID, Title: "Primary Workspace", TurnCount: 0},
+		{SessionID: sessionID, Title: "Primary Workspace", TurnCount: 0},
+	}
+	return adaptive
+}
+
+// configureDesktopPreRun performs every pre-App.Run MyGo registration step.
+// Keeping this isolated lets main_test.go execute the exact startup registration
+// sequence on the OS main thread before mygo.App.Run so any accidental needsApp
+// call fails go test immediately.
+func configureDesktopPreRun(p desktopPreRunConfig) (*desktopRuntimeState, bool) {
+	mygo.App.SetName("Marlin")
+	mygo.App.SetVersion(appconfig.Version)
+	if p.AcquireSingleInstanceLock && !mygo.App.RequestSingleInstanceLock() {
+		return nil, false
 	}
 
-	var (
-		prefsMu   sync.Mutex
-		win       *mygo.Window
-		tray      *mygo.Tray
-		emacsWin  *frame.Frame
-		link      *hostlink.Link
-		stopVoice func()
-	)
+	rt := &desktopRuntimeState{prefs: p.Prefs}
 	// Bind Tier-0 bidirectional Hybrid WebView RPC service (MyGo physically blocks
 	// Tier-2 Untrusted pages from calling any bound Go methods).
 	mygo.Bind(WorkflowBridge{
 		onSave: func(g kit.WorkflowGraph) {
-			if emacsWin != nil {
-				emacsWin.Echo(fmt.Sprintf("Workflow synced (%d nodes, %d edges)", len(g.Nodes), len(g.Edges)))
+			if rt.emacsWin != nil {
+				rt.emacsWin.Echo(fmt.Sprintf("Workflow synced (%d nodes, %d edges)", len(g.Nodes), len(g.Edges)))
 			}
-			if win != nil {
-				win.Invalidate()
+			if rt.win != nil {
+				rt.win.Invalidate()
 			}
 		},
 	})
 	savePrefs := func(next appconfig.UserPrefs) {
-		prefsMu.Lock()
-		prefs = next
-		snap := prefs
-		prefsMu.Unlock()
-		if err := appconfig.SavePrefs(cfg.PrefsFile, snap); err != nil {
+		rt.prefsMu.Lock()
+		rt.prefs = next
+		snap := rt.prefs
+		rt.prefsMu.Unlock()
+		if err := appconfig.SavePrefs(p.AppConfig.PrefsFile, snap); err != nil {
 			log.Printf("prefs save warning: %v", err)
 		}
 	}
 
 	mygo.App.OnSecondInstance(func(_ []string, _ string) {
 		mygo.App.Focus()
-		if win != nil {
-			win.Show()
-			win.Focus()
+		if rt.win != nil {
+			rt.win.Show()
+			rt.win.Focus()
 		}
 	})
 	mygo.App.OnOpenFile(func(path string) {
-		if path == "" || adaptive.Desktop == nil || adaptive.Desktop.Transcript == nil {
+		if path == "" || p.Adaptive == nil || p.Adaptive.Desktop == nil || p.Adaptive.Desktop.Transcript == nil {
 			return
 		}
-		_, _ = adaptive.Desktop.Transcript.StageLocalFiles([]string{path})
-		if emacsWin != nil {
-			emacsWin.Echo("Attached " + path)
+		_, _ = p.Adaptive.Desktop.Transcript.StageLocalFiles([]string{path})
+		if rt.emacsWin != nil {
+			rt.emacsWin.Echo("Attached " + path)
 		}
-		if win != nil {
-			win.Invalidate()
+		if rt.win != nil {
+			rt.win.Invalidate()
 		}
 	})
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
-		cancel()
-		bgScope.CloseAndDrain()
-		if emacsWin != nil {
-			emacsWin.Close()
+		if p.Cancel != nil {
+			p.Cancel()
+		}
+		if p.BGScope != nil {
+			p.BGScope.CloseAndDrain()
+		}
+		if rt.emacsWin != nil {
+			rt.emacsWin.Close()
 		}
 		featurekit.ShutdownWebIslands()
-		prefsMu.Lock()
-		snap := prefs
-		prefsMu.Unlock()
-		_ = appconfig.SavePrefs(cfg.PrefsFile, snap)
-		if tray != nil {
-			tray.Destroy()
+		_ = appconfig.SavePrefs(p.AppConfig.PrefsFile, rt.snapshotPrefs())
+		if rt.tray != nil {
+			rt.tray.Destroy()
 		}
-		if stopVoice != nil {
-			stopVoice()
+		if rt.stopVoice != nil {
+			rt.stopVoice()
 		}
-		if link != nil {
-			link.SaveNow()
-			link.Close()
+		if rt.link != nil {
+			rt.link.SaveNow()
+			rt.link.Close()
 		}
 	})
-
 	mygo.App.WhenReady(func() {
-		invalidate := func() {
-			if win != nil {
-				win.Invalidate()
-			}
+		if p.OnReady != nil {
+			p.OnReady(rt, savePrefs)
 		}
-		focusWindow := func() {
-			mygo.App.Focus()
-			if win != nil {
-				win.Show()
-				win.Focus()
-			}
-		}
-
-		var applyFeatures func(string)
-		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
-			Config:   cfg,
-			Prefs:    prefs,
-			CopyText: mygo.Clipboard.WriteText,
-			OnApplyFeatures: func(spec string) {
-				if applyFeatures != nil {
-					applyFeatures(spec)
-				}
-			},
-			Invalidate: invalidate,
-		})
-
-		var connErr error
-		link, connErr = hostlink.Connect(
-			ctx,
-			cfg,
-			adaptive,
-			desktopTargetKind(),
-			invalidate,
-			hostlink.WithDesktopMyGoAdapters(),
-			hostlink.WithClipboardWriter(mygo.Clipboard.WriteText),
-			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
-			hostlink.WithSavedRemotes(prefs.SavedRemotes),
-			hostlink.WithOnSessionChanged(func(sid string) {
-				prefsMu.Lock()
-				prefs.LastSessionID = sid
-				snap := prefs
-				prefsMu.Unlock()
-				savePrefs(snap)
-			}),
-			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
-				if emacsWin != nil {
-					emacsWin.SyncSavedRemote(r)
-				}
-			}),
-		)
-		if connErr != nil {
-			log.Fatalf("marlin-desktop host connection failed: %v", connErr)
-		}
-
-		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
-		applyFeatures = func(spec string) {
-			reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
-			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
-		}
-
-		tr := adaptive.Desktop.Transcript
-		tr.OnPickAttachment = func() {
-			bgScope.Go(func(taskCtx context.Context) {
-				paths, err := composer.PickFilesNative(taskCtx, composer.NativePickerOptions{
-					Title:         "Attach files to Marlin",
-					AllowMultiple: true,
-				})
-				if err == nil && len(paths) > 0 {
-					_, _ = tr.StageLocalFiles(paths)
-					if emacsWin != nil {
-						emacsWin.Echo(fmt.Sprintf("Attached %d file(s)", len(paths)))
-					}
-					invalidate()
-				}
-			})
-		}
-		tr.OnPasteAttachment = func() {
-			bgScope.Go(func(taskCtx context.Context) {
-				if in, ok, err := composer.ReadClipboardAttachment(taskCtx); err == nil && ok {
-					_, _ = tr.AttachFile(in)
-					invalidate()
-				}
-			})
-		}
-		stopVoice = wireDesktopVoice(bgScope, tr, invalidate)
-
-		var (
-			hasLastVibrancy bool
-			lastVibrancy    mygo.Vibrancy
-		)
-		applyWindowGlass := func(glassOn, isLight bool) {
-			if win == nil {
-				return
-			}
-			vibMode := "auto"
-			if emacsWin != nil {
-				vibMode = emacsWin.VibrancyMode()
-				pal, op := emacsWin.ActivePaletteAndOpacity()
-				featurekit.SyncWebIslandTheme(pal, op)
-			}
-			v := desktopVibrancy(glassOn, isLight, vibMode)
-			if !hasLastVibrancy || v != lastVibrancy {
-				hasLastVibrancy = true
-				lastVibrancy = v
-				win.SetVibrancy(v)
-				win.SetActiveAppearance(v != mygo.VibrancyNone)
-			}
-		}
-
-		featurekit.RegisterUserIslands(themeBundle.WebIslands)
-		syncCfg := marketplace.OfficialSyncConfig{
-			LocalRepoDir: strings.TrimSpace(os.Getenv("MARLIN_MARKETPLACE_DIR")),
-		}
-		syncClient, _ := marketplace.NewOfficialSyncClient(syncCfg)
-		pkgStore, pkgErr := marketplace.NewPackageStore(marketplace.PackageStoreConfig{
-			SyncClient: syncClient,
-			StateFile:  filepath.Join(themeDir, "packages-state.json"),
-			UIDir:      themeDir,
-		})
-		if pkgErr != nil {
-			log.Printf("marketplace package store warning: %v", pkgErr)
-		}
-		emacsWin = frame.New(frame.Config{
-			Adaptive:            adaptive,
-			Link:                link,
-			AppConfig:           cfg,
-			Prefs:               prefs,
-			FeatureReg:          reg,
-			FeatureLedger:       ledger,
-			FeatureHost:         host,
-			PackageStore:        pkgStore,
-			WebHost:               featurekit.WebIslandHost(),
-			OnWebIslandAction:     featurekit.DispatchWebIslandAction,
-			OnWebIslandVisibility: featurekit.NotifyWebIslandVisibility,
-			OnPushArtifact:        featurekit.PushArtifactStagePayload,
-			InitialThemeID:        cfg.ThemeID,
-			ThemeBundle:         themeBundle,
-			OnReloadThemeBundle: func() appconfig.UIThemeBundle {
-				b := appconfig.LoadUIThemeBundle(themeDir)
-				featurekit.RegisterUserIslands(b.WebIslands)
-				return b
-			},
-			OnGlassChanged: func(on bool) {
-				isLight := false
-				if emacsWin != nil {
-					isLight = emacsWin.IsLightTheme()
-				}
-				applyWindowGlass(on, isLight)
-			},
-			OnThemeChanged: func(isLight bool) {
-				if emacsWin != nil {
-					applyWindowGlass(emacsWin.UIModules().Glass, isLight)
-				}
-			},
-			OnZenModeChanged: func(writeroom, fullscreen bool) {
-				featurekit.SetRoomWriteroom(writeroom)
-				if win != nil {
-					win.SetFullScreen(fullscreen)
-				}
-			},
-			OnQuit: func() {
-				mygo.App.Quit()
-			},
-			RoomStats: func() (int, int, int, int) {
-				st := featurekit.AgentRoomStats()
-				return st.TasksDone, st.TasksTotal, st.AgentsOnline, st.AgentsTotal
-			},
-			RoomTasks: func() []widgets.TaskItem {
-				raw := featurekit.AgentRoomTasks()
-				out := make([]widgets.TaskItem, 0, len(raw))
-				for _, r := range raw {
-					out = append(out, widgets.TaskItem{ID: r.ID, Title: r.Title, Status: r.Status, Owner: r.Owner})
-				}
-				return out
-			},
-			OnAddTask:       featurekit.AddAgentRoomTask,
-			OnCycleTask:     featurekit.CycleAgentRoomTask,
-			OnPrefsChanged:  savePrefs,
-			OnApplyFeatures: applyFeatures,
-			Invalidate:      invalidate,
-		})
-
-		mygo.App.SetMenu(buildDesktopMenu(emacsWin, invalidate))
-		featurekit.SetRoomWriteroomExit(func() {
-			if emacsWin != nil {
-				emacsWin.ToggleZenMode()
-				invalidate()
-			}
-		})
-		tray = setupDesktopTray(emacsWin, focusWindow, invalidate)
-
-		initGlass := emacsWin.UIModules().Glass
-		initVibrancy := desktopVibrancy(initGlass, emacsWin.IsLightTheme(), emacsWin.VibrancyMode())
-		initPal, initOp := emacsWin.ActivePaletteAndOpacity()
-		featurekit.SyncWebIslandTheme(initPal, initOp)
-		title := fmt.Sprintf("Marlin — %s", link.Endpoint)
-		win = mygo.NewWindow(mygo.WindowOptions{
-			Title:         title,
-			Width:         1280,
-			Height:        820,
-			TitleBarStyle: mygo.TitleBarHiddenInset,
-			Transparent:   true,
-			Vibrancy:      initVibrancy,
-			StateKey:      "marlin-desktop-main",
-			Content:       ui.View(emacsWin.View),
-		})
-		win.SetActiveAppearance(initGlass)
-		featurekit.SetWebViewInvalidate(invalidate)
-		featurekit.SetWebViewFactory(func(islandID string, html, preloadJS string, tier async.TrustTier) (featurekit.WebViewInstance, error) {
-			if win == nil {
-				return featurekit.WebViewInstance{}, fmt.Errorf("window unavailable")
-			}
-			pageOpts := mygo.PageOptions{
-				PreloadScript: preloadJS,
-				Untrusted:     tier != async.TrustTier0FirstParty,
-			}
-			wv, err := win.NewWebView(mygo.WebViewOptions{
-				Transparent: true,
-				Page:        pageOpts,
-			})
-			if err != nil {
-				return featurekit.WebViewInstance{}, err
-			}
-			wv.Page().OnRenderProcessGone(func(_ string) {
-				featurekit.RecoverWebIsland(islandID)
-			})
-			wv.Page().LoadHTML(html, "")
-			return featurekit.WebViewInstance{
-				View: wv,
-				Tier: tier,
-				Eval: func(js string) {
-					if !wv.IsDestroyed() {
-						_, _ = wv.Page().Eval(js)
-					}
-				},
-				ReloadHTML: func(nextHTML string) {
-					if !wv.IsDestroyed() {
-						wv.Page().LoadHTML(nextHTML, "")
-					}
-				},
-				Destroy: func() {
-					if !wv.IsDestroyed() {
-						wv.Destroy()
-					}
-				},
-			}, nil
-		})
-		win.Invalidate()
-
-		// Pre-warm the built-in *Workflow Canvas* WKWebView off the first-click
-		// critical path shortly after the initial Dashboard frame has painted,
-		// eliminating the 300ms+ WebKit cold-boot stall when switching tabs.
-		bgScope.Go(func(warmCtx context.Context) {
-			timer := time.NewTimer(350 * time.Millisecond)
-			defer timer.Stop()
-			select {
-			case <-warmCtx.Done():
-				return
-			case <-timer.C:
-				featurekit.PrewarmWebIsland(featurekit.BuiltinWorkflowStudioIslandID)
-			}
-		})
-
-		// Live auto-reload watcher inside StructuredScope (quiescence-drained on quit).
-		bgScope.Go(func(watchCtx context.Context) {
-			appconfig.WatchUIThemeDir(watchCtx, themeDir, 600*time.Millisecond, func() {
-				if emacsWin != nil {
-					emacsWin.ReloadThemesAsync()
-				}
-			})
-		})
-
-		// Demand-driven 1Hz live clock tick inside StructuredScope:
-		// automatically pauses when unfocused or viewing non-Dashboard buffers
-		// to eliminate macOS transparent-window idle GPU power residency.
-		bgScope.Go(func(loopCtx context.Context) {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-loopCtx.Done():
-					return
-				case <-ticker.C:
-					if emacsWin != nil && emacsWin.ShouldTickIdle() && win != nil {
-						win.Invalidate()
-					}
-				}
-			}
-		})
 	})
-
-	if err := mygo.App.Run(); err != nil {
-		log.Fatal(err)
-	}
-	if stopVoice != nil {
-		stopVoice()
-	}
-	if link != nil {
-		link.Close()
-	}
+	return rt, true
 }
 
 // desktopVibrancy resolves the declarative TOML [surface].vibrancy material

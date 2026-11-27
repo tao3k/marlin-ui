@@ -102,8 +102,8 @@ func TestWorkspaceIsolationAndDoomPopupLifecycle(t *testing.T) {
 		t.Fatalf("expected ResizeSplit(+0.15) ~0.65, got %v", r1)
 	}
 	rMax, _ := mgr.ResizeSplit(0.50)
-	if rMax != 0.75 {
-		t.Fatalf("expected ResizeSplit clamped to 0.75, got %v", rMax)
+	if rMax != 0.85 {
+		t.Fatalf("expected ResizeSplit clamped to 0.85, got %v", rMax)
 	}
 	balSnap := mgr.BalanceSplit()
 	if balSnap.Active.SplitRatio != 0.50 {
@@ -204,5 +204,43 @@ func TestSyncSchemeWindowsBuildsMultiWindowTreeAndPreservesWinnerUndo(t *testing
 	if !undone || restored.Active.WindowCount() != 1 || restored.Active.ActiveBuffer != buffer.Dashboard {
 		t.Fatalf("expected WinnerUndo to restore pre-sync single *Dashboard* layout, got undone=%v count=%d buf=%q",
 			undone, restored.Active.WindowCount(), restored.Active.ActiveBuffer)
+	}
+}
+
+func TestGhosttyTmuxAutoBalanceAndCurrentWindowSplit(t *testing.T) {
+	// 1. Default startup: single workspace `main` with *Dashboard* + *conversation* only.
+	mgr := NewManager(nil)
+	initSnap := mgr.Snapshot()
+	if len(initSnap.Workspaces) != 1 || initSnap.ActiveID != "main" {
+		t.Fatalf("expected single default workspace main, got %+v", initSnap.Workspaces)
+	}
+	if len(initSnap.Active.Buffers) != 2 || initSnap.Active.Buffers[0] != buffer.Dashboard || initSnap.Active.Buffers[1] != buffer.Conversation {
+		t.Fatalf("expected default tabs [*Dashboard* *conversation*], got %+v", initSnap.Active.Buffers)
+	}
+
+	// 2. Focus *conversation* and split vertically with empty secondary -> clones current *conversation* 50/50!
+	_, _ = mgr.OpenBuffer(buffer.Conversation)
+	s2 := mgr.SplitVertical("")
+	wins2 := s2.Active.Windows()
+	if len(wins2) != 2 || wins2[0].Buffer != buffer.Conversation || wins2[1].Buffer != buffer.Conversation {
+		t.Fatalf("expected empty SplitVertical to split current *conversation* window, got %+v", wins2)
+	}
+	if s2.Active.WindowTree.Ratio != 0.50 {
+		t.Fatalf("expected 2-pane split ratio 0.50, got %v", s2.Active.WindowTree.Ratio)
+	}
+
+	// 3. Split vertically a 3rd time -> Ghostty/tmux auto-balance equalizes to 33.3% | 33.3% | 33.3%!
+	s3 := mgr.SplitVertical("")
+	r3 := s3.Active.WindowTree.Ratio
+	if r3 < 0.33 || r3 > 0.34 || s3.Active.WindowTree.Second.Ratio != 0.50 {
+		t.Fatalf("expected 3-way vertical split auto-balanced to (0.333, 0.50), got root=%v second=%v",
+			r3, s3.Active.WindowTree.Second.Ratio)
+	}
+
+	// 4. Closing one pane auto-rebalances remaining 2 panes back to exact 50/50!
+	closed, sAfter := mgr.CloseFocusedPane()
+	if !closed || sAfter.Active.WindowCount() != 2 || sAfter.Active.WindowTree.Ratio != 0.50 {
+		t.Fatalf("expected CloseFocusedPane to re-balance to 2 panes at 0.50, got closed=%v count=%d ratio=%v",
+			closed, sAfter.Active.WindowCount(), sAfter.Active.WindowTree.Ratio)
 	}
 }

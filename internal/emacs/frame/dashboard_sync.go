@@ -654,11 +654,19 @@ func (f *Frame) EffectiveGlassOpacity(th theme.Theme) float32 {
 }
 
 // ActivePaletteAndOpacity returns a wait-free snapshot of the active theme's
-// kit.Palette and effective glass opacity for syncing external hosts (e.g. WebViews).
+// kit.Palette and effective viewport background opacity so native WebViews
+// (e.g. *Workflow Canvas*, *Artifact Stage*) match every other Emacs Window
+// seamlessly across dark/light themes, Liquid Glass toggle, and opacity presets.
 func (f *Frame) ActivePaletteAndOpacity() (kit.Palette, float32) {
 	snap := f.loadSnapshot()
-	op, _, _, _ := effectiveSurfaceFromSnap(snap)
-	return snap.Theme.ToKitPalette(), op
+	_, _, viewportOp, _ := effectiveSurfaceFromSnap(snap)
+	if !snap.UIModules.Glass {
+		return snap.Theme.ToKitPalette(), 1.0
+	}
+	if viewportOp <= 0 {
+		viewportOp = kit.DefaultGlassOpacity
+	}
+	return snap.Theme.ToKitPalette(), viewportOp
 }
 
 // CycleGlassOpacity steps frosted glass opacity through VisionOS / Ghostty

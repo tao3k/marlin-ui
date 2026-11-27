@@ -7,16 +7,13 @@
 package main
 
 import (
-	"bytes"
-	"image"
-	"image/color"
-	"image/png"
 	"log"
 
 	"github.com/egoist/mygo"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/frame"
+	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 )
 
 func setupDesktopTray(
@@ -62,7 +59,7 @@ func setupDesktopTray(
 
 	tray, err := mygo.NewTray(mygo.TrayOptions{
 		ID:             "dev.tao3k.marlin-ui.tray",
-		Icon:           renderMarlinTrayPNG(),
+		Icon:           theme.MarlinTrayIconPNG(),
 		IconIsTemplate: true,
 		ToolTip:        appconfig.BuildSummary("Marlin"),
 		Menu:           menu,
@@ -72,35 +69,4 @@ func setupDesktopTray(
 		return nil
 	}
 	return tray
-}
-
-// renderMarlinTrayPNG synthesizes a crisp 32x32 Retina monochrome template
-// icon (stylized "M" glyph) in pure Go with zero external asset files.
-func renderMarlinTrayPNG() []byte {
-	const size = 32
-	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	ink := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
-	drawDot := func(cx, cy, r int) {
-		for y := cy - r; y <= cy+r; y++ {
-			for x := cx - r; x <= cx+r; x++ {
-				if x >= 0 && x < size && y >= 0 && y < size {
-					dx, dy := x-cx, y-cy
-					if dx*dx+dy*dy <= r*r {
-						img.SetNRGBA(x, y, ink)
-					}
-				}
-			}
-		}
-	}
-	for y := 7; y <= 25; y++ {
-		drawDot(7, y, 2)
-		drawDot(24, y, 2)
-	}
-	for i := 0; i <= 8; i++ {
-		drawDot(7+i, 8+i, 2)
-		drawDot(24-i, 8+i, 2)
-	}
-	var buf bytes.Buffer
-	_ = png.Encode(&buf, img)
-	return buf.Bytes()
 }

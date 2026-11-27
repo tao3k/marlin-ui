@@ -107,7 +107,11 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		}
 
 		ui.Row(c.Key("conv-main-split")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-			ui.Scroll(c.Key("conv-scroll")).Grow(3).MinWidth(0).Padding(20, 28).Children(func() {
+			scrollPadBottom := float32(58)
+			if !zen && bc != nil && bc.ComposerPinned {
+				scrollPadBottom = 136
+			}
+			ui.Scroll(c.Key("conv-scroll")).Grow(3).MinWidth(0).Padding(20, 28, scrollPadBottom, 28).Children(func() {
 				ui.Row(c.Key("conv-center-wrap")).FillWidth().Justify(ui.Center).Children(func() {
 					ui.Column(c).Grow(1).MaxWidth(colMaxW).Gap(18).AlignItems(ui.Stretch).Children(func() {
 					if startIdx > 0 {
@@ -167,8 +171,39 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		})
 
 		renderTransientStatusStrip(c, tr, bc, th)
-		renderConversationComposerBar(c, tr, bc, th)
+		if zen {
+			renderConversationComposerBar(c, tr, bc, th, false)
+		} else if shouldShowFloatingComposer(tr, bc) {
+			renderConversationComposerBar(c, tr, bc, th, true)
+		} else if bc != nil {
+			if bc.OnComposerHover != nil {
+				bc.OnComposerHover(false)
+			}
+			if bc.OnComposerFocus != nil {
+				bc.OnComposerFocus(false)
+			}
+		}
 	})
+}
+
+func shouldShowFloatingComposer(tr *mygoshell.TranscriptController, bc *Context) bool {
+	if bc == nil {
+		return true
+	}
+	// If no dock hover controller is attached (standalone buffer tests), show inline.
+	if bc.OnComposerHover == nil && bc.OnToggleComposerPin == nil {
+		return true
+	}
+	if bc.ComposerExpanded || bc.ComposerPinned {
+		return true
+	}
+	if bc.ComposerDraft != nil && strings.TrimSpace(*bc.ComposerDraft) != "" {
+		return true
+	}
+	if tr != nil && tr.Composer != nil && len(tr.Composer.Snapshot().Attachments) > 0 {
+		return true
+	}
+	return false
 }
 
 func renderConversationHeaderBar(c *ui.Context, th theme.Theme, bc *Context) {
@@ -603,7 +638,7 @@ func renderGenerativeDataPartCard(c *ui.Context, key string, dp uistream.Part, b
 	})
 }
 
-func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptController, bc *Context, th theme.Theme) {
+func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptController, bc *Context, th theme.Theme, floating bool) {
 	deepThink := tr.DeepThinkEnabled()
 	inFlight := tr.InFlight()
 	usage := tr.ContextUsage()
@@ -629,12 +664,22 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 	}
 
 	dockBg := th.Bar
-	if c.Vibrancy() {
+	if c.Vibrancy() || floating {
 		dockBg = ui.Transparent
 	}
-	ui.Row(c.Key("conv-composer-dock")).Padding(10, 24, 14, 24).Justify(ui.Center).
-		Background(dockBg).
-		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.45)).Children(func() {
+	dock := ui.Row(c.Key("conv-composer-dock")).Justify(ui.Center).Background(dockBg)
+	if floating {
+		// Float the formal ChatBox comfortably right near the ModeLine (zero
+		// upward squeezing) because clicking the Marlin makes it dive back
+		// underwater into the ModeLine water stain.
+		dock.Absolute().Bottom(8).Left(0).Right(0).Padding(8, 24, 6, 24)
+	} else {
+		dock.Padding(10, 24, 14, 24).
+			BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.45))
+	}
+	var cardHovered bool
+	var inpFocused bool
+	dock.Children(func() {
 		compMaxW := float32(860)
 		if bc != nil && bc.ZenMode {
 			compMaxW = 760
@@ -644,11 +689,13 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 		if c.Vibrancy() {
 			compCard.Material(glass.Glass{
 				Style: glass.Regular,
-				Tint:  kit.WithAlpha(th.SurfaceElevated, 0.40),
-			}).Shadow(0, 8, 24, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.30))
+				Tint:  kit.WithAlpha(th.SurfaceElevated, 0.48),
+			}).Shadow(0, 10, 28, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.36))
 		} else {
-			compCard.Background(th.SurfaceElevated).Border(1, th.Border)
+			compCard.Background(th.SurfaceElevated).Border(1, th.Border).
+				Shadow(0, 10, 28, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.28))
 		}
+		cardHovered = dock.Hovered() || compCard.Hovered()
 		compCard.Children(func() {
 			if tr.Composer != nil {
 				if atts := tr.Composer.Snapshot().Attachments; len(atts) > 0 {
@@ -672,6 +719,7 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 				inp := ui.TextInputBase(c.Key("conv-composer-input"), bc.ComposerDraft).
 					Placeholder("Ask Marlin anything… (@cite file, Enter to send, ESC for Normal)").
 					Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Grow(1)
+				inpFocused = inp.Focused()
 				if inp.Submitted() {
 					submitDraft()
 				}
@@ -714,6 +762,13 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 					}
 				}
 				ui.Spacer(c)
+				if floating && bc != nil && bc.OnToggleComposerPin != nil {
+					if theme.StyledButton(c, theme.ButtonSpec{
+						Key: "conv-hide-composer", Label: "Hide", Icon: "chevron.down", Variant: theme.BtnGhost, Size: theme.BtnSizeSM, Tone: th.InkMuted, Pill: true,
+					}, th).Clicked() {
+						bc.OnToggleComposerPin()
+					}
+				}
 				ui.Text(c, tokText).Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted).NoWrap()
 				if bc != nil && bc.ComposerDraft != nil && bc.OnSubmitPrompt != nil {
 					hasDraft := strings.TrimSpace(*bc.ComposerDraft) != ""
@@ -734,6 +789,14 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 			})
 		})
 	})
+	if bc != nil {
+		if bc.OnComposerHover != nil {
+			bc.OnComposerHover(cardHovered)
+		}
+		if bc.OnComposerFocus != nil {
+			bc.OnComposerFocus(inpFocused)
+		}
+	}
 }
 
 func renderDeterministicGatewayNotice(c *ui.Context, bc *Context, th theme.Theme) {
@@ -874,6 +937,17 @@ func renderEmptyConversationStage(c *ui.Context, tr *mygoshell.TranscriptControl
 			})
 		})
 
-		renderConversationComposerBar(c, tr, bc, th)
+		if bc != nil && bc.ZenMode {
+			renderConversationComposerBar(c, tr, bc, th, false)
+		} else if shouldShowFloatingComposer(tr, bc) {
+			renderConversationComposerBar(c, tr, bc, th, true)
+		} else if bc != nil {
+			if bc.OnComposerHover != nil {
+				bc.OnComposerHover(false)
+			}
+			if bc.OnComposerFocus != nil {
+				bc.OnComposerFocus(false)
+			}
+		}
 	})
 }

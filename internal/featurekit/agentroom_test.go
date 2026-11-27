@@ -69,16 +69,31 @@ func TestDesktopAgentRoomAppleGeistParityAndLiveBotRouting(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for @reviewer live reply")
 	}
+	// Group channel @mention replies nest cleanly inside the triggering message's thread.
 	deadline := time.Now().Add(2 * time.Second)
+	var userMsgID string
 	for time.Now().Before(deadline) {
-		tt.Frame()
-		if tt.HasText("Reviewer Audit") {
+		snap := featurekit.AgentRoomSnapshot()
+		for _, m := range snap.Messages {
+			if strings.Contains(m.Body, "@reviewer verify desktop parity") && m.ThreadCount >= 1 {
+				userMsgID = m.ID
+				break
+			}
+		}
+		if userMsgID != "" {
 			break
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
+	if userMsgID == "" {
+		t.Fatalf("expected @reviewer reply threaded under user message (ThreadCount >= 1)")
+	}
+	if err := featurekit.OpenAgentRoomThread(userMsgID); err != nil {
+		t.Fatalf("OpenAgentRoomThread(%s) failed: %v", userMsgID, err)
+	}
+	tt.Frame()
 	if !tt.HasText("Reviewer Audit") {
-		t.Fatalf("expected @reviewer reply rendered in Desktop Agent Room, got %q", strings.Join(tt.Texts(), " | "))
+		t.Fatalf("expected @reviewer reply rendered in THREAD REPLIES drawer, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
 	// Verify opening a thread shows both root message and seeded reply, and replying

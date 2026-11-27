@@ -89,9 +89,16 @@ protocol = "anthropic"
 	if !tt.HasText("GO") || !tt.HasText("[1] crates/ui_grpc.rs:L1896") {
 		t.Fatal("expected editorial CodeBlock language header and inline source citation pill")
 	}
-	// Vercel AI SDK Generative UI PartData card and Composer action strip must appear.
-	if !tt.HasText("AI SDK · data-mermaid") || !tt.HasText("Deep Think") {
-		t.Fatal("expected Generative UI data-mermaid card and Deep Think composer strip")
+	// Vercel AI SDK Generative UI PartData card appears, while formal ChatBox is docked in ModeLine Marlin until clicked.
+	if !tt.HasText("AI SDK · data-mermaid") || !tt.HasText("Marlin ChatBox") {
+		t.Fatal("expected Generative UI data-mermaid card and ModeLine Marlin ChatBox dock")
+	}
+	if err := tt.Click("Marlin ChatBox"); err != nil {
+		t.Fatalf("click ModeLine Marlin ChatBox dock: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Deep Think") {
+		t.Fatal("expected Deep Think composer strip after clicking ModeLine Marlin dock")
 	}
 
 	// Clicking Preview Stage opens the right-side Generative Artifact Split Stage.

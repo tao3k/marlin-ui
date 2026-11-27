@@ -205,6 +205,8 @@ func (f *Frame) View(c *ui.Context) {
 		Modules:             mods,
 		GlassOpacity:        glassOp,
 		ZenMode:             zen,
+		ComposerExpanded:    f.ComposerOpen(),
+		ComposerPinned:      f.ComposerOpen(),
 		Customize:           f.customize,
 		PackageSnap:         f.packageSnapshot(),
 		PackageFilter:       snap.PackageFilter,
@@ -247,9 +249,10 @@ func (f *Frame) View(c *ui.Context) {
 		ComposerDraft:     &f.convComposerDraft,
 		OnSubmitPrompt:    f.submitPrompt,
 		OnSelectModel:     f.SelectModel,
-		OnToggleDeepThink: f.ToggleDeepThink,
-		OnCiteInComposer:  f.CiteInComposer,
-		OnOpenFilePreview: f.OpenFilePreview,
+		OnToggleDeepThink:   f.ToggleDeepThink,
+		OnCiteInComposer:    f.CiteInComposer,
+		OnOpenFilePreview:   f.OpenFilePreview,
+		OnToggleComposerPin: f.ToggleComposerOpen,
 	}
 
 	winCount := snap.Workspaces.Active.WindowCount()
@@ -368,6 +371,7 @@ func (f *Frame) View(c *ui.Context) {
 				Glass:             mods.Glass,
 				GlassOpacity:      chromeOp,
 				OnSelectWorkspace: func(id string) { f.SwitchWorkspace(id) },
+				OnKillWorkspace:   func(id string) { f.KillWorkspaceByID(id) },
 				OnNewWorkspace:    func() { f.CreateWorkspace("", "") },
 				OnTogglePopup:     f.TogglePopup,
 				OnSelectBuffer:    f.SelectBuffer,
@@ -438,27 +442,29 @@ func (f *Frame) View(c *ui.Context) {
 			modeline.Render(ctx, st)
 		}
 
-		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
-				splitProps := f.buildSplitProps(snap.Workspaces, showChrome, schemeExts, mapCtx, f.FeatureHost, renderPaneModeline)
-				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, splitProps, f.buildPopupProps(snap.Workspaces))
+		ui.Column(c.Key("doom-stage-with-modeline")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
+				if !renderMountedPluginViewport(c, th, activePlugin, bc) {
+					splitProps := f.buildSplitProps(snap.Workspaces, showChrome, schemeExts, mapCtx, f.FeatureHost, renderPaneModeline)
+					window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, splitProps, f.buildPopupProps(snap.Workspaces))
+				}
+				f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
+			})
+			if showChrome && !multiPaneActive {
+				st := f.buildModelineStatus(snap, modelLbl, sessLbl)
+				st.WorkspaceName = snap.Workspaces.Active.Name
+				st.Glass = mods.Glass
+				st.GlassOpacity = chromeOp
+				st.PendingGates = pendingGateCount
+				st.OnReviewGate = f.OpenGateReview
+				st.OnToggleDedicated = f.ToggleWindowDedicated
+				st.WindowCount = 1
+				st.WidthCols = 120
+				st.Focused = true
+				st.Dedicated = snap.Workspaces.Active.FocusedLeaf().Dedicated
+				modeline.Render(c, st)
 			}
-			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)
 		})
-		if showChrome && !multiPaneActive {
-			st := f.buildModelineStatus(snap, modelLbl, sessLbl)
-			st.WorkspaceName = snap.Workspaces.Active.Name
-			st.Glass = mods.Glass
-			st.GlassOpacity = chromeOp
-			st.PendingGates = pendingGateCount
-			st.OnReviewGate = f.OpenGateReview
-			st.OnToggleDedicated = f.ToggleWindowDedicated
-			st.WindowCount = 1
-			st.WidthCols = 120
-			st.Focused = true
-			st.Dedicated = snap.Workspaces.Active.FocusedLeaf().Dedicated
-			modeline.Render(c, st)
-		}
 		if showMini {
 			minibuffer.Render(c, minibuffer.RenderProps{
 				State:             f.miniState,
@@ -490,10 +496,70 @@ func (f *Frame) View(c *ui.Context) {
 				OnInvalidate: f.requestFrame,
 			})
 		}
+		// Transparent hanging-pendant Marlin water overlay straddling the entire
+		// ModeLine bar and overhanging slightly below its bottom lip (hidden
+		// whenever Helm / M-x / Hydra completion drawers are active).
+		if showChrome && !overlayActive && activeBuf == buffer.Conversation && activeFeat == "" && activeExt == nil && activePlugin == nil {
+			bottomOffset := float32(0)
+			if showMini {
+				bottomOffset = theme.MinibufferHeight - theme.MarlinOceanOverhang
+			}
+			f.renderMarlinOceanCrestOverlay(c, th, bottomOffset)
+		}
 	})
 	if f.consumeRefocusFrame() {
 		frameEl.Focus(ui.FocusOptions{PreventScroll: true})
 	}
+}
+
+func (f *Frame) renderMarlinOceanCrestOverlay(c *ui.Context, th theme.Theme, bottomOffset float32) {
+	open, hoverStart, clickStart := f.composerDockAnimTimes()
+	prevHovered := f.ComposerDockHovered()
+
+	// Straddles the ModeLine's top border line in the horizontal center:
+	// bottom 26px overlays the ModeLine bar for wet water stains & hanging
+	// droplets, while the upper 112px extends seamlessly into open air above.
+	ui.Row(c.Key("dm-marlin-crest-wrap")).
+		Absolute().Bottom(bottomOffset).Left(0).Right(0).
+		Height(theme.MarlinOceanDockHeight).
+		Justify(ui.Center).AlignItems(ui.End).
+		PassThrough().
+		Children(func() {
+			ui.Box(c.Key("dm-marlin-crest-stage")).
+				Width(theme.MarlinOceanDockWidth).
+				Height(theme.MarlinOceanDockHeight).
+				PassThrough().
+				Children(func() {
+					// Interactive hitbox stays compact over the ModeLine water strip when
+					// ChatBox is open (Marlin dived underwater -> never blocks ChatBox!).
+					// When ChatBox is closed, expands upward on hover to cover the full fish.
+					hitH := float32(76)
+					if open {
+						hitH = theme.ModelineHeight + theme.MarlinOceanOverhang + 6
+					} else if prevHovered {
+						hitH = theme.MarlinOceanDockHeight - 10
+					}
+					hitBtn := kit.ActionControl(ui.ButtonBase(c.Key("dm-marlin-dock")).
+						Label("Marlin ChatBox").
+						Absolute().Bottom(0).Left(48).Right(48).Height(hitH).
+						Background(ui.Transparent))
+					hovered := hitBtn.Hovered()
+
+					theme.MarlinOceanDock(c, theme.MarlinOceanDockProps{
+						Key:        "dm-marlin-ocean",
+						Hovered:    hovered,
+						Open:       open,
+						HoverStart: hoverStart,
+						ClickStart: clickStart,
+						Theme:      th,
+					})
+
+					f.setComposerDockHovered(hovered)
+					if hitBtn.Clicked() {
+						f.ToggleComposerOpen()
+					}
+				})
+		})
 }
 
 func (f *Frame) requestRefocusFrame() {

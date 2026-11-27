@@ -119,17 +119,17 @@ func renderWindowTree(c *ui.Context, th theme.Theme, bc *buffer.Context, split S
 		}
 		if node.IsSplit() {
 			ratio := node.Ratio
-			if ratio < 0.25 || ratio > 0.75 {
+			if ratio < 0.15 || ratio > 0.85 {
 				ratio = 0.50
 			}
-			firstGrow := float32(int(ratio*100 + 0.5))
-			secondGrow := float32(100) - firstGrow
+			firstGrow := ratio
+			secondGrow := 1.0 - ratio
 
 			var container ui.Element
 			if node.Direction == workspace.SplitVertical {
-				container = ui.Row(c.Key("doom-split-"+keyPath)).Grow(growWeight).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
+				container = ui.Row(c.Key("doom-split-"+keyPath)).Grow(growWeight).Shrink(1).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
 			} else {
-				container = ui.Column(c.Key("doom-split-"+keyPath)).Grow(growWeight).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
+				container = ui.Column(c.Key("doom-split-"+keyPath)).Grow(growWeight).Shrink(1).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
 			}
 			applyDivider(c, container, th, dividerSide)
 			container.Children(func() {
@@ -148,7 +148,7 @@ func renderWindowTree(c *ui.Context, th theme.Theme, bc *buffer.Context, split S
 			Focused:   node.ID == split.FocusedWindowID,
 		}
 		pane := ui.Column(c.Key("doom-pane-"+leaf.ID)).
-			Grow(growWeight).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
+			Grow(growWeight).Shrink(1).Basis(0).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip()
 		applyDivider(c, pane, th, dividerSide)
 		pane.Children(func() {
 			// Subtle 1.5px top focus hairline (zero non-Emacs top header bar clutter!).

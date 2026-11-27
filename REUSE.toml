@@ -12,6 +12,7 @@ path = [
   "mygo.json",
   "resources/icon.png",
   "internal/emacs/theme/assets/marlin-emblem.png",
+  "internal/emacs/theme/assets/marlin-sprite-sheet.png",
   "sdk/marlin-ui-sdk/package.json",
   "sdk/marlin-ui-sdk/tsconfig.json",
 ]

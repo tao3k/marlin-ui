@@ -219,10 +219,16 @@ func (f *Frame) StepWorkspace(delta int) bool {
 // KillActiveWorkspace closes the current perspective workspace (SPC l d) unless
 // it is the last remaining workspace.
 func (f *Frame) KillActiveWorkspace() bool {
+	return f.KillWorkspaceByID("")
+}
+
+// KillWorkspaceByID closes a specific workspace by ID (or the active workspace
+// when id is empty) unless it is the last remaining workspace.
+func (f *Frame) KillWorkspaceByID(id string) bool {
 	if f.wsMgr == nil {
 		return false
 	}
-	killed, snap := f.wsMgr.KillWorkspace("")
+	killed, snap := f.wsMgr.KillWorkspace(id)
 	if !killed {
 		f.Echo("Cannot kill last remaining workspace")
 		return false
@@ -233,26 +239,43 @@ func (f *Frame) KillActiveWorkspace() bool {
 	return true
 }
 
-// SplitVertical splits the active workspace left | right (Doom SPC w v).
+func (f *Frame) syncActiveSpecialBufferIntoWindowTree() {
+	f.mu.Lock()
+	featID := f.activeFeatureID
+	extID := f.activeExtID
+	f.mu.Unlock()
+	if f.wsMgr == nil {
+		return
+	}
+	if extID != "" {
+		_, _ = f.wsMgr.OpenBuffer(buffer.ID("scheme-ext:" + extID))
+	} else if featID != "" {
+		_, _ = f.wsMgr.OpenBuffer(buffer.ID(featID))
+	}
+}
+
+// SplitVertical splits the currently focused window left | right (50/50 auto-balanced, Doom SPC w v / C-x 3).
 func (f *Frame) SplitVertical(secondary buffer.ID) {
 	if f.wsMgr == nil {
 		return
 	}
+	f.syncActiveSpecialBufferIntoWindowTree()
 	snap := f.wsMgr.SplitVertical(secondary)
 	f.syncSplitStateLocked(snap.Active)
 	f.persistWorkspaces()
-	f.Echo("Split right: " + string(snap.Active.SecondaryBuffer))
+	f.Echo("Split right (50/50): " + string(snap.Active.FocusedBuffer()))
 }
 
-// SplitHorizontal splits the active workspace top / bottom (Doom SPC w s).
+// SplitHorizontal splits the currently focused window top / bottom (50/50 auto-balanced, Doom SPC w s / C-x 2).
 func (f *Frame) SplitHorizontal(secondary buffer.ID) {
 	if f.wsMgr == nil {
 		return
 	}
+	f.syncActiveSpecialBufferIntoWindowTree()
 	snap := f.wsMgr.SplitHorizontal(secondary)
 	f.syncSplitStateLocked(snap.Active)
 	f.persistWorkspaces()
-	f.Echo("Split below: " + string(snap.Active.SecondaryBuffer))
+	f.Echo("Split below (50/50): " + string(snap.Active.FocusedBuffer()))
 }
 
 // DeleteOtherWindows collapses any split to a single window (Doom SPC w o).
@@ -578,12 +601,30 @@ func (f *Frame) currentFilePreview() *buffer.FilePreviewState {
 	return fp
 }
 
+func isEphemeralScratchWorkspace(sw appconfig.SavedWorkspace) bool {
+	if strings.TrimSpace(sw.ProjectRoot) != "" {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(sw.Name))
+	if !strings.HasPrefix(name, "ws-") {
+		return false
+	}
+	_, err := strconv.Atoi(strings.TrimPrefix(name, "ws-"))
+	return err == nil
+}
+
 func (f *Frame) restoreSavedWorkspaces() {
 	if f.wsMgr == nil || len(f.Prefs.Workspaces) == 0 {
 		return
 	}
 	persps := make([]workspace.Perspective, 0, len(f.Prefs.Workspaces))
 	for _, sw := range f.Prefs.Workspaces {
+		// Never auto-resurrect unnamed scratch workspaces (ws-2, ws-3, ...)
+		// on fresh launch: start cleanly with 1:main plus any explicitly named
+		// project workspaces.
+		if sw.ID != "main" && isEphemeralScratchWorkspace(sw) {
+			continue
+		}
 		bufs := make([]buffer.ID, 0, len(sw.Buffers))
 		for _, b := range sw.Buffers {
 			if strings.TrimSpace(b) != "" {
@@ -600,6 +641,9 @@ func (f *Frame) restoreSavedWorkspaces() {
 			SplitRatio:      sw.SplitRatio,
 			Buffers:         bufs,
 		})
+	}
+	if len(persps) == 0 {
+		return
 	}
 	snap := f.wsMgr.RestorePerspectives(f.Prefs.ActiveWorkspaceID, persps)
 	f.activeBuffer = snap.Active.ActiveBuffer

@@ -149,17 +149,13 @@ func TestDoomEmacsFrameHydraModelineAndGRPCProjection(t *testing.T) {
 		t.Fatalf("expected hydra to close on Done, got prefix=%q", fr.KeypadPrefix())
 	}
 
-	// 3. Switch to *Sessions* and *Targets* tabulated-list-mode buffers ('main modeline preset).
-	if err := tt.Click("*Sessions*"); err != nil {
-		t.Fatalf("click *Sessions*: %v", err)
-	}
+	// 3. Open *Sessions* and *Targets* tabulated-list-mode buffers on demand ('main modeline preset).
+	fr.SelectBuffer(buffer.Sessions)
 	tt.Frame()
 	if fr.ActiveBuffer() != buffer.Sessions || !tt.HasText("Tabulated-List") || !tt.HasText("Primary Workspace") {
 		t.Fatalf("expected *Sessions* tabulated buffer + main modeline, got %q", strings.Join(tt.Texts(), " | "))
 	}
-	if err := tt.Click("*Targets*"); err != nil {
-		t.Fatalf("click *Targets*: %v", err)
-	}
+	fr.SelectBuffer(buffer.Targets)
 	tt.Frame()
 	if !tt.HasText("Edge GPU") {
 		t.Fatalf("expected restored remote in *Targets* buffer, got %q", strings.Join(tt.Texts(), " | "))
@@ -444,8 +440,9 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		t.Fatalf("expected vertical split with per-window Doom modeline numbers 1 & 2, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
-	// 1b. Resize & swap panes via SPC w l and SPC w x, plus nested 3rd window (SPC w s),
+	// 1b. Switch pane 2 to *conversation*, resize & swap panes via SPC w l and SPC w x, plus nested 3rd window (SPC w s),
 	// direct winum jump (SPC w 1), dedicated pin (SPC w t), and winner-mode undo/redo (SPC w u / SPC w U).
+	fr.SelectBuffer(buffer.Conversation)
 	fr.ResizeSplit(0.10)
 	fr.SwapSplitPanes()
 	tt.Frame()
@@ -572,12 +569,19 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 		t.Fatalf("expected live model label in modeline/frame, got %q", strings.Join(tt.Texts(), " | "))
 	}
 
-	// 5. Empty *conversation* renders the flagship Hero Stage + docked Composer directly.
+	// 5. Empty *conversation* renders the flagship Hero Stage + ModeLine Marlin dock (clicking opens formal ChatBox).
 	fr.DeleteOtherWindows()
 	fr.SelectBuffer(buffer.Conversation)
 	tt.Frame()
-	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Deep Think") || !tt.HasText("Cite") {
-		t.Fatalf("expected empty *conversation* Hero Stage + docked Composer, got %q", strings.Join(tt.Texts(), " | "))
+	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Marlin ChatBox") {
+		t.Fatalf("expected empty *conversation* Hero Stage + ModeLine Marlin dock, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if err := tt.Click("Marlin ChatBox"); err != nil {
+		t.Fatalf("expected ModeLine Marlin dock clickable: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("Deep Think") || !tt.HasText("Cite") {
+		t.Fatalf("expected formal ChatBox (Deep Think + Cite) after clicking ModeLine Marlin dock, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }
 

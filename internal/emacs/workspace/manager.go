@@ -73,6 +73,7 @@ type Perspective struct {
 	ID              string
 	Name            string
 	ProjectRoot     string
+	SessionID       string
 	ActiveBuffer    buffer.ID
 	SplitMode       SplitMode
 	SecondaryBuffer buffer.ID
@@ -108,12 +109,12 @@ type Manager struct {
 	nextSeq    int
 }
 
-// NewManager initializes the primary "main" workspace with default tabs and
-// Doom popup rules.
+// NewManager initializes the single primary "main" workspace with a clean
+// minimal tab set (*Dashboard* + *conversation*) and Doom popup rules.
 func NewManager(initialTabs []buffer.ID) *Manager {
 	tabs := append([]buffer.ID(nil), initialTabs...)
 	if len(tabs) == 0 {
-		tabs = []buffer.ID{buffer.Dashboard, buffer.Conversation, buffer.Sessions, buffer.Targets}
+		tabs = []buffer.ID{buffer.Dashboard, buffer.Conversation}
 	}
 	return &Manager{
 		activeID: "main",
@@ -211,6 +212,7 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 		ID:              id,
 		Name:            cleanName,
 		ProjectRoot:     strings.TrimSpace(projectRoot),
+		SessionID:       "marlin-" + id,
 		ActiveBuffer:    buffer.Conversation,
 		SplitMode:       SplitSingle,
 		SplitRatio:      0.50,
@@ -413,7 +415,8 @@ func (m *Manager) applySplit(mode SplitMode, secondary buffer.ID) Snapshot {
 		focusLeaf = firstWindowLeaf(ws.WindowTree)
 	}
 	if secondary == "" {
-		secondary = defaultSecondaryBuffer(focusLeaf.Buffer)
+		// Split based on the currently focused window's buffer (Emacs / Ghostty / tmux).
+		secondary = focusLeaf.Buffer
 	}
 	ws.NextWindowSeq++
 	newID := fmt.Sprintf("w%d", ws.NextWindowSeq)
@@ -427,8 +430,10 @@ func (m *Manager) applySplit(mode SplitMode, secondary buffer.ID) Snapshot {
 			Second:    newLeaf,
 		}
 	})
+	// Auto-balance split tree across the split axis (50/50 for 2 panes, 33.3% each for 3 panes).
+	ws.WindowTree = balanceWindowTree(ws.WindowTree)
 	ws.FocusedWindowID = newID
-	if !containsBuf(ws.Buffers, secondary) {
+	if !strings.HasPrefix(string(secondary), "scheme-ext:") && !strings.HasPrefix(string(secondary), "feature:") && !containsBuf(ws.Buffers, secondary) {
 		ws.Buffers = append(ws.Buffers, secondary)
 	}
 	syncLegacySplitFields(ws)
@@ -542,7 +547,7 @@ func (m *Manager) RestorePerspectives(activeID string, saved []Perspective) Snap
 			w.SecondaryBuffer = ""
 		}
 		ratio := w.SplitRatio
-		if ratio < 0.25 || ratio > 0.75 {
+		if ratio < 0.15 || ratio > 0.85 {
 			ratio = 0.50
 		}
 		p := Perspective{
@@ -617,7 +622,7 @@ func (m *Manager) CloseFocusedPane() (closed bool, snap Snapshot) {
 	}
 	recordWinnerSnapshot(ws)
 	curIdx := ws.FocusedPane
-	ws.WindowTree = deleteWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	ws.WindowTree = balanceWindowTree(deleteWindowLeaf(ws.WindowTree, ws.FocusedWindowID))
 	nextLeaves := ws.Windows()
 	if len(nextLeaves) > 0 {
 		if curIdx >= len(nextLeaves) {

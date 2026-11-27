@@ -7,6 +7,7 @@
 package featurekit
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/runtime/async"
+	"github.com/tao3k/marlin-mygo/runtime/kit"
 )
 
 func TestWebIslandDefaultDenyTier0AndFocusRevocation(t *testing.T) {
@@ -115,5 +117,31 @@ func TestWebIslandDefaultDenyTier0AndFocusRevocation(t *testing.T) {
 	NotifyWebIslandVisibility("")
 	if _, shown, focused, _ := lc.Snapshot(); shown || focused {
 		t.Fatalf("expected NotifyWebIslandVisibility(\"\") to revoke shown & focused, got shown=%v focused=%v", shown, focused)
+	}
+}
+
+func TestWorkflowCanvasMatchesViewportThemeAndOpacity(t *testing.T) {
+	pal := kit.Palette{
+		Canvas:  ui.Hex("#282c34"),
+		Bar:     ui.Hex("#21242b"),
+		Surface: ui.Hex("#2d333f"),
+		Ink:     ui.Hex("#d5dce6"),
+	}
+	html := workflowStudioThemedHTML(pal, 0.75)
+	if !strings.Contains(html, "rgba(40, 44, 52, 0.750)") {
+		t.Fatalf("expected Workflow Canvas HTML to embed theme viewport background rgba(40, 44, 52, 0.750), got snippet without it")
+	}
+	if !strings.Contains(html, "html,body{background:var(--viewport-bg) !important;}") {
+		t.Fatalf("expected Workflow Canvas HTML to override raw transparent html/body background")
+	}
+
+	script := webIslandViewportThemeScript(pal, 1.0)
+	if !strings.Contains(script, "rgba(40, 44, 52, 1.000)") || !strings.Contains(script, "document.body.style.background=bg") {
+		t.Fatalf("expected live theme sync script to update html/body viewport background opacity cleanly")
+	}
+
+	artHTML := appleGeistArtifactStageHTML(pal, 0.75)
+	if !strings.Contains(artHTML, "--marlin-viewport-bg: rgba(40, 44, 52, 0.750)") || !strings.Contains(artHTML, "background: var(--marlin-viewport-bg)") {
+		t.Fatalf("expected Artifact Stage HTML to follow theme viewport opacity")
 	}
 }

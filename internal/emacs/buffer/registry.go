@@ -103,9 +103,11 @@ type Context struct {
 	Signals         *widgets.Signals
 	WidgetRuntime   *widgets.Runtime
 	Modules         widgets.Modules
-	GlassOpacity    float32
-	ZenMode         bool
-	Customize       *CustomizeState
+	GlassOpacity     float32
+	ZenMode          bool
+	ComposerExpanded bool
+	ComposerPinned   bool
+	Customize        *CustomizeState
 	PackageSnap     marketplace.PackageStoreSnapshot
 	PackageFilter   string
 
@@ -137,8 +139,11 @@ type Context struct {
 	OnSubmitPrompt     func(text string)
 	OnSelectModel      func(alias, displayLabel string)
 	OnToggleDeepThink  func()
-	OnCiteInComposer   func(ref string)
-	OnOpenFilePreview  func(title, path, snippet string, line int)
+	OnCiteInComposer    func(ref string)
+	OnOpenFilePreview   func(title, path, snippet string, line int)
+	OnComposerHover     func(hovered bool)
+	OnComposerFocus     func(focused bool)
+	OnToggleComposerPin func()
 }
 
 // Render dispatches rendering to the active buffer's major mode.

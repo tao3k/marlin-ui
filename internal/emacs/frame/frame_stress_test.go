@@ -75,6 +75,9 @@ func TestMyGoNativeAutomatedTabClickSoakAndP99(t *testing.T) {
 		}
 	}()
 
+	f.SelectBuffer(buffer.Sessions)
+	f.SelectBuffer(buffer.Targets)
+	f.SelectBuffer(buffer.Dashboard)
 	tt := ui.NewTester(f.View, 920, 560)
 	tt.SetVibrancy(true)
 	tabLabels := []string{

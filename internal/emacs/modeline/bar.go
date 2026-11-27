@@ -150,9 +150,7 @@ func Render(c *ui.Context, st Status) {
 		// Segment 1: Authentic 4px doom-modeline-bar (`doom-modeline-bar-width 4`).
 		ui.Box(c.Key(k("dm-bar"))).Width(4).FillHeight().Background(barColor)
 
-		// Strict 2-zone optical layout:
-		//   - LHS flex container (`Grow(1).MinWidth(0).Shrink(1)`): never collides with RHS.
-		//   - RHS fixed container (`Shrink(0)`): right-anchored with hairline group dividers.
+		// Strict 2-zone optical layout: LHS flex-grows with truncation; RHS stays crisp.
 		ui.Row(c).Grow(1).MinWidth(0).Padding(0, 10).Gap(10).AlignItems(ui.Center).Clip().Children(func() {
 			// LHS Zone
 			ui.Row(c.Key(k("dm-lhs"))).Basis(0).Grow(1).MinWidth(0).Gap(7).AlignItems(ui.Center).Clip().Children(func() {
@@ -163,7 +161,7 @@ func Render(c *ui.Context, st Status) {
 
 			// RHS Zone
 			if len(rhsSegs) > 0 {
-				ui.Row(c.Key(k("dm-rhs"))).Shrink(0).Gap(7).AlignItems(ui.Center).Children(func() {
+				ui.Row(c.Key(k("dm-rhs"))).Gap(7).AlignItems(ui.Center).Shrink(0).Children(func() {
 					renderRHSSegments(c, k, rhsSegs, st, th, widthCols, focused, multi, tier)
 				})
 			}

@@ -123,26 +123,231 @@ func main() {
 		}
 	}
 
-	mygo.App.SetName("Marlin Mobile")
-	mygo.App.SetVersion(appconfig.Version)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	plat := mygoshell.MobilePlatformIOS
-	formFactor := mygoshell.FormFactorIOS
-	targetKind := schema.TargetMobileIOS
-	if strings.EqualFold(strings.TrimSpace(cfg.MobilePlatform), "android") || runtime.GOOS == "android" {
-		plat = mygoshell.MobilePlatformAndroid
-		formFactor = mygoshell.FormFactorAndroid
-		targetKind = schema.TargetMobileAndroid
-	}
+	plat, formFactor, targetKind := resolveMobilePlatform(cfg.MobilePlatform)
 	spec := mygoshell.BuiltinMobileDeviceSpec(plat, cfg.MobileDevice)
+	adaptive := newMobileAdaptiveShell(cfg.ThemeID, spec.Name, formFactor, plat)
 
+	rt, savePrefs := configureMobilePreRun(mobilePreRunConfig{
+		AppConfig: cfg,
+		Prefs:     prefs,
+		OnReady: func(rt *mobileRuntimeState, savePrefs func()) {
+			var (
+				win     *mygo.Window
+				tabWins []*mygo.Window
+				tabBar  *mygo.Tabs
+			)
+			invalidate := func() {
+				if win != nil {
+					win.Invalidate()
+				}
+				for _, w := range tabWins {
+					if w != nil {
+						w.Invalidate()
+					}
+				}
+			}
+
+			var applyFeatures func(string)
+			authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
+				Config: cfg,
+				Prefs:  rt.snapshotPrefs(),
+				OnApplyFeatures: func(spec string) {
+					if applyFeatures != nil {
+						applyFeatures(spec)
+					}
+				},
+				OnSavePrefs: func(vals map[string]any) {
+					rt.updatePrefs(func(p *appconfig.UserPrefs) {
+						appconfig.ApplySettingsValues(p, vals)
+					})
+					savePrefs()
+				},
+				Invalidate: invalidate,
+			})
+
+			var err error
+			rt.link, err = hostlink.Connect(
+				ctx,
+				cfg,
+				adaptive,
+				targetKind,
+				invalidate,
+				hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
+				hostlink.WithSavedRemotes(rt.snapshotPrefs().SavedRemotes),
+				hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
+					rt.updatePrefs(func(p *appconfig.UserPrefs) {
+						p.UpsertRemote(r)
+					})
+					savePrefs()
+				}),
+			)
+			if err != nil {
+				log.Fatalf("marlin-mobile host connection failed: %v", err)
+			}
+			reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, rt.link.OnDraftChanged, invalidate)
+			applyFeatures = func(spec string) {
+				reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
+				adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
+			}
+			adaptive.Mobile.TargetLabel = fmt.Sprintf("%s · %s", spec.Name, rt.link.Endpoint)
+
+			// On iOS (both native GOOS=ios Swift UIKit host and macOS Apple HIG dev preview),
+			// mount Marlin's flagship Desktop-parity Liquid Glass iOS 26 shell under internal/mobile/ios.
+			if plat == mygoshell.MobilePlatformIOS {
+				isNativeIOS := runtime.GOOS == "ios"
+				iosShell := ios.New(ios.Config{
+					Adaptive:       adaptive,
+					Link:           rt.link,
+					AppConfig:      cfg,
+					Prefs:          rt.snapshotPrefs(),
+					ThemeBundle:    themeBundle,
+					InitialThemeID: cfg.ThemeID,
+					NativeTabBar:   isNativeIOS,
+					OnPrefsChanged: func(next appconfig.UserPrefs) {
+						rt.setPrefs(next)
+						savePrefs()
+					},
+					OnBadgeChanged: func(tabIdx int, badge string) {
+						if tabBar != nil {
+							tabBar.SetBadge(tabIdx, badge)
+						}
+					},
+					Invalidate: invalidate,
+				})
+
+				if isNativeIOS {
+					// Native Swift UITabBarController + SF Symbols (automatic iOS 26 Liquid Glass tab bar!).
+					items := make([]mygo.TabItem, 0, len(mobile.Tabs))
+					for _, ts := range mobile.Tabs {
+						tw := mygo.NewWindow(mygo.WindowOptions{
+							Title:   ts.Title,
+							Hidden:  true,
+							Content: ui.View(iosShell.TabView(ts.Tab)),
+						})
+						tabWins = append(tabWins, tw)
+						items = append(items, mygo.TabItem{
+							Title:  ts.Title,
+							Symbol: ts.Symbol,
+							Window: tw,
+						})
+					}
+					if tb, tbErr := mygo.NewTabs(items...); tbErr == nil {
+						tabBar = tb
+						tb.OnSelect(func(idx int) {
+							if idx >= 0 && idx < len(mobile.Tabs) {
+								iosShell.SelectTab(mobile.Tabs[idx].Tab)
+							}
+						})
+						invalidate()
+						return
+					}
+				}
+
+				// macOS Apple HIG iPhone 16 Pro dev window with native macOS 26 NSGlassEffectView
+				// regular frosted Liquid Glass (blurs busy background terminals cleanly).
+				win = mygo.NewWindow(mygo.WindowOptions{
+					Title:         fmt.Sprintf("Marlin iOS — %s", spec.Name),
+					Width:         spec.LogicalWidth,
+					Height:        spec.LogicalHeight,
+					MinWidth:      spec.LogicalWidth,
+					MinHeight:     spec.LogicalHeight,
+					MaxWidth:      spec.LogicalWidth,
+					MaxHeight:     spec.LogicalHeight,
+					TitleBarStyle: mygo.TitleBarHiddenInset,
+					Transparent:   true,
+					Vibrancy:      mygo.VibrancyGlass,
+					Content:       ui.View(iosShell.View),
+				})
+				win.SetActiveAppearance(true)
+				win.Invalidate()
+				return
+			}
+
+			// Android Material 3 companion shell under internal/mobile/android.
+			androidShell := android.New(android.Config{
+				Adaptive:       adaptive,
+				Link:           rt.link,
+				AppConfig:      cfg,
+				Prefs:          rt.snapshotPrefs(),
+				ThemeBundle:    themeBundle,
+				InitialThemeID: cfg.ThemeID,
+				OnPrefsChanged: func(next appconfig.UserPrefs) {
+					rt.setPrefs(next)
+					savePrefs()
+				},
+				Invalidate: invalidate,
+			})
+			winOpts := mygo.WindowOptions{
+				Title:   fmt.Sprintf("Marlin Android — %s", spec.Name),
+				Width:   spec.LogicalWidth,
+				Height:  spec.LogicalHeight,
+				Content: ui.View(androidShell.View),
+			}
+			if runtime.GOOS != "ios" && runtime.GOOS != "android" {
+				winOpts.MinWidth = spec.LogicalWidth
+				winOpts.MinHeight = spec.LogicalHeight
+				winOpts.MaxWidth = spec.LogicalWidth
+				winOpts.MaxHeight = spec.LogicalHeight
+			}
+			win = mygo.NewWindow(winOpts)
+			win.Invalidate()
+		},
+	})
+
+	if err := mygo.App.Run(); err != nil {
+		log.Fatal(err)
+	}
+	savePrefs()
+	if rt.link != nil {
+		rt.link.Close()
+	}
+}
+
+type mobileRuntimeState struct {
+	prefsMu sync.Mutex
+	prefs   appconfig.UserPrefs
+	link    *hostlink.Link
+}
+
+func (rt *mobileRuntimeState) snapshotPrefs() appconfig.UserPrefs {
+	rt.prefsMu.Lock()
+	defer rt.prefsMu.Unlock()
+	return rt.prefs
+}
+
+func (rt *mobileRuntimeState) setPrefs(next appconfig.UserPrefs) {
+	rt.prefsMu.Lock()
+	rt.prefs = next
+	rt.prefsMu.Unlock()
+}
+
+func (rt *mobileRuntimeState) updatePrefs(fn func(*appconfig.UserPrefs)) {
+	rt.prefsMu.Lock()
+	fn(&rt.prefs)
+	rt.prefsMu.Unlock()
+}
+
+type mobilePreRunConfig struct {
+	AppConfig appconfig.Config
+	Prefs     appconfig.UserPrefs
+	OnReady   func(*mobileRuntimeState, func())
+}
+
+func resolveMobilePlatform(raw string) (mygoshell.MobilePlatform, mygoshell.ShellFormFactor, schema.TargetKind) {
+	if strings.EqualFold(strings.TrimSpace(raw), "android") || runtime.GOOS == "android" {
+		return mygoshell.MobilePlatformAndroid, mygoshell.FormFactorAndroid, schema.TargetMobileAndroid
+	}
+	return mygoshell.MobilePlatformIOS, mygoshell.FormFactorIOS, schema.TargetMobileIOS
+}
+
+func newMobileAdaptiveShell(themeID, deviceName string, formFactor mygoshell.ShellFormFactor, plat mygoshell.MobilePlatform) *mygoshell.AdaptiveShell {
 	adaptive := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
 		BrandTitle:     "Marlin",
-		BrandSubtitle:  spec.Name,
-		InitialThemeID: cfg.ThemeID,
+		BrandSubtitle:  deviceName,
+		InitialThemeID: themeID,
 		FormFactor:     formFactor,
 		MobilePlatform: plat,
 	})
@@ -155,197 +360,31 @@ func main() {
 			Active:   true,
 		},
 	})
+	return adaptive
+}
 
-	var (
-		prefsMu sync.Mutex
-		link    *hostlink.Link
-	)
+// configureMobilePreRun performs every pre-App.Run MyGo registration step for
+// marlin-mobile so main_test.go can execute the exact startup sequence on the
+// OS main thread before mygo.App.Run.
+func configureMobilePreRun(p mobilePreRunConfig) (*mobileRuntimeState, func()) {
+	mygo.App.SetName("Marlin Mobile")
+	mygo.App.SetVersion(appconfig.Version)
+
+	rt := &mobileRuntimeState{prefs: p.Prefs}
 	savePrefs := func() {
-		prefsMu.Lock()
-		snap := prefs
-		prefsMu.Unlock()
-		_ = appconfig.SavePrefs(cfg.PrefsFile, snap)
+		_ = appconfig.SavePrefs(p.AppConfig.PrefsFile, rt.snapshotPrefs())
 	}
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
 		savePrefs()
-		if link != nil {
-			link.SaveNow()
-			link.Close()
+		if rt.link != nil {
+			rt.link.SaveNow()
+			rt.link.Close()
 		}
 	})
-
 	mygo.App.WhenReady(func() {
-		var (
-			win     *mygo.Window
-			tabWins []*mygo.Window
-			tabBar  *mygo.Tabs
-		)
-		invalidate := func() {
-			if win != nil {
-				win.Invalidate()
-			}
-			for _, w := range tabWins {
-				if w != nil {
-					w.Invalidate()
-				}
-			}
+		if p.OnReady != nil {
+			p.OnReady(rt, savePrefs)
 		}
-
-		var applyFeatures func(string)
-		authCtrl := hostlink.AttachAuthAndSettings(ctx, adaptive, hostlink.AuthSettingsConfig{
-			Config: cfg,
-			Prefs:  prefs,
-			OnApplyFeatures: func(spec string) {
-				if applyFeatures != nil {
-					applyFeatures(spec)
-				}
-			},
-			OnSavePrefs: func(vals map[string]any) {
-				prefsMu.Lock()
-				appconfig.ApplySettingsValues(&prefs, vals)
-				prefsMu.Unlock()
-				savePrefs()
-			},
-			Invalidate: invalidate,
-		})
-
-		var err error
-		link, err = hostlink.Connect(
-			ctx,
-			cfg,
-			adaptive,
-			targetKind,
-			invalidate,
-			hostlink.WithAuthTokenSource(hostlink.OptionalAuthTokenSource(authCtrl)),
-			hostlink.WithSavedRemotes(prefs.SavedRemotes),
-			hostlink.WithOnRemoteAdded(func(r appconfig.SavedRemote) {
-				prefsMu.Lock()
-				prefs.UpsertRemote(r)
-				prefsMu.Unlock()
-				savePrefs()
-			}),
-		)
-		if err != nil {
-			log.Fatalf("marlin-mobile host connection failed: %v", err)
-		}
-		reg, ledger, host := featurekit.Mount(cfg.FeaturesSpec, adaptive, link.OnDraftChanged, invalidate)
-		applyFeatures = func(spec string) {
-			reg.Activate(features.ParseFeatureSpec(spec), ledger, host)
-			adaptive.SetFeatureHost(host, adaptive.Desktop.GovernanceUI)
-		}
-		adaptive.Mobile.TargetLabel = fmt.Sprintf("%s · %s", spec.Name, link.Endpoint)
-
-		// On iOS (both native GOOS=ios Swift UIKit host and macOS Apple HIG dev preview),
-		// mount Marlin's flagship Desktop-parity Liquid Glass iOS 26 shell under internal/mobile/ios.
-		if plat == mygoshell.MobilePlatformIOS {
-			isNativeIOS := runtime.GOOS == "ios"
-			iosShell := ios.New(ios.Config{
-				Adaptive:       adaptive,
-				Link:           link,
-				AppConfig:      cfg,
-				Prefs:          prefs,
-				ThemeBundle:    themeBundle,
-				InitialThemeID: cfg.ThemeID,
-				NativeTabBar:   isNativeIOS,
-				OnPrefsChanged: func(next appconfig.UserPrefs) {
-					prefsMu.Lock()
-					prefs = next
-					prefsMu.Unlock()
-					savePrefs()
-				},
-				OnBadgeChanged: func(tabIdx int, badge string) {
-					if tabBar != nil {
-						tabBar.SetBadge(tabIdx, badge)
-					}
-				},
-				Invalidate: invalidate,
-			})
-
-			if isNativeIOS {
-				// Native Swift UITabBarController + SF Symbols (automatic iOS 26 Liquid Glass tab bar!).
-				items := make([]mygo.TabItem, 0, len(mobile.Tabs))
-				for _, ts := range mobile.Tabs {
-					tw := mygo.NewWindow(mygo.WindowOptions{
-						Title:   ts.Title,
-						Hidden:  true,
-						Content: ui.View(iosShell.TabView(ts.Tab)),
-					})
-					tabWins = append(tabWins, tw)
-					items = append(items, mygo.TabItem{
-						Title:  ts.Title,
-						Symbol: ts.Symbol,
-						Window: tw,
-					})
-				}
-				if tb, tbErr := mygo.NewTabs(items...); tbErr == nil {
-					tabBar = tb
-					tb.OnSelect(func(idx int) {
-						if idx >= 0 && idx < len(mobile.Tabs) {
-							iosShell.SelectTab(mobile.Tabs[idx].Tab)
-						}
-					})
-					invalidate()
-					return
-				}
-			}
-
-			// macOS Apple HIG iPhone 16 Pro dev window with native macOS 26 NSGlassEffectView
-			// regular frosted Liquid Glass (blurs busy background terminals cleanly).
-			win = mygo.NewWindow(mygo.WindowOptions{
-				Title:         fmt.Sprintf("Marlin iOS — %s", spec.Name),
-				Width:         spec.LogicalWidth,
-				Height:        spec.LogicalHeight,
-				MinWidth:      spec.LogicalWidth,
-				MinHeight:     spec.LogicalHeight,
-				MaxWidth:      spec.LogicalWidth,
-				MaxHeight:     spec.LogicalHeight,
-				TitleBarStyle: mygo.TitleBarHiddenInset,
-				Transparent:   true,
-				Vibrancy:      mygo.VibrancyGlass,
-				Content:       ui.View(iosShell.View),
-			})
-			win.SetActiveAppearance(true)
-			win.Invalidate()
-			return
-		}
-
-		// Android Material 3 companion shell under internal/mobile/android.
-		androidShell := android.New(android.Config{
-			Adaptive:       adaptive,
-			Link:           link,
-			AppConfig:      cfg,
-			Prefs:          prefs,
-			ThemeBundle:    themeBundle,
-			InitialThemeID: cfg.ThemeID,
-			OnPrefsChanged: func(next appconfig.UserPrefs) {
-				prefsMu.Lock()
-				prefs = next
-				prefsMu.Unlock()
-				savePrefs()
-			},
-			Invalidate: invalidate,
-		})
-		winOpts := mygo.WindowOptions{
-			Title:   fmt.Sprintf("Marlin Android — %s", spec.Name),
-			Width:   spec.LogicalWidth,
-			Height:  spec.LogicalHeight,
-			Content: ui.View(androidShell.View),
-		}
-		if runtime.GOOS != "ios" && runtime.GOOS != "android" {
-			winOpts.MinWidth = spec.LogicalWidth
-			winOpts.MinHeight = spec.LogicalHeight
-			winOpts.MaxWidth = spec.LogicalWidth
-			winOpts.MaxHeight = spec.LogicalHeight
-		}
-		win = mygo.NewWindow(winOpts)
-		win.Invalidate()
 	})
-
-	if err := mygo.App.Run(); err != nil {
-		log.Fatal(err)
-	}
-	savePrefs()
-	if link != nil {
-		link.Close()
-	}
+	return rt, savePrefs
 }

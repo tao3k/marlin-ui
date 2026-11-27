@@ -6,11 +6,64 @@ package frame
 
 import (
 	"strings"
+	"time"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/modeline"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
+
+// ComposerOpen reports whether the formal *conversation* ChatBox is open
+// (toggled by clicking the ModeLine Marlin dock).
+func (f *Frame) ComposerOpen() bool {
+	f.composerMu.Lock()
+	defer f.composerMu.Unlock()
+	return f.composerOpen
+}
+
+// ComposerDockHovered reports whether the pointer is currently hovering over
+// the center ModeLine Marlin dock.
+func (f *Frame) ComposerDockHovered() bool {
+	f.composerMu.Lock()
+	defer f.composerMu.Unlock()
+	return f.composerDockHovered
+}
+
+// ToggleComposerOpen toggles the formal *conversation* ChatBox open/closed and
+// fires the click forward-dash + splash animation on the ModeLine Marlin.
+func (f *Frame) ToggleComposerOpen() {
+	f.composerMu.Lock()
+	f.composerOpen = !f.composerOpen
+	f.composerClickStart = time.Now()
+	if f.composerOpen && f.composerHoverStart.IsZero() {
+		f.composerHoverStart = time.Now()
+	}
+	f.composerMu.Unlock()
+	f.requestFrame()
+}
+
+func (f *Frame) setComposerDockHovered(hovered bool) {
+	f.composerMu.Lock()
+	prev := f.composerDockHovered
+	f.composerDockHovered = hovered
+	if hovered && !prev {
+		// Record entry timestamp so the ~1.0s surfacing + fin-flutter + splash
+		// animation runs once per hover entry and then settles static!
+		f.composerHoverStart = time.Now()
+	} else if !hovered && prev && !f.composerOpen {
+		f.composerHoverStart = time.Time{}
+	}
+	f.composerMu.Unlock()
+	if prev != hovered {
+		f.requestFrame()
+	}
+}
+
+func (f *Frame) composerDockAnimTimes() (open bool, hoverStart, clickStart time.Time) {
+	f.composerMu.Lock()
+	defer f.composerMu.Unlock()
+	return f.composerOpen, f.composerHoverStart, f.composerClickStart
+}
 
 func (f *Frame) buildModelineStatus(snap frameSnapshot, modelLbl, sessLbl string) modeline.Status {
 	return f.buildModelineStatusForBuffer(snap, snap.ActiveBuffer, modelLbl, sessLbl)

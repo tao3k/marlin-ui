@@ -23,7 +23,10 @@ func hexRGB(c ui.Color) string {
 // SDK `data-*` Generative UI parts (data-metrics, data-chart, data-table,
 // data-workflow, data-mermaid, data-json) with live Doom One / Tokyo Night
 // token parity via the @marlin/ui-sdk marlin:theme / marlin:action bridge.
-func appleGeistArtifactStageHTML(pal kit.Palette) string {
+func appleGeistArtifactStageHTML(pal kit.Palette, viewportOpacity float32) string {
+	if viewportOpacity <= 0 {
+		viewportOpacity = kit.DefaultGlassOpacity
+	}
 	vars := fmt.Sprintf(`:root {
   --marlin-canvas: %s;
   --marlin-surface: %s;
@@ -35,9 +38,11 @@ func appleGeistArtifactStageHTML(pal kit.Palette) string {
   --marlin-success: %s;
   --marlin-warning: %s;
   --marlin-danger: %s;
-  --marlin-glass-opacity: 0.72;
+  --marlin-glass-opacity: %.3f;
+  --marlin-viewport-bg: %s;
 }`, hexRGB(pal.Canvas), hexRGB(pal.Surface), hexRGB(pal.Bar), hexRGB(pal.Ink), hexRGB(pal.Muted),
-		hexRGB(pal.Accent), hexRGB(pal.Info), hexRGB(pal.Success), hexRGB(pal.Warning), hexRGB(pal.Danger))
+		hexRGB(pal.Accent), hexRGB(pal.Info), hexRGB(pal.Success), hexRGB(pal.Warning), hexRGB(pal.Danger),
+		viewportOpacity, rgbaCSS(pal.Canvas, viewportOpacity))
 
 	var b strings.Builder
 	b.WriteString(`<!DOCTYPE html>
@@ -52,7 +57,7 @@ func appleGeistArtifactStageHTML(pal kit.Palette) string {
 	b.WriteString(vars)
 	b.WriteString(`
 :root {
-  --background: transparent;
+  --background: var(--marlin-viewport-bg);
   --foreground: var(--marlin-ink);
   --card: color-mix(in srgb, var(--marlin-surface) 62%, transparent);
   --primary: var(--marlin-accent);
@@ -62,7 +67,7 @@ func appleGeistArtifactStageHTML(pal kit.Palette) string {
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%;
-  background: transparent; color: var(--foreground);
+  background: var(--marlin-viewport-bg); color: var(--foreground);
   font: 13px/1.52 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Inter", system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
