@@ -32,7 +32,10 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	th := theme.FromMyGoTheme(t)
-	snap := m.fullSnapshot()
+	snap := AgentRoomSnapshot()
+	if !snap.Available {
+		snap = m.fullSnapshot()
+	}
 
 	canvas := th.Canvas
 	panelBg := theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.72)
@@ -552,7 +555,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 
 	// Commit all controller mutations cleanly outside layout closures.
 	if selectCh != "" {
-		_ = m.selectChannel(selectCh)
+		_ = SelectAgentRoomChannel(selectCh)
 	}
 	if mention != "" {
 		if strings.TrimSpace(m.draft) == "" {
@@ -566,7 +569,7 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 		lower := strings.ToLower(txt)
 		if strings.HasPrefix(lower, "/task ") {
 			if title := strings.TrimSpace(txt[len("/task "):]); title != "" {
-				_ = m.addTask(title)
+				_ = AddAgentRoomTask(title)
 			}
 			m.draft = ""
 		} else if lower == "/clear" {
@@ -575,35 +578,35 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 			if strings.HasPrefix(lower, "/ask ") {
 				txt = strings.TrimSpace(txt[len("/ask "):])
 			}
-			if txt != "" && m.postMessage(snap.ActiveChannelID, txt, "") == nil {
+			if txt != "" && PostAgentRoomMessage(snap.ActiveChannelID, txt, "") == nil {
 				m.draft = ""
 			}
 		}
 	}
 	if openThread != "" {
-		_ = m.openThread(openThread)
+		_ = OpenAgentRoomThread(openThread)
 	}
 	if closeThread {
-		m.closeThread()
+		CloseAgentRoomThread()
 	}
 	if sendThread && snap.ActiveThreadID != "" && strings.TrimSpace(m.threadDraft) != "" {
-		if m.postMessage(snap.ActiveChannelID, m.threadDraft, snap.ActiveThreadID) == nil {
+		if PostAgentRoomMessage(snap.ActiveChannelID, m.threadDraft, snap.ActiveThreadID) == nil {
 			m.threadDraft = ""
 		}
 	}
 	if addItem && strings.TrimSpace(m.itemDraft) != "" {
-		if m.addTask(strings.TrimSpace(m.itemDraft)) == nil {
+		if AddAgentRoomTask(strings.TrimSpace(m.itemDraft)) == nil {
 			m.itemDraft = ""
 		}
 	}
 	if promoteTitle != "" {
-		_ = m.addTask(promoteTitle)
+		_ = AddAgentRoomTask(promoteTitle)
 	}
 	if cycleTaskID != "" {
-		_ = m.cycleTask(cycleTaskID)
+		_ = CycleAgentRoomTask(cycleTaskID)
 	}
 	if toggleRxMsg != "" {
-		_ = m.toggleReaction(toggleRxMsg, toggleRxTag)
+		_ = ToggleAgentRoomReaction(toggleRxMsg, toggleRxTag)
 	}
 }
 

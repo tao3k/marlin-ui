@@ -13,6 +13,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -327,9 +328,15 @@ func (c *CoveClient) PostMessage(ctx context.Context, roomID, channelID, authorI
 	return messageFromProto(resp), nil
 }
 
-// DispatchTurn invokes CoveRelayService/DispatchTurn over HTTP/2, forwarding a
-// verified RoomGovernanceEnvelope to Marlin Gateway (`marlin-agent-core`).
+// DispatchTurn posts a user turn into Cove and dispatches it live over HTTP/2
+// to marlin-agent-core (`marlin.app.v1.AppServer/StreamTurn`).
 func (c *CoveClient) DispatchTurn(ctx context.Context, roomID, channelID, authorID, targetAgentHandle, body string) (CoveDispatchResponse, error) {
+	return c.DispatchTurnInThread(ctx, roomID, channelID, authorID, targetAgentHandle, body, "")
+}
+
+// DispatchTurnInThread posts a user turn (optionally inside a thread) into Cove
+// and dispatches it live over HTTP/2 to marlin-agent-core.
+func (c *CoveClient) DispatchTurnInThread(ctx context.Context, roomID, channelID, authorID, targetAgentHandle, body, threadRootID string) (CoveDispatchResponse, error) {
 	rpc, err := c.client()
 	if err != nil {
 		return CoveDispatchResponse{}, err
@@ -340,6 +347,7 @@ func (c *CoveClient) DispatchTurn(ctx context.Context, roomID, channelID, author
 		AuthorId:          authorID,
 		TargetAgentHandle: targetAgentHandle,
 		Body:              body,
+		ThreadRootId:      strings.TrimSpace(threadRootID),
 	})
 	if err != nil {
 		return CoveDispatchResponse{}, err
@@ -420,6 +428,15 @@ func (c *CoveClient) WatchEvents(ctx context.Context, roomID string, onEvent fun
 // ToRoomFullSnapshot projects a Cove relay snapshot into marlin-ui's native
 // build-tag-free RoomFullSnapshot used across Desktop, iOS, and Android.
 func (s CoveRoomSnapshot) ToRoomFullSnapshot(activeChannelID, currentActorID string) featurekit.RoomFullSnapshot {
+	return s.ToRoomFullSnapshotWithThread(activeChannelID, "", currentActorID, nil)
+}
+
+// ToRoomFullSnapshotWithThread projects a Cove relay snapshot with active thread
+// and live thinking-bot presence overrides into marlin-ui's RoomFullSnapshot.
+func (s CoveRoomSnapshot) ToRoomFullSnapshotWithThread(
+	activeChannelID, activeThreadID, currentActorID string,
+	thinkingOverrides map[string]string,
+) featurekit.RoomFullSnapshot {
 	if activeChannelID == "" && len(s.Channels) > 0 {
 		activeChannelID = s.Channels[0].ID
 	}
@@ -427,9 +444,14 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshot(activeChannelID, currentActorID str
 	participants := make([]featurekit.RoomParticipantView, 0, len(s.Participants))
 	thinking := make([]string, 0)
 	for _, p := range s.Participants {
+		pres := p.Presence
+		if ov, ok := thinkingOverrides[p.ID]; ok && ov != "" {
+			pres = ov
+		}
+		p.Presence = pres
 		byID[p.ID] = p
 		isAgent := p.Kind == "agent"
-		if isAgent && (p.Presence == "thinking" || p.Presence == "working") {
+		if isAgent && (pres == "thinking" || pres == "working") {
 			thinking = append(thinking, p.DisplayName)
 		}
 		participants = append(participants, featurekit.RoomParticipantView{
@@ -439,33 +461,48 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshot(activeChannelID, currentActorID str
 			Role:            p.Role,
 			IsAgent:         isAgent,
 			HostNode:        "marlin-cove",
-			Presence:        p.Presence,
+			Presence:        pres,
 			CanPost:         true,
+			CanManageItems:  !isAgent,
+			CanInvokeTools:  isAgent,
+			RequireGate:     isAgent,
 			CanApproveGates: !isAgent && (p.Role == "owner" || p.Role == "maintainer"),
 		})
 	}
 
 	channels := make([]featurekit.RoomChannelView, 0, len(s.Channels))
 	for _, ch := range s.Channels {
+		botID := ""
+		if ch.IsDirect && strings.HasPrefix(ch.ID, "dm:") {
+			botID = strings.TrimPrefix(ch.ID, "dm:")
+		}
 		channels = append(channels, featurekit.RoomChannelView{
-			ID:    ch.ID,
-			Name:  ch.Name,
-			Topic: ch.Topic,
-			IsDM:  ch.IsDirect,
+			ID:               ch.ID,
+			Name:             ch.Name,
+			Topic:            ch.Topic,
+			IsDM:             ch.IsDirect,
+			BotParticipantID: botID,
 		})
 	}
 
-	messages := make([]featurekit.RoomMessageView, 0, len(s.Messages))
+	replyCounts := make(map[string]int)
 	for _, m := range s.Messages {
-		if activeChannelID != "" && m.ChannelID != activeChannelID {
-			continue
+		if m.ThreadRootID != "" {
+			replyCounts[m.ThreadRootID]++
 		}
+	}
+
+	toMsgView := func(m CoveMessage) featurekit.RoomMessageView {
 		author := byID[m.AuthorID]
 		authorName := author.DisplayName
 		if authorName == "" {
 			authorName = m.AuthorID
 		}
-		messages = append(messages, featurekit.RoomMessageView{
+		ts := ""
+		if m.CreatedAtUnix > 0 {
+			ts = time.Unix(m.CreatedAtUnix, 0).Local().Format("15:04")
+		}
+		return featurekit.RoomMessageView{
 			ID:              m.ID,
 			ChannelID:       m.ChannelID,
 			AuthorID:        m.AuthorID,
@@ -479,18 +516,37 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshot(activeChannelID, currentActorID str
 			GateID:          m.GateID,
 			TaintedExternal: m.Origin == "telegram" || m.Origin == "discord",
 			Delivery:        m.Origin,
+			Timestamp:       ts,
 			CreatedUnix:     m.CreatedAtUnix,
-		})
+			ThreadCount:     replyCounts[m.ID],
+		}
+	}
+
+	messages := make([]featurekit.RoomMessageView, 0, len(s.Messages))
+	threadMessages := make([]featurekit.RoomMessageView, 0)
+	for _, m := range s.Messages {
+		if activeChannelID != "" && m.ChannelID != activeChannelID {
+			continue
+		}
+		view := toMsgView(m)
+		if m.ThreadRootID == "" {
+			messages = append(messages, view)
+		} else if activeThreadID != "" && m.ThreadRootID == activeThreadID {
+			threadMessages = append(threadMessages, view)
+		}
 	}
 
 	return featurekit.RoomFullSnapshot{
 		Available:       true,
 		ActiveChannelID: activeChannelID,
+		ActiveThreadID:  activeThreadID,
 		CurrentActorID:  currentActorID,
 		ThinkingBots:    thinking,
 		Channels:        channels,
 		Participants:    participants,
 		Messages:        messages,
+		ThreadMessages:  threadMessages,
+		Tasks:           featurekit.AgentRoomTasks(),
 	}
 }
 

@@ -25,6 +25,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/tao3k/marlin-mygo/runtime/async"
+
+	"github.com/tao3k/marlin-ui/internal/appconfig"
+	"github.com/tao3k/marlin-ui/internal/featurekit"
 )
 
 func reserveLocalAddr(t *testing.T) string {
@@ -319,4 +322,188 @@ mention_policy = "required"
 	if taintedCount != 2 {
 		t.Fatalf("expected 2 tainted external bridge messages (Telegram + Discord) in #general, got %d", taintedCount)
 	}
+
+	// 12. Verify CoveRelayBridge binds featurekit.RoomBridge for Desktop & Mobile
+	// including 1:1 Direct Bot DM channels (`dm:agent:architect`) and async non-blocking DispatchTurn.
+	var dirtyCalls int
+	var dirtyMu sync.Mutex
+	bridge := AttachCoveRelayBridge(ctx, appconfig.Config{
+		CoveURL:    grpcAddr,
+		CoveToken:  coveToken,
+		CoveRoomID: "cove-main",
+	}, func() {
+		dirtyMu.Lock()
+		dirtyCalls++
+		dirtyMu.Unlock()
+	})
+	if bridge == nil {
+		t.Fatalf("expected AttachCoveRelayBridge to return live bridge")
+	}
+	defer bridge.Close()
+
+	uiSnap := featurekit.AgentRoomSnapshot()
+	if !uiSnap.Available || len(uiSnap.Channels) < 6 {
+		t.Fatalf("expected live Cove snapshot with shared + 3 direct bot channels, got %+v", uiSnap.Channels)
+	}
+	if err := featurekit.SelectAgentRoomChannel("dm:agent:architect"); err != nil {
+		t.Fatalf("SelectAgentRoomChannel dm:agent:architect failed: %v", err)
+	}
+	if err := featurekit.PostAgentRoomMessage("dm:agent:architect", "Direct DM check over gRPC HTTP/2", ""); err != nil {
+		t.Fatalf("PostAgentRoomMessage in DM channel failed: %v", err)
+	}
+	dmDeadline := time.Now().Add(3 * time.Second)
+	sawDMReply := false
+	for time.Now().Before(dmDeadline) {
+		cur := featurekit.AgentRoomSnapshot()
+		for _, m := range cur.Messages {
+			if m.IsAgent && strings.Contains(m.Body, "Marlin Gateway gRPC reply for @architect") {
+				sawDMReply = true
+				break
+			}
+		}
+		if sawDMReply {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !sawDMReply {
+		t.Fatalf("timed out waiting for async 1:1 Direct Bot DM reply in CoveRelayBridge")
+	}
+}
+
+// TestLiveRealAppServerCoveRoomLLM exercises the real 3-process production
+// chain when MARLIN_COVE_LIVE_LLM=1 is set:
+//
+//	marlin-ui (CoveRelayBridge) <-> real Rust marlin-cove (gRPC HTTP/2)
+//	  <-> real Rust .bin/marlin-app-server (marlin.app.v1.AppServer/StreamTurn -> live LLM)
+func TestLiveRealAppServerCoveRoomLLM(t *testing.T) {
+	if os.Getenv("MARLIN_COVE_LIVE_LLM") != "1" {
+		t.Skip("set MARLIN_COVE_LIVE_LLM=1 to run live 3-process LLM Room E2E")
+	}
+	coveBin := locateMarlinCoveBinary()
+	if coveBin == "" {
+		t.Fatalf("marlin-cove binary not found")
+	}
+	appBin, err := filepath.Abs(filepath.Join("..", "..", "..", "..", ".bin", "marlin-app-server"))
+	if err != nil {
+		t.Fatalf("resolve marlin-app-server: %v", err)
+	}
+	if _, err := os.Stat(appBin); err != nil {
+		t.Fatalf("marlin-app-server binary missing at %s: %v", appBin, err)
+	}
+	cfgFile, err := filepath.Abs(filepath.Join("..", "..", "example.toml"))
+	if err != nil {
+		t.Fatalf("resolve example.toml: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	// 1. Start real Rust marlin-app-server with example.toml + inherited .env LLM keys.
+	const bridgeToken = "e2e-live-bridge-token"
+	appCmd := exec.CommandContext(ctx, appBin)
+	appCmd.Env = append(os.Environ(),
+		"MARLIN_BRIDGE_REAL_SESSION=1",
+		"MARLIN_BRIDGE_TOKEN="+bridgeToken,
+		"MARLIN_CONFIG="+cfgFile,
+		"MARLIN_BRIDGE_CONFIG="+cfgFile,
+	)
+	var appOut bytes.Buffer
+	var appMu sync.Mutex
+	appCmd.Stdout = &syncWriter{mu: &appMu, buf: &appOut}
+	appCmd.Stderr = &syncWriter{mu: &appMu, buf: &appOut}
+	if err := appCmd.Start(); err != nil {
+		t.Fatalf("start marlin-app-server: %v", err)
+	}
+	defer func() {
+		_ = appCmd.Process.Kill()
+		_ = appCmd.Wait()
+	}()
+
+	var appAddr string
+	for range 80 {
+		appMu.Lock()
+		text := appOut.String()
+		appMu.Unlock()
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "READY ") {
+				appAddr = strings.TrimSpace(strings.TrimPrefix(line, "READY "))
+				break
+			}
+		}
+		if appAddr != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if appAddr == "" {
+		appMu.Lock()
+		logs := appOut.String()
+		appMu.Unlock()
+		t.Fatalf("marlin-app-server never printed READY; logs:\n%s", logs)
+	}
+	t.Logf("live marlin-app-server READY at %s", appAddr)
+
+	// 2. Start real Rust marlin-cove targeting marlin-app-server's native marlin.app.v1.AppServer.
+	coveAddr := reserveLocalAddr(t)
+	coveCmd := exec.CommandContext(ctx, coveBin, "serve")
+	coveCmd.Env = append(os.Environ(),
+		"MARLIN_COVE_RELAY_GRPC_BIND="+coveAddr,
+		"MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT=http://"+appAddr,
+		"MARLIN_COVE_MARLIN_GATEWAY_TOKEN="+bridgeToken,
+	)
+	var coveErr bytes.Buffer
+	coveCmd.Stderr = &coveErr
+	if err := coveCmd.Start(); err != nil {
+		t.Fatalf("start marlin-cove serve: %v", err)
+	}
+	defer func() {
+		_ = coveCmd.Process.Kill()
+		_ = coveCmd.Wait()
+	}()
+
+	client := NewCoveClient(coveAddr, "")
+	defer func() { _ = client.Close() }()
+	var healthErr error
+	for range 40 {
+		if _, healthErr = client.Health(ctx); healthErr == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if healthErr != nil {
+		t.Fatalf("marlin-cove unhealthy: %v (stderr: %s)", healthErr, coveErr.String())
+	}
+	t.Logf("live marlin-cove READY at %s -> app-server %s", coveAddr, appAddr)
+
+	// 3. Dispatch a real @architect turn through Cove -> real marlin-app-server -> real LLM!
+	resp, err := client.DispatchTurn(
+		ctx,
+		"cove-main",
+		"architecture",
+		"human:owner",
+		"architect",
+		"@architect Reply in one short sentence confirming you received this Marlin Cove Room gRPC turn.",
+	)
+	if err != nil {
+		appMu.Lock()
+		logs := appOut.String()
+		appMu.Unlock()
+		t.Fatalf("live DispatchTurn failed: %v\napp-server logs:\n%s\ncove stderr:\n%s", err, logs, coveErr.String())
+	}
+	if strings.TrimSpace(resp.AgentReply.Body) == "" || strings.Contains(resp.AgentReply.Body, "marlin-bridge received") {
+		t.Fatalf("expected real live LLM reply (not echo stub), got: %q", resp.AgentReply.Body)
+	}
+	t.Logf("LIVE LLM ROOM REPLY (@architect in #architecture): %s", resp.AgentReply.Body)
+}
+
+type syncWriter struct {
+	mu  *sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (w *syncWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
 }

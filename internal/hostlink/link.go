@@ -483,7 +483,6 @@ func Connect(
 		sr.turnCtrl = turnCtrl
 		sr.composerBridge = grpcwire.NewComposerBridge(turnCtrl, nil)
 		AttachRoomResponder(link, cfg)
-		AttachCoveRelayBridge(linkCtx, cfg, markDirty)
 
 		var (
 			turnMu    sync.Mutex
@@ -662,6 +661,8 @@ func Connect(
 		app.OnSendPrompt = func(prompt string) { sendPreview(prompt, prompt, nil) }
 	}
 
+	coveBridge := AttachCoveRelayBridge(linkCtx, cfg, markDirty)
+
 	if adaptive.Mobile != nil {
 		adaptive.Mobile.OnSendPrompt = func(p string) {
 			if app.OnSendPrompt != nil {
@@ -715,6 +716,9 @@ func Connect(
 		}
 		saveMu.Unlock()
 		saveNow()
+		if coveBridge != nil {
+			coveBridge.Close()
+		}
 		if stopProj != nil {
 			stopProj()
 		}

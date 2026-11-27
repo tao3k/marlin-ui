@@ -2096,6 +2096,7 @@ type DispatchTurnRequest struct {
 	AuthorId          string                 `protobuf:"bytes,3,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
 	TargetAgentHandle string                 `protobuf:"bytes,4,opt,name=target_agent_handle,json=targetAgentHandle,proto3" json:"target_agent_handle,omitempty"`
 	Body              string                 `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
+	ThreadRootId      string                 `protobuf:"bytes,6,opt,name=thread_root_id,json=threadRootId,proto3" json:"thread_root_id,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2161,6 +2162,13 @@ func (x *DispatchTurnRequest) GetTargetAgentHandle() string {
 func (x *DispatchTurnRequest) GetBody() string {
 	if x != nil {
 		return x.Body
+	}
+	return ""
+}
+
+func (x *DispatchTurnRequest) GetThreadRootId() string {
+	if x != nil {
+		return x.ThreadRootId
 	}
 	return ""
 }
@@ -2573,14 +2581,15 @@ const file_marlin_cove_v1_cove_proto_rawDesc = "" +
 	"\agate_id\x18\x06 \x01(\tR\x06gateId\x12C\n" +
 	"\vattachments\x18\a \x03(\v2!.marlin.cove.v1.MessageAttachmentR\vattachments\x124\n" +
 	"\x06origin\x18\b \x01(\x0e2\x1c.marlin.cove.v1.BridgeOriginR\x06origin\x12&\n" +
-	"\x0fbot_chain_depth\x18\t \x01(\rR\rbotChainDepth\"\xae\x01\n" +
+	"\x0fbot_chain_depth\x18\t \x01(\rR\rbotChainDepth\"\xd4\x01\n" +
 	"\x13DispatchTurnRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x02 \x01(\tR\tchannelId\x12\x1b\n" +
 	"\tauthor_id\x18\x03 \x01(\tR\bauthorId\x12.\n" +
 	"\x13target_agent_handle\x18\x04 \x01(\tR\x11targetAgentHandle\x12\x12\n" +
-	"\x04body\x18\x05 \x01(\tR\x04body\"\xdc\x01\n" +
+	"\x04body\x18\x05 \x01(\tR\x04body\x12$\n" +
+	"\x0ethread_root_id\x18\x06 \x01(\tR\fthreadRootId\"\xdc\x01\n" +
 	"\x14DispatchTurnResponse\x12>\n" +
 	"\fuser_message\x18\x01 \x01(\v2\x1b.marlin.cove.v1.RoomMessageR\vuserMessage\x12F\n" +
 	"\n" +

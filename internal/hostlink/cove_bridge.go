@@ -9,8 +9,10 @@ package hostlink
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -157,6 +159,7 @@ type CoveRelayBridge struct {
 	snapshot        CoveRoomSnapshot
 	activeChannelID string
 	activeThreadID  string
+	thinkingBots    map[string]string
 	onDirty         func()
 }
 
@@ -177,6 +180,7 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 		actor:           "human:owner",
 		scope:           async.NewStructuredScope(ctx),
 		activeChannelID: "general",
+		thinkingBots:    make(map[string]string),
 		onDirty:         onDirty,
 	}
 
@@ -193,9 +197,22 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 	})
 
 	bridge.scope.Go(func(runCtx context.Context) {
-		_ = client.WatchEvents(runCtx, roomID, func(evt CoveRoomEvent) {
-			bridge.applyEvent(evt)
-		})
+		for {
+			if runCtx.Err() != nil {
+				return
+			}
+			if snap, err := client.FetchSnapshot(runCtx, roomID); err == nil {
+				bridge.setSnapshot(snap)
+			}
+			_ = client.WatchEvents(runCtx, roomID, func(evt CoveRoomEvent) {
+				bridge.applyEvent(evt)
+			})
+			select {
+			case <-runCtx.Done():
+				return
+			case <-time.After(1 * time.Second):
+			}
+		}
 	})
 
 	return bridge
@@ -226,6 +243,19 @@ func (b *CoveRelayBridge) setSnapshot(snap CoveRoomSnapshot) {
 	}
 }
 
+func (b *CoveRelayBridge) upsertMessageLocked(msg CoveMessage) {
+	if msg.ID == "" {
+		return
+	}
+	for i := range b.snapshot.Messages {
+		if b.snapshot.Messages[i].ID == msg.ID {
+			b.snapshot.Messages[i] = msg
+			return
+		}
+	}
+	b.snapshot.Messages = append(b.snapshot.Messages, msg)
+}
+
 func (b *CoveRelayBridge) applyEvent(evt CoveRoomEvent) {
 	b.mu.Lock()
 	if evt.Seq > b.snapshot.LatestSeq {
@@ -234,11 +264,21 @@ func (b *CoveRelayBridge) applyEvent(evt CoveRoomEvent) {
 	switch evt.Kind.Type {
 	case "message_posted":
 		if evt.Kind.Message != nil {
-			b.snapshot.Messages = append(b.snapshot.Messages, *evt.Kind.Message)
+			b.upsertMessageLocked(*evt.Kind.Message)
 		}
 	case "participant_joined":
 		if evt.Kind.Participant != nil {
-			b.snapshot.Participants = append(b.snapshot.Participants, *evt.Kind.Participant)
+			replaced := false
+			for i := range b.snapshot.Participants {
+				if b.snapshot.Participants[i].ID == evt.Kind.Participant.ID {
+					b.snapshot.Participants[i] = *evt.Kind.Participant
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				b.snapshot.Participants = append(b.snapshot.Participants, *evt.Kind.Participant)
+			}
 		}
 	case "gate_requested":
 		if evt.Kind.Gate != nil {
@@ -265,10 +305,12 @@ func (b *CoveRelayBridge) projectedSnapshot() featurekit.RoomFullSnapshot {
 	ch := b.activeChannelID
 	threadID := b.activeThreadID
 	actor := b.actor
+	thinkingCopy := make(map[string]string, len(b.thinkingBots))
+	for k, v := range b.thinkingBots {
+		thinkingCopy[k] = v
+	}
 	b.mu.RUnlock()
-	out := snap.ToRoomFullSnapshot(ch, actor)
-	out.ActiveThreadID = threadID
-	return out
+	return snap.ToRoomFullSnapshotWithThread(ch, threadID, actor, thinkingCopy)
 }
 
 func (b *CoveRelayBridge) selectChannel(channelID string) error {
@@ -282,19 +324,96 @@ func (b *CoveRelayBridge) selectChannel(channelID string) error {
 	return nil
 }
 
+func (b *CoveRelayBridge) resolveTargetAgent(channelID, body string) (botID string, handle string) {
+	b.mu.RLock()
+	participants := b.snapshot.Participants
+	b.mu.RUnlock()
+
+	if strings.HasPrefix(channelID, "dm:") {
+		wantID := strings.TrimPrefix(channelID, "dm:")
+		for _, p := range participants {
+			if p.Kind == "agent" && p.ID == wantID {
+				return p.ID, strings.TrimPrefix(strings.ToLower(p.Handle), "@")
+			}
+		}
+	}
+	if mentioned := firstAgentMention(body, participants); mentioned != "" {
+		for _, p := range participants {
+			if p.Kind == "agent" && strings.TrimPrefix(strings.ToLower(p.Handle), "@") == mentioned {
+				return p.ID, mentioned
+			}
+		}
+		return "agent:" + mentioned, mentioned
+	}
+	return "", ""
+}
+
 func (b *CoveRelayBridge) postMessage(channelID, body, threadRootID string) error {
+	txt := strings.TrimSpace(body)
+	if txt == "" {
+		return nil
+	}
 	ch := strings.TrimSpace(channelID)
 	if ch == "" {
 		b.mu.RLock()
 		ch = b.activeChannelID
 		b.mu.RUnlock()
 	}
-	if handle := firstAgentMention(body); handle != "" && strings.TrimSpace(threadRootID) == "" {
-		_, err := b.client.DispatchTurn(context.Background(), b.roomID, ch, b.actor, handle, body)
-		return err
+	if ch == "" {
+		ch = "general"
 	}
-	_, err := b.client.PostMessage(context.Background(), b.roomID, ch, b.actor, body, threadRootID)
-	return err
+
+	botID, handle := b.resolveTargetAgent(ch, txt)
+	if handle != "" {
+		b.mu.Lock()
+		b.thinkingBots[botID] = "thinking"
+		b.mu.Unlock()
+		if b.onDirty != nil {
+			b.onDirty()
+		}
+		b.scope.Go(func(runCtx context.Context) {
+			rpcCtx, cancel := context.WithTimeout(runCtx, 120*time.Second)
+			defer cancel()
+			resp, err := b.client.DispatchTurnInThread(rpcCtx, b.roomID, ch, b.actor, handle, txt, threadRootID)
+			b.mu.Lock()
+			delete(b.thinkingBots, botID)
+			if err == nil {
+				b.upsertMessageLocked(resp.UserMessage)
+				b.upsertMessageLocked(resp.AgentReply)
+			} else {
+				b.upsertMessageLocked(CoveMessage{
+					ID:            fmt.Sprintf("local-err-%d", time.Now().UnixNano()),
+					RoomID:        b.roomID,
+					ChannelID:     ch,
+					ThreadRootID:  threadRootID,
+					AuthorID:      botID,
+					AuthorKind:    "agent",
+					Body:          fmt.Sprintf("_@%s could not complete turn:_ `%v`", handle, err),
+					Origin:        "marlin_gateway",
+					CreatedAtUnix: time.Now().Unix(),
+				})
+			}
+			b.mu.Unlock()
+			if b.onDirty != nil {
+				b.onDirty()
+			}
+		})
+		return nil
+	}
+
+	b.scope.Go(func(runCtx context.Context) {
+		rpcCtx, cancel := context.WithTimeout(runCtx, 15*time.Second)
+		defer cancel()
+		if msg, err := b.client.PostMessage(rpcCtx, b.roomID, ch, b.actor, txt, threadRootID); err == nil {
+			b.mu.Lock()
+			b.upsertMessageLocked(msg)
+			b.mu.Unlock()
+			if b.onDirty != nil {
+				b.onDirty()
+			}
+		}
+	})
+	return nil
 }
 
 func (b *CoveRelayBridge) openThread(msgID string) error {
@@ -316,14 +435,25 @@ func (b *CoveRelayBridge) closeThread() {
 	}
 }
 
-func firstAgentMention(body string) string {
+func firstAgentMention(body string, participants []CoveParticipant) string {
+	known := map[string]bool{
+		"architect": true,
+		"reviewer":  true,
+		"security":  true,
+	}
+	for _, p := range participants {
+		if p.Kind == "agent" {
+			if h := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(p.Handle)), "@"); h != "" {
+				known[h] = true
+			}
+		}
+	}
 	for _, field := range strings.Fields(body) {
 		if !strings.HasPrefix(field, "@") {
 			continue
 		}
 		handle := strings.ToLower(strings.TrimRight(strings.TrimPrefix(field, "@"), ".,!?:;"))
-		switch handle {
-		case "architect", "reviewer", "security":
+		if known[handle] {
 			return handle
 		}
 	}

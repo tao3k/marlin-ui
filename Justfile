@@ -114,6 +114,151 @@ dev-desktop *args:
     fi
     exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop ${extra[@]+"${extra[@]}"} {{args}}
 
+# DEV: Launch full live Agent Room stack: marlin-app-server (LLM) <-> marlin-cove (gRPC HTTP/2) <-> marlin-desktop.
+dev-room *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    core="${CORE:-../..}"
+    cove_bin="${MARLIN_COVE_BIN:-../marlin-cove/target/debug/marlin-cove}"
+    tags="${TAGS:-marlin_full}"
+    for envf in "$core/.env" "./.env"; do
+        if [ -f "$envf" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$envf"
+            set +a
+        fi
+    done
+    app_bin=""
+    for cand in \
+        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-mygo-host" \
+        "$core/target/release/marlin-app-server"; do
+        if [ -x "$cand" ]; then
+            app_bin="$cand"
+            break
+        fi
+    done
+    if [ -z "$app_bin" ]; then
+        echo "error: marlin-app-server binary not found" >&2
+        exit 1
+    fi
+    if [ ! -x "$cove_bin" ]; then
+        echo "error: marlin-cove binary not found at $cove_bin (build .data/marlin-cove first)" >&2
+        exit 1
+    fi
+    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
+        export GOWORK="$(cd .. && pwd)/marlin-dev.work"
+    fi
+    cfg_file="$(pwd)/example.toml"
+    tmp_dir="$(mktemp -d)"
+    app_log="$tmp_dir/app-server.log"
+    cove_log="$tmp_dir/marlin-cove.log"
+    cleanup() {
+        kill "${COVE_PID:-}" "${APP_PID:-}" 2>/dev/null || true
+        rm -rf "$tmp_dir"
+    }
+    trap cleanup EXIT INT TERM
+    bridge_token="${MARLIN_BRIDGE_TOKEN:-marlin-cove-dev-$(date +%s)}"
+    cove_token="${MARLIN_COVE_TOKEN:-cove-room-dev-$(date +%s)}"
+    MARLIN_BRIDGE_REAL_SESSION=1 MARLIN_BRIDGE_TOKEN="$bridge_token" MARLIN_CONFIG="$cfg_file" MARLIN_BRIDGE_CONFIG="$cfg_file" "$app_bin" >"$app_log" 2>&1 &
+    APP_PID=$!
+    app_addr=""
+    for _ in $(seq 1 60); do
+        if grep -q "^READY " "$app_log" 2>/dev/null; then
+            app_addr="$(awk '/^READY / {print $2; exit}' "$app_log")"
+            break
+        fi
+        sleep 0.1
+    done
+    if [ -z "$app_addr" ]; then
+        echo "error: marlin-app-server failed to start:" >&2
+        cat "$app_log" >&2
+        exit 1
+    fi
+    cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
+    MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
+    MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
+    MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
+    MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
+        "$cove_bin" serve >"$cove_log" 2>&1 &
+    COVE_PID=$!
+    sleep 0.4
+    echo "[dev-room] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
+    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop \
+        -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \
+        -cove "$cove_bind" -cove-token "$cove_token" {{args}}
+
+# DEV: Launch full live Agent Room stack on iOS Companion shell (393x852).
+dev-room-ios *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    core="${CORE:-../..}"
+    cove_bin="${MARLIN_COVE_BIN:-../marlin-cove/target/debug/marlin-cove}"
+    tags="${TAGS:-marlin_full}"
+    for envf in "$core/.env" "./.env"; do
+        if [ -f "$envf" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$envf"
+            set +a
+        fi
+    done
+    app_bin=""
+    for cand in \
+        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-mygo-host" \
+        "$core/target/release/marlin-app-server"; do
+        if [ -x "$cand" ]; then
+            app_bin="$cand"
+            break
+        fi
+    done
+    if [ -z "$app_bin" ] || [ ! -x "$cove_bin" ]; then
+        echo "error: require marlin-app-server and marlin-cove binaries" >&2
+        exit 1
+    fi
+    if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
+        export GOWORK="$(cd .. && pwd)/marlin-dev.work"
+    fi
+    cfg_file="$(pwd)/example.toml"
+    tmp_dir="$(mktemp -d)"
+    app_log="$tmp_dir/app-server.log"
+    cove_log="$tmp_dir/marlin-cove.log"
+    cleanup() {
+        kill "${COVE_PID:-}" "${APP_PID:-}" 2>/dev/null || true
+        rm -rf "$tmp_dir"
+    }
+    trap cleanup EXIT INT TERM
+    bridge_token="${MARLIN_BRIDGE_TOKEN:-marlin-cove-dev-$(date +%s)}"
+    cove_token="${MARLIN_COVE_TOKEN:-cove-room-dev-$(date +%s)}"
+    MARLIN_BRIDGE_REAL_SESSION=1 MARLIN_BRIDGE_TOKEN="$bridge_token" MARLIN_CONFIG="$cfg_file" MARLIN_BRIDGE_CONFIG="$cfg_file" "$app_bin" >"$app_log" 2>&1 &
+    APP_PID=$!
+    app_addr=""
+    for _ in $(seq 1 60); do
+        if grep -q "^READY " "$app_log" 2>/dev/null; then
+            app_addr="$(awk '/^READY / {print $2; exit}' "$app_log")"
+            break
+        fi
+        sleep 0.1
+    done
+    if [ -z "$app_addr" ]; then
+        cat "$app_log" >&2
+        exit 1
+    fi
+    cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
+    MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
+    MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
+    MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
+    MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
+        "$cove_bin" serve >"$cove_log" 2>&1 &
+    COVE_PID=$!
+    sleep 0.4
+    echo "[dev-room-ios] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
+    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-mobile -platform ios \
+        -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \
+        -cove "$cove_bind" -cove-token "$cove_token" {{args}}
+
 # DEV: Launch iOS Companion client in Apple HIG (393x852) dev shell connected to sibling Rust host.
 # Accepts any marlin-mobile flags directly (e.g. `just dev-ios -config ./example.toml -device iphone16`).
 dev-ios *args:
