@@ -483,6 +483,7 @@ func Connect(
 		sr.turnCtrl = turnCtrl
 		sr.composerBridge = grpcwire.NewComposerBridge(turnCtrl, nil)
 		AttachRoomResponder(link, cfg)
+		AttachCoveRelayBridge(linkCtx, cfg, markDirty)
 
 		var (
 			turnMu    sync.Mutex

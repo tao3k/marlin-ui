@@ -7,6 +7,7 @@
 package hostlink
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -197,6 +198,22 @@ type CoveGateReceipt struct {
 	ResolvedAtUnix int64  `json:"resolved_at_unix"`
 }
 
+// CoveRoomEvent mirrors marlin-cove's monotonic SSE RoomEvent envelope.
+type CoveRoomEvent struct {
+	Seq    uint64            `json:"seq"`
+	RoomID string            `json:"room_id"`
+	Kind   CoveRoomEventKind `json:"kind"`
+}
+
+// CoveRoomEventKind mirrors marlin-cove's tagged RoomEventKind payload.
+type CoveRoomEventKind struct {
+	Type        string           `json:"type"`
+	Message     *CoveMessage     `json:"message,omitempty"`
+	Participant *CoveParticipant `json:"participant,omitempty"`
+	Gate        *CoveGate        `json:"gate,omitempty"`
+	Receipt     *CoveGateReceipt `json:"receipt,omitempty"`
+}
+
 // FetchGovernanceEnvelope fetches the verified room governance envelope that
 // Marlin Cove forwards to Marlin Gateway (marlin-agent-core).
 func (c *CoveClient) FetchGovernanceEnvelope(ctx context.Context, roomID, principalID string) (CoveGovernanceEnvelope, error) {
@@ -204,6 +221,82 @@ func (c *CoveClient) FetchGovernanceEnvelope(ctx context.Context, roomID, princi
 	path := fmt.Sprintf("/v1/rooms/%s/governance/%s", url.PathEscape(roomID), url.PathEscape(principalID))
 	err := c.doJSON(ctx, http.MethodGet, path, nil, &out)
 	return out, err
+}
+
+// RedeemInvite redeems a scoped invite token via POST /v1/invites/{token}/join.
+func (c *CoveClient) RedeemInvite(ctx context.Context, token, principalID, displayName, handle, kind string) (CoveParticipant, error) {
+	var out CoveParticipant
+	path := fmt.Sprintf("/v1/invites/%s/join", url.PathEscape(token))
+	payload := map[string]any{
+		"principal_id": principalID,
+		"display_name": displayName,
+		"handle":       handle,
+		"kind":         kind,
+	}
+	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
+	return out, err
+}
+
+// RequestGate opens a Tier-0 PromptGate via POST /v1/rooms/{room_id}/gates.
+func (c *CoveClient) RequestGate(ctx context.Context, roomID, channelID, requestedBy, summary, capability string) (CoveGate, error) {
+	var out CoveGate
+	path := fmt.Sprintf("/v1/rooms/%s/gates", url.PathEscape(roomID))
+	payload := map[string]any{
+		"channel_id":   channelID,
+		"requested_by": requestedBy,
+		"summary":      summary,
+		"capability":   capability,
+	}
+	err := c.doJSON(ctx, http.MethodPost, path, payload, &out)
+	return out, err
+}
+
+// WatchEvents subscribes to GET /v1/rooms/{room_id}/events (SSE) and invokes
+// onEvent for every RoomEvent until ctx is canceled or the stream ends.
+func (c *CoveClient) WatchEvents(ctx context.Context, roomID string, onEvent func(CoveRoomEvent)) error {
+	path := fmt.Sprintf("/v1/rooms/%s/events", url.PathEscape(roomID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if c.token != "" {
+		if strings.HasPrefix(c.token, "Bearer ") {
+			req.Header.Set("Authorization", c.token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
+	}
+
+	sseClient := &http.Client{}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("marlin-cove SSE %s failed (%d): %s", path, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		var evt CoveRoomEvent
+		if err := json.Unmarshal([]byte(payload), &evt); err == nil && onEvent != nil {
+			onEvent(evt)
+		}
+	}
+	return scanner.Err()
 }
 
 // DispatchTurn posts a user turn into Cove and dispatches it live to Marlin
