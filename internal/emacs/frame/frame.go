@@ -967,8 +967,14 @@ func (f *Frame) View(c *ui.Context) {
 			st.GlassOpacity = chromeOp
 			st.PendingGates = pendingGateCount
 			st.OnReviewGate = f.OpenGateReview
+			st.OnToggleDedicated = f.ToggleWindowDedicated
 			st.WindowNumber = leaf.Number
 			st.WindowCount = snap.Workspaces.Active.WindowCount()
+			if st.WindowCount >= 3 {
+				st.WidthCols = 48
+			} else {
+				st.WidthCols = 72
+			}
 			st.Focused = leaf.Focused
 			st.Dedicated = leaf.Dedicated
 			st.KeyPrefix = leaf.ID
@@ -993,7 +999,9 @@ func (f *Frame) View(c *ui.Context) {
 			st.GlassOpacity = chromeOp
 			st.PendingGates = pendingGateCount
 			st.OnReviewGate = f.OpenGateReview
+			st.OnToggleDedicated = f.ToggleWindowDedicated
 			st.WindowCount = 1
+			st.WidthCols = 120
 			st.Focused = true
 			st.Dedicated = snap.Workspaces.Active.FocusedLeaf().Dedicated
 			modeline.Render(c, st)

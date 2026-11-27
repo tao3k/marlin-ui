@@ -905,13 +905,17 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 	}
 	turns := 0
 	helmTotal := 0
+	agentWorking := false
+	deepThink := false
 	if f.Adaptive != nil && f.Adaptive.Desktop != nil {
 		if f.Adaptive.Desktop.ActiveSessionID != "" {
 			sessID = f.Adaptive.Desktop.ActiveSessionID
 		}
 		if f.Adaptive.Desktop.Transcript != nil {
 			turns = f.Adaptive.Desktop.Transcript.Len()
+			deepThink = f.Adaptive.Desktop.Transcript.DeepThinkEnabled()
 			if f.Adaptive.Desktop.Transcript.InFlight() {
+				agentWorking = true
 				actLabel = "Working"
 				actCol = th.Info
 			}
@@ -948,26 +952,31 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 		}
 	}
 	return modeline.Status{
-		Preset:           preset,
-		KeyMode:          f.meowState.Mode(),
-		MiniMode:         f.miniState.Mode(),
-		Keypad:           f.meowState.Keypad(),
-		BufferName:       bufName,
-		MajorMode:        majorModeName(activeBuf),
-		WorkspacePath:    wsPath,
-		RemoteHost:       remoteHost,
-		ActivityLabel:    actLabel,
-		ActivityColor:    actCol,
-		ModelLabel:       modelLbl,
-		StatusItems:      snap.StatusItems,
-		SessionID:        sessID,
-		RowCount:         turns,
-		HelmTotal:        helmTotal,
-		ShowGateBadge:    activeBuf != buffer.Dashboard,
-		OnOpenModels:     func() { f.SelectBuffer(buffer.Models) },
-		OnOpenWorkspaces: func() { f.OpenHydra("SPC l") },
-		VersionLabel:     ver,
-		Theme:            th,
+		Preset:            preset,
+		KeyMode:           f.meowState.Mode(),
+		MiniMode:          f.miniState.Mode(),
+		Keypad:            f.meowState.Keypad(),
+		BufferName:        bufName,
+		MajorMode:         majorModeName(activeBuf),
+		WorkspacePath:     wsPath,
+		RemoteHost:        remoteHost,
+		ActivityLabel:     actLabel,
+		ActivityColor:     actCol,
+		AgentWorking:      agentWorking,
+		HasUnsavedDraft:   activeBuf == buffer.Conversation && strings.TrimSpace(f.convComposerDraft) != "",
+		DeepThink:         deepThink,
+		ShowDeepThink:     activeBuf == buffer.Conversation,
+		ModelLabel:        modelLbl,
+		StatusItems:       snap.StatusItems,
+		SessionID:         sessID,
+		RowCount:          turns,
+		HelmTotal:         helmTotal,
+		ShowGateBadge:     activeBuf != buffer.Dashboard,
+		OnOpenModels:      func() { f.SelectBuffer(buffer.Models) },
+		OnOpenWorkspaces:  func() { f.OpenHydra("SPC TAB") },
+		OnToggleDeepThink: f.ToggleDeepThink,
+		VersionLabel:      ver,
+		Theme:             th,
 	}
 }
 
