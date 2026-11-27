@@ -23,6 +23,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 // frameSnapshot is an immutable, defensively cloned RCU view of Frame state
@@ -136,6 +137,15 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 func (f *Frame) hydraBodyFor(snap frameSnapshot, prefix string) hydra.Body {
 	def, ok := snap.TomlHydras[prefix]
 	if !ok {
+		for _, cand := range snap.TomlHydras {
+			if cand.ID == prefix {
+				def = cand
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
 		def = snap.TomlHydras["SPC"]
 	}
 	return f.materializeHydra(def)
@@ -247,11 +257,40 @@ func (f *Frame) commitGRPCWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 	if len(snap.StatusItems) > 0 {
 		f.statusItems = append([]schema.UIStatusItem(nil), snap.StatusItems...)
 	}
-	if len(snap.Extensions) > 0 {
-		f.schemeExts = append([]schema.UIExtensionRegion(nil), snap.Extensions...)
-	}
 	if len(snap.Commands) > 0 {
 		f.schemeCmds = append([]schema.UICommandSpec(nil), snap.Commands...)
+	}
+	if proj, err := uiframework.ProjectWorkbench(uiframework.DefaultRegistry(), desktopTargetKind(), snap); err == nil {
+		if len(snap.Slots) > 0 {
+			f.assembledSurface = proj.Surface
+		}
+		if len(snap.Extensions) > 0 {
+			f.schemeExts = proj.Extensions
+			if proj.RejectedExtensions > 0 {
+				f.logMessage(fmt.Sprintf("marlin.ui.v1 rejected %d unbounded/invalid extension(s)", proj.RejectedExtensions))
+			}
+		}
+		if len(proj.Hydras) > 0 {
+			f.liveSchemeHydras = projectMappedHydras(proj.Hydras)
+			f.rebuildEffectiveHydrasLocked()
+		}
+		if len(proj.Windows) > 0 && f.wsMgr != nil {
+			specs := make([]workspace.SchemeWindowSpec, 0, len(proj.Windows))
+			for _, w := range proj.Windows {
+				specs = append(specs, workspace.SchemeWindowSpec{
+					ID:     w.ID,
+					Buffer: buffer.ID(w.BufferID),
+				})
+			}
+			wsSnap := f.wsMgr.SyncSchemeWindows(specs, proj.SelectedWindowID)
+			f.activeBuffer = wsSnap.Active.ActiveBuffer
+			f.openTabs = append([]buffer.ID(nil), wsSnap.Active.Buffers...)
+			if strings.HasPrefix(string(f.activeBuffer), uiframework.SchemeExtBufferPrefix) && wsSnap.Active.WindowCount() <= 1 {
+				f.activeExtID = strings.TrimPrefix(string(f.activeBuffer), uiframework.SchemeExtBufferPrefix)
+			} else {
+				f.activeExtID = ""
+			}
+		}
 	}
 	if !f.themeUserSet && snap.Theme.Canvas != snap.Theme.Ink && snap.ProfileName != "" && !strings.HasPrefix(snap.ProfileName, "adaptive-") {
 		f.Theme = theme.FromUITheme(snap.ProfileName, snap.ProfileName, snap.Theme)

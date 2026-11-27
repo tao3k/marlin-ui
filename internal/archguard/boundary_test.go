@@ -106,6 +106,8 @@ var allowedEmacsInternalDeps = map[string]map[string]bool{
 		"internal/emacs/minibuffer": true,
 		"internal/appconfig":        true,
 		"internal/hostlink":         true,
+		"internal/shellmanifest":    true,
+		"internal/uiframework":      true,
 	},
 }
 

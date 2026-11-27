@@ -11,6 +11,10 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/engine/features"
+	"github.com/tao3k/marlin-mygo/pkg/schema"
+	"github.com/tao3k/marlin-mygo/runtime/mapper"
+
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
@@ -455,12 +459,21 @@ func (f *Frame) SelectModel(alias, displayLabel string) {
 func (f *Frame) buildSplitProps(
 	wsSnap workspace.Snapshot,
 	showChrome bool,
+	schemeExts []schema.UIExtensionRegion,
+	mapCtx mapper.Context,
+	featHost *features.Host,
 	renderPaneModeline func(c *ui.Context, leaf workspace.WindowLeafView),
 ) window.SplitProps {
 	act := wsSnap.Active
 	winCount := act.WindowCount()
 	if winCount <= 1 || act.WindowTree == nil {
-		return window.SplitProps{Mode: workspace.SplitSingle, WindowCount: 1}
+		return window.SplitProps{
+			Mode:        workspace.SplitSingle,
+			WindowCount: 1,
+			SchemeExts:  schemeExts,
+			MapCtx:      mapCtx,
+			FeatHost:    featHost,
+		}
 	}
 	return window.SplitProps{
 		Mode:               act.SplitMode,
@@ -471,6 +484,9 @@ func (f *Frame) buildSplitProps(
 		FocusedWindowID:    act.FocusedWindowID,
 		WindowCount:        winCount,
 		ShowChrome:         showChrome,
+		SchemeExts:         schemeExts,
+		MapCtx:             mapCtx,
+		FeatHost:           featHost,
 		RenderPaneModeline: renderPaneModeline,
 		OnFocusWindow:      f.FocusWindowID,
 		OnFocusPane:        f.FocusPane,

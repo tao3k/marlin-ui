@@ -11,7 +11,10 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/pkg/schema"
+
 	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 //go:embed defaults/*.toml
@@ -55,8 +58,7 @@ func loadDefaultCommands() []declarativeCommand {
 	return cmds
 }
 
-func loadDefaultKeymaps() map[string]declarativeHydraDef {
-	base := loadSchemeBaseKeymaps()
+func loadDesktopTOMLKeymaps() map[string]declarativeHydraDef {
 	raw, err := defaultTOMLFS.ReadFile("defaults/keymaps.toml")
 	if err != nil {
 		panic(fmt.Sprintf("frame: missing embedded defaults/keymaps.toml: %v", err))
@@ -65,7 +67,53 @@ func loadDefaultKeymaps() map[string]declarativeHydraDef {
 	if err != nil {
 		panic(fmt.Sprintf("frame: invalid embedded defaults/keymaps.toml: %v", err))
 	}
-	return mergeHydraOverlay(base, overlay)
+	return overlay
+}
+
+func loadDefaultKeymaps() map[string]declarativeHydraDef {
+	return mergeHydraOverlay(loadSchemeBaseKeymaps(), loadDesktopTOMLKeymaps())
+}
+
+// projectLiveSchemeKeymaps converts live `marlin.ui.v1` Scheme keybindings and
+// Hydra transients into declarativeHydraDef entries ready to layer beneath
+// Desktop-special and user TOML overlays.
+func projectLiveSchemeKeymaps(
+	keymap []schema.UIKeyBindingSpec,
+	transients []schema.UITransient,
+) map[string]declarativeHydraDef {
+	return projectMappedHydras(uiframework.ProjectKeymapAndTransients(keymap, transients))
+}
+
+func projectMappedHydras(mapped map[string]uiframework.MappedHydra) map[string]declarativeHydraDef {
+	out := make(map[string]declarativeHydraDef, len(mapped))
+	for pref, mh := range mapped {
+		def := declarativeHydraDef{
+			ID:     mh.ID,
+			Prefix: mh.Prefix,
+			Title:  mh.Title,
+			Heads:  make([]declarativeHeadDef, 0, len(mh.Heads)),
+		}
+		for _, hd := range mh.Heads {
+			code, mods, ok := parseUIKeyWithMods(hd.Key)
+			if !ok {
+				continue
+			}
+			def.Heads = append(def.Heads, declarativeHeadDef{
+				Key:      hd.Key,
+				KeyCode:  code,
+				KeyMods:  mods,
+				Label:    hd.Label,
+				Column:   hd.Column,
+				Exit:     hd.Exit,
+				IsPrefix: hd.IsPrefix,
+				Action:   hd.Action,
+			})
+		}
+		if len(def.Heads) > 0 {
+			out[pref] = def
+		}
+	}
+	return out
 }
 
 // mergeHydraOverlay layers TOML desktop extensions or downstream user overrides

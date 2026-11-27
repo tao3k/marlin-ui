@@ -12,11 +12,13 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/engine/search"
+	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/mobile"
 	"github.com/tao3k/marlin-ui/internal/mobile/ios"
+	"github.com/tao3k/marlin-ui/internal/shellmanifest"
 )
 
 func TestIOSLiquidGlassShellTabsThemeParityAndZeroFlickerSearch(t *testing.T) {
@@ -32,6 +34,13 @@ func TestIOSLiquidGlassShellTabsThemeParityAndZeroFlickerSearch(t *testing.T) {
 	})
 	if shell.Platform() != mobile.PlatformIOS {
 		t.Fatalf("expected PlatformIOS, got %v", shell.Platform())
+	}
+	surf := shell.AssembledSurface()
+	if !surf.HasModule(shellmanifest.ModAgentRoom) || !surf.HasModule(shellmanifest.ModIOSTabBar) || surf.HasModule(shellmanifest.ModDoomModeline) {
+		t.Fatalf("unexpected iOS assembled surface composition: %+v", surf)
+	}
+	if surf.AdmitSlot("approval.gate", false) || !surf.AdmitSlot("approval.gate", true) {
+		t.Fatalf("iOS surface must enforce fail-closed approval.gate trust invariant")
 	}
 
 	tt := ui.NewTester(shell.View, 393, 852)
@@ -97,5 +106,38 @@ func TestIOSLiquidGlassShellTabsThemeParityAndZeroFlickerSearch(t *testing.T) {
 	tt.Frame()
 	if !shell.ActiveTheme().IsLight || shell.ActiveTheme().ID != "doom-one-light" {
 		t.Fatalf("expected live theme switch to doom-one-light, got %+v", shell.ActiveTheme().ID)
+	}
+
+	// 5. Live Scheme UIWorkbenchSnapshot projects bounds-validated Extensions + Mobile-width StatusItems onto iOS Home!
+	shell.ApplyWorkbenchSnapshot(schema.UIWorkbenchSnapshot{
+		Generation: 5,
+		ModelLabel: "deepseek/deepseek-flash",
+		StatusItems: []schema.UIStatusItem{
+			{ID: "git", Label: "main", KeepPriority: 100},
+			{ID: "desktop-wide", Label: "WIDE ONLY", MinWidth: 100, KeepPriority: 10},
+		},
+		Extensions: []schema.UIExtensionRegion{
+			{
+				ID:    "mobile-trace",
+				Label: "*Live Trace*",
+				Content: schema.UIElement{
+					Kind:  schema.ElemText,
+					Spans: []schema.UISpan{{Text: "iOS Scheme Telemetry Ready", Tone: schema.ToneInfo}},
+				},
+			},
+			{
+				ID:      "invalid-ext",
+				Content: schema.UIElement{}, // rejected by MAR-UI-R03
+			},
+		},
+	})
+	if len(shell.SchemeExtensions()) != 1 || len(shell.SchemeStatusItems()) != 1 {
+		t.Fatalf("expected 1 valid Scheme extension and 1 mobile-width status item on iOS, got exts=%d status=%d",
+			len(shell.SchemeExtensions()), len(shell.SchemeStatusItems()))
+	}
+	shell.SelectTab(mobile.TabHome)
+	settlePager()
+	if !tt.HasText("SCHEME EXTENSIONS") || !tt.HasText("iOS Scheme Telemetry Ready") {
+		t.Fatalf("expected iOS Bento Home to render live Scheme UIExtensionRegion via mapper.MapElement, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }

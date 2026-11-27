@@ -181,3 +181,28 @@ func TestDoomMultiWindowTreeWinumDedicatedAndWinnerMode(t *testing.T) {
 		t.Fatalf("expected CloseWindowOrWorkspace on single-window scratch workspace to kill it, got act=%q active=%q", act, afterClose.ActiveID)
 	}
 }
+
+func TestSyncSchemeWindowsBuildsMultiWindowTreeAndPreservesWinnerUndo(t *testing.T) {
+	mgr := NewManager([]buffer.ID{buffer.Dashboard, buffer.Conversation})
+
+	synced := mgr.SyncSchemeWindows([]SchemeWindowSpec{
+		{ID: "win-1", Buffer: buffer.Conversation},
+		{ID: "win-2", Buffer: buffer.ID("scheme-ext:git-status")},
+		{ID: "win-3", Buffer: buffer.Sessions},
+	}, "win-2")
+
+	wins := synced.Active.Windows()
+	if len(wins) != 3 {
+		t.Fatalf("expected 3 Scheme-synced windows, got %d", len(wins))
+	}
+	if wins[0].ID != "win-1" || wins[1].ID != "win-2" || wins[1].Buffer != "scheme-ext:git-status" || !wins[1].Focused {
+		t.Fatalf("unexpected Scheme window layout or focus: %+v", wins)
+	}
+
+	// Winner-mode undo cleanly restores the pre-sync 1-window *Dashboard* layout!
+	undone, restored := mgr.WinnerUndo()
+	if !undone || restored.Active.WindowCount() != 1 || restored.Active.ActiveBuffer != buffer.Dashboard {
+		t.Fatalf("expected WinnerUndo to restore pre-sync single *Dashboard* layout, got undone=%v count=%d buf=%q",
+			undone, restored.Active.WindowCount(), restored.Active.ActiveBuffer)
+	}
+}

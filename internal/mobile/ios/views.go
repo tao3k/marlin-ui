@@ -15,7 +15,9 @@ import (
 
 	"github.com/tao3k/marlin-mygo/engine/promptgate"
 	"github.com/tao3k/marlin-mygo/engine/search"
+	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
+	"github.com/tao3k/marlin-mygo/runtime/mapper"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
@@ -32,6 +34,9 @@ func (s *Shell) renderBentoHome(c *ui.Context, th theme.Theme, hasFloatingTabBar
 	s.mu.Lock()
 	motionOn := s.MotionOn
 	deep := s.deepThink
+	schemeExts := append([]schema.UIExtensionRegion(nil), s.schemeExts...)
+	schemeStatus := append([]mapper.ResolvedStatusItem(nil), s.schemeStatus...)
+	activeModel := s.activeModel
 	s.mu.Unlock()
 	padBot := float32(18)
 	if hasFloatingTabBar {
@@ -256,6 +261,61 @@ func (s *Shell) renderBentoHome(c *ui.Context, th theme.Theme, hasFloatingTabBar
 					}
 				}
 			})
+
+			// Row 5 (Optional): Live Scheme UIExtensionRegions + Mobile Status Items
+			// streamed over marlin.ui.v1 and rendered natively via runtime/mapper.
+			if len(schemeExts) > 0 || len(schemeStatus) > 0 {
+				ui.Column(c.Key("ios-bento-scheme-exts")).Padding(16, 16, 14, 16).Gap(10).Radius(24).
+					Background(widgetFill).Border(1, widgetHairline).AlignItems(ui.Stretch).Children(func() {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						sfIcon(c, "puzzlepiece.extension", 14, th.Accent, false)
+						ui.Text(c, "SCHEME EXTENSIONS").Font(theme.FontMono).FontSize(10.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).SingleLine()
+					})
+					if len(schemeStatus) > 0 {
+						ui.Row(c.Key("ios-scheme-status-row")).Gap(6).Wrap().AlignItems(ui.Center).Children(func() {
+							for _, st := range schemeStatus {
+								ui.Row(c.Key("ios-st-"+st.ID)).Padding(3, 8).Radius(theme.RadiusPill).
+									Background(kit.WithAlpha(th.SurfaceElevated, 0.72)).Children(func() {
+									ui.Text(c, st.Text).Font(theme.FontMono).FontSize(10.5).FontWeight(600).TextColor(th.Info).NoWrap()
+								})
+							}
+						})
+					}
+					mapCtx := mapper.Context{
+						WidthCols: 42,
+						Sheet:     th.Sheet,
+						Bindings: map[string]string{
+							"model":   activeModel,
+							"session": s.AppCfg.SessionID,
+							"theme":   th.Name,
+						},
+						OnCommand: func(name string) {
+							if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnCommandInvoke != nil {
+								s.Adaptive.Desktop.OnCommandInvoke(name)
+							}
+							s.invalidate()
+						},
+						OnAction: func(action, _ string) {
+							if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnCommandInvoke != nil {
+								s.Adaptive.Desktop.OnCommandInvoke(action)
+							}
+							s.invalidate()
+						},
+					}
+					for _, ext := range schemeExts {
+						lbl := strings.TrimSpace(ext.Label)
+						if lbl == "" {
+							lbl = ext.ID
+						}
+						ui.Column(c.Key("ios-scheme-ext-"+ext.ID)).Padding(10, 12).Gap(6).Radius(16).
+							Background(kit.WithAlpha(th.Canvas, 0.45)).Border(1, kit.WithAlpha(th.BorderSubtle, 0.50)).
+							AlignItems(ui.Stretch).Children(func() {
+							ui.Text(c, lbl).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).SingleLine()
+							mapper.MapElement(c, ext.Content, th.ToMapperSkin(), mapCtx)
+						})
+					}
+				})
+			}
 		})
 	})
 }

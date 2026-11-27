@@ -215,15 +215,17 @@ func (f *Frame) applyThemeBundleLocked(bundle appconfig.UIThemeBundle, preferred
 	}
 	f.tomlCommands = cmds
 
-	hydras := loadDefaultKeymaps()
+	f.desktopTOMLOverlay = loadDesktopTOMLKeymaps()
 	if strings.TrimSpace(bundle.KeymapsTOML) != "" {
 		if extra, err := parseKeymapsTOML(bundle.KeymapsTOML); err != nil {
 			warnings = append(warnings, fmt.Sprintf("keymaps.toml: %v", err))
 		} else {
-			hydras = mergeHydraOverlay(hydras, extra)
+			f.userTOMLOverlay = extra
 		}
+	} else {
+		f.userTOMLOverlay = nil
 	}
-	f.tomlHydras = hydras
+	f.rebuildEffectiveHydrasLocked()
 
 	return warnings
 }
@@ -413,6 +415,14 @@ func (f *Frame) dispatchWidgetAction(action string) {
 			f.Adaptive.Desktop.OnCommandInvoke(name)
 		}
 		f.Echo("Executed " + name)
+		return
+	}
+	if strings.HasPrefix(act, "scheme:") {
+		name := strings.TrimPrefix(act, "scheme:")
+		if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.OnCommandInvoke != nil {
+			f.Adaptive.Desktop.OnCommandInvoke(name)
+		}
+		f.Echo("Scheme: " + name)
 		return
 	}
 	switch act {
@@ -927,12 +937,22 @@ func (f *Frame) buildModelineStatusForBuffer(snap frameSnapshot, activeBuf buffe
 	if pr := strings.TrimSpace(snap.Workspaces.Active.ProjectRoot); pr != "" {
 		wsPath = pr
 	}
+	bufName := string(activeBuf)
+	if strings.HasPrefix(bufName, "scheme-ext:") {
+		extID := strings.TrimPrefix(bufName, "scheme-ext:")
+		for _, ext := range snap.SchemeExts {
+			if ext.ID == extID && strings.TrimSpace(ext.Label) != "" {
+				bufName = strings.TrimSpace(ext.Label)
+				break
+			}
+		}
+	}
 	return modeline.Status{
 		Preset:           preset,
 		KeyMode:          f.meowState.Mode(),
 		MiniMode:         f.miniState.Mode(),
 		Keypad:           f.meowState.Keypad(),
-		BufferName:       string(activeBuf),
+		BufferName:       bufName,
 		MajorMode:        majorModeName(activeBuf),
 		WorkspacePath:    wsPath,
 		RemoteHost:       remoteHost,
@@ -968,6 +988,9 @@ func majorModeName(id buffer.ID) string {
 	case buffer.Packages:
 		return "Package-Menu"
 	default:
+		if strings.HasPrefix(string(id), "scheme-ext:") {
+			return "Scheme-Ext"
+		}
 		return "Marlin-Chat"
 	}
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
+	"github.com/tao3k/marlin-mygo/runtime/mapper"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/meow"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
@@ -360,13 +361,11 @@ func renderRightDeclarative(c *ui.Context, k func(string) string, st Status, th 
 			}
 		}
 
-		// If marlin.ui.v1 gRPC supplied declarative StatusItems, render them directly.
+		// If marlin.ui.v1 gRPC supplied declarative Scheme StatusItems, evaluate their
+		// width-aware priority rules (MinWidth, CompactBelow, KeepPriority) via runtime/mapper.
 		if len(st.StatusItems) > 0 && st.WindowCount <= 1 {
-			for i, item := range st.StatusItems {
-				lbl := strings.TrimSpace(item.Label)
-				if lbl == "" {
-					lbl = strings.TrimSpace(item.CompactLabel)
-				}
+			for i, item := range mapper.ProjectStatusItems(st.StatusItems, 120, nil) {
+				lbl := strings.TrimSpace(item.Text)
 				if lbl == "" {
 					continue
 				}

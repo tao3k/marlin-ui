@@ -11,6 +11,7 @@ package frame
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,6 +41,8 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/window"
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
+	"github.com/tao3k/marlin-ui/internal/shellmanifest"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 // Config configures Marlin UI's Doom Emacs Frame.
@@ -89,11 +92,15 @@ type Frame struct {
 	themeSurfaces   map[string]appconfig.SurfaceConfig
 	userTokensJSON  string
 	userOverrideCSS string
-	dashboardNode   *widgets.Node
-	customSidebar   *widgets.SidebarSpec
-	tomlCommands    []declarativeCommand
-	tomlHydras      map[string]declarativeHydraDef
-	uiModules       widgets.Modules
+	dashboardNode      *widgets.Node
+	customSidebar      *widgets.SidebarSpec
+	tomlCommands       []declarativeCommand
+	tomlHydras         map[string]declarativeHydraDef
+	desktopTOMLOverlay map[string]declarativeHydraDef
+	userTOMLOverlay    map[string]declarativeHydraDef
+	liveSchemeHydras   map[string]declarativeHydraDef
+	assembledSurface   uiframework.AssembledSurface
+	uiModules          widgets.Modules
 	zenMode         bool
 	railPinned      bool
 	dashPromptDraft   string
@@ -210,8 +217,56 @@ func New(cfg Config) *Frame {
 	}
 	f.restoreSavedWorkspaces()
 	f.initPackageStore(cfg.PackageStore)
+	if assembled, err := uiframework.DefaultRegistry().AssembleSurface(desktopTargetKind(), nil); err == nil {
+		f.assembledSurface = assembled
+	}
 	f.initAsyncRuntime()
 	return f
+}
+
+func desktopTargetKind() shellmanifest.TargetKind {
+	switch runtime.GOOS {
+	case "darwin":
+		return shellmanifest.TargetDesktopMacOS
+	case "windows":
+		return shellmanifest.TargetDesktopWindows
+	default:
+		return shellmanifest.TargetDesktopLinux
+	}
+}
+
+// AssembledSurface returns Desktop's validated modular UI Component surface
+// (shared core modules + Desktop Emacs modules + live Scheme slot policies).
+func (f *Frame) AssembledSurface() uiframework.AssembledSurface {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.assembledSurface
+}
+
+// ApplyWorkbenchSnapshot admits a live `marlin.ui.v1` Scheme/Rust workbench
+// snapshot directly into Frame state (updating live Scheme keymaps, Hydra
+// transients, status items, commands, extensions, and slot trust policies).
+func (f *Frame) ApplyWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
+	f.commitGRPCWorkbenchSnapshot(snap)
+}
+
+// rebuildEffectiveHydrasLocked composes the 4-tier Doom keymap hierarchy:
+//  1. Static Scheme Base (`scheme/ui-meow/key-bindings.ss` canonical mirror)
+//  2. Live Scheme gRPC (`marlin.ui.v1` `snap.Keymap` + `snap.Transients`)
+//  3. Desktop-Special Extension (`defaults/keymaps.toml`)
+//  4. Downstream User Overlay (`~/.config/marlin/ui/keymaps.toml`)
+func (f *Frame) rebuildEffectiveHydrasLocked() {
+	eff := loadSchemeBaseKeymaps()
+	if len(f.liveSchemeHydras) > 0 {
+		eff = mergeHydraOverlay(eff, f.liveSchemeHydras)
+	}
+	if len(f.desktopTOMLOverlay) > 0 {
+		eff = mergeHydraOverlay(eff, f.desktopTOMLOverlay)
+	}
+	if len(f.userTOMLOverlay) > 0 {
+		eff = mergeHydraOverlay(eff, f.userTOMLOverlay)
+	}
+	f.tomlHydras = eff
 }
 
 func (f *Frame) logMessage(line string) {
@@ -300,8 +355,15 @@ func (f *Frame) CycleTheme() {
 }
 
 // SelectFeature focuses an opted-in feature buffer (e.g. "feature:chatroom") or Scheme extension.
+// When multi-window split mode is active, Scheme extensions (`scheme-ext:<id>`)
+// open as first-class buffers inside the focused split pane so the user's
+// multi-window layout stays intact.
 func (f *Frame) SelectFeature(fid string) {
 	if f.selectMountedPlugin(fid) {
+		return
+	}
+	if strings.HasPrefix(fid, uiframework.SchemeExtBufferPrefix) && f.wsMgr != nil && f.wsMgr.Snapshot().Active.WindowCount() > 1 {
+		f.SelectBuffer(buffer.ID(fid))
 		return
 	}
 	wasMini := f.miniState.IsCompletionActive()
@@ -757,19 +819,53 @@ func (f *Frame) View(c *ui.Context) {
 		OnOpenFilePreview: f.OpenFilePreview,
 	}
 
+	winCount := snap.Workspaces.Active.WindowCount()
 	mapCtx := mapper.Context{
 		WidthCols: 120,
 		Sheet:     th.Sheet,
 		Bindings: map[string]string{
-			"model":   modelLbl,
-			"session": sessLbl,
-			"theme":   th.Name,
+			"model":         modelLbl,
+			"session":       sessLbl,
+			"theme":         th.Name,
+			"workspace":     snap.Workspaces.Active.Name,
+			"buffer":        string(activeBuf),
+			"window.count":  fmt.Sprintf("%d", winCount),
+			"gates.pending": fmt.Sprintf("%d", pendingGateCount),
+		},
+		Facts: map[string]bool{
+			"split.active":      winCount > 1,
+			"zen.active":        zen,
+			"glass.enabled":     mods.Glass,
+			"gates.has_pending": pendingGateCount > 0,
 		},
 		OnCommand: func(name string) {
+			act, _, _ := uiframework.ResolveSchemeAction(name)
+			if act != "" {
+				f.dispatchWidgetAction(act)
+				return
+			}
 			if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.OnCommandInvoke != nil {
 				f.Adaptive.Desktop.OnCommandInvoke(name)
 			}
 			f.Echo("Executed " + name)
+		},
+		OnAction: func(action, _ string) {
+			act := strings.TrimSpace(action)
+			if act == "" {
+				return
+			}
+			if strings.Contains(act, ":") {
+				f.dispatchWidgetAction(act)
+				return
+			}
+			resolved, _, _ := uiframework.ResolveSchemeAction(act)
+			f.dispatchWidgetAction(resolved)
+		},
+		OnSelectRow: func(listID, rowID string) {
+			if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.OnCommandInvoke != nil {
+				f.Adaptive.Desktop.OnCommandInvoke(listID + ":" + rowID)
+			}
+			f.Echo("Selected " + rowID)
 		},
 	}
 
@@ -782,7 +878,9 @@ func (f *Frame) View(c *ui.Context) {
 
 	activeTabKey := activeFeat
 	if activeExtID != "" {
-		activeTabKey = "scheme-ext:" + activeExtID
+		activeTabKey = uiframework.SchemeExtBufferPrefix + activeExtID
+	} else if strings.HasPrefix(string(activeBuf), uiframework.SchemeExtBufferPrefix) {
+		activeTabKey = string(activeBuf)
 	} else if activePlugin != nil {
 		activeTabKey = "pkg:" + activePlugin.ID
 	}
@@ -883,7 +981,7 @@ func (f *Frame) View(c *ui.Context) {
 
 		ui.Column(c.Key("doom-viewport-host")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 			if !renderMountedPluginViewport(c, th, activePlugin, bc) {
-				splitProps := f.buildSplitProps(snap.Workspaces, showChrome, renderPaneModeline)
+				splitProps := f.buildSplitProps(snap.Workspaces, showChrome, schemeExts, mapCtx, f.FeatureHost, renderPaneModeline)
 				window.RenderBody(c, th, activeBuf, activeFeat, activeExt, f.FeatureHost, bc, mapCtx, splitProps, f.buildPopupProps(snap.Workspaces))
 			}
 			f.renderEdgeSidebar(c, snap, mods, glassOp, featBufs, sig, wrt)

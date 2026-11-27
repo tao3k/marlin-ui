@@ -19,13 +19,17 @@ import (
 	"github.com/egoist/mygo/ui/mobile"
 
 	"github.com/tao3k/marlin-mygo/engine/search"
+	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
+	"github.com/tao3k/marlin-mygo/runtime/mapper"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 	mob "github.com/tao3k/marlin-ui/internal/mobile"
+	"github.com/tao3k/marlin-ui/internal/shellmanifest"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 // Tab aliases the shared internal/mobile.Tab destination contract.
@@ -87,10 +91,14 @@ type Shell struct {
 	Prefs        appconfig.UserPrefs
 	NativeTabBar bool
 
-	Theme        theme.Theme
-	ThemeCatalog []theme.Theme
-	Surface      appconfig.SurfaceConfig
-	GlassEnabled bool
+	Theme            theme.Theme
+	ThemeCatalog     []theme.Theme
+	Surface          appconfig.SurfaceConfig
+	assembledSurface uiframework.AssembledSurface
+	schemeExts       []schema.UIExtensionRegion
+	schemeStatus     []mapper.ResolvedStatusItem
+	schemeCmds       []uiframework.MappedCommand
+	GlassEnabled     bool
 	GlassOpacity float32
 	MotionOn     bool
 
@@ -164,16 +172,19 @@ func New(cfg Config) *Shell {
 		activeModel = cfg.AppConfig.ModelCfg.SummaryLabel()
 	}
 
+	assembled, _ := uiframework.DefaultRegistry().AssembleSurface(shellmanifest.TargetMobileIOS, nil)
+
 	return &Shell{
-		Adaptive:       cfg.Adaptive,
-		Link:           cfg.Link,
-		AppCfg:         cfg.AppConfig,
-		Prefs:          cfg.Prefs,
-		NativeTabBar:   cfg.NativeTabBar,
-		Theme:          selected,
-		ThemeCatalog:   catalog,
-		Surface:        surf,
-		GlassEnabled:   glassOn,
+		Adaptive:         cfg.Adaptive,
+		Link:             cfg.Link,
+		AppCfg:           cfg.AppConfig,
+		Prefs:            cfg.Prefs,
+		NativeTabBar:     cfg.NativeTabBar,
+		Theme:            selected,
+		ThemeCatalog:     catalog,
+		Surface:          surf,
+		assembledSurface: assembled,
+		GlassEnabled:     glassOn,
 		GlassOpacity:   op,
 		MotionOn:       motionOn,
 		activeTab:      TabChat,
@@ -190,6 +201,57 @@ func New(cfg Config) *Shell {
 
 // Platform identifies this shell as Apple iOS.
 func (s *Shell) Platform() mob.Platform { return mob.PlatformIOS }
+
+// AssembledSurface returns iOS's validated modular UI Component surface
+// (shared core modules + iOS Liquid Glass modules + slot trust policies).
+func (s *Shell) AssembledSurface() uiframework.AssembledSurface {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.assembledSurface
+}
+
+// ApplyWorkbenchSnapshot admits a live `marlin.ui.v1` Scheme/Rust workbench
+// snapshot into the iOS companion via the shared `uiframework.ProjectWorkbench`
+// pipeline (validating extension bounds, fail-closed slot trust, and mobile
+// width-adapted status items).
+func (s *Shell) ApplyWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
+	proj, err := uiframework.ProjectWorkbench(uiframework.DefaultRegistry(), shellmanifest.TargetMobileIOS, snap)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if len(snap.Slots) > 0 {
+		s.assembledSurface = proj.Surface
+	}
+	if len(snap.Extensions) > 0 {
+		s.schemeExts = append([]schema.UIExtensionRegion(nil), proj.Extensions...)
+	}
+	if len(snap.StatusItems) > 0 {
+		s.schemeStatus = append([]mapper.ResolvedStatusItem(nil), proj.StatusItems...)
+	}
+	if len(proj.Commands) > 0 {
+		s.schemeCmds = append([]uiframework.MappedCommand(nil), proj.Commands...)
+	}
+	if strings.TrimSpace(snap.ModelLabel) != "" {
+		s.activeModel = strings.TrimSpace(snap.ModelLabel)
+	}
+	s.mu.Unlock()
+	s.invalidate()
+}
+
+// SchemeExtensions returns bounds-validated live Scheme UIExtensionRegions.
+func (s *Shell) SchemeExtensions() []schema.UIExtensionRegion {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]schema.UIExtensionRegion(nil), s.schemeExts...)
+}
+
+// SchemeStatusItems returns mobile-width projected Scheme modeline status items.
+func (s *Shell) SchemeStatusItems() []mapper.ResolvedStatusItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]mapper.ResolvedStatusItem(nil), s.schemeStatus...)
+}
 
 // ActiveTheme returns the current theme pack (thread-safe).
 func (s *Shell) ActiveTheme() theme.Theme {

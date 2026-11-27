@@ -26,6 +26,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
+	"github.com/tao3k/marlin-ui/internal/shellmanifest"
 )
 
 func TestDoomEmacsFrameHydraModelineAndGRPCProjection(t *testing.T) {
@@ -734,5 +735,222 @@ func TestHelmZeroBlankFlashDuringAsyncQueryTransition(t *testing.T) {
 	afterRect, ok := tt.Find("Follow Preview")
 	if !ok || afterRect.Y != prevRect.Y {
 		t.Fatalf("expected 0px vertical shift after atomic swap: before=%v after=%v", prevRect.Y, afterRect.Y)
+	}
+}
+
+func TestLiveSchemeKeymapSlotsAndUserTOMLOverlay(t *testing.T) {
+	var invoked []string
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	sh.Desktop.OnCommandInvoke = func(name string) {
+		invoked = append(invoked, name)
+	}
+
+	// Downstream user TOML overlay adds a single personal key (`SPC w k -> cmd:win-only`)
+	// without clobbering Scheme base or live Scheme gRPC bindings.
+	userOverlay := `
+[[heads]]
+prefix = "SPC w"
+key = "k"
+label = "User Only Window"
+column = "User"
+exit = true
+action = "cmd:win-only"
+`
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-scheme-live"},
+		ThemeBundle: appconfig.UIThemeBundle{
+			KeymapsTOML: userOverlay,
+		},
+	})
+	defer fr.Close()
+
+	// 1. Modular component registry assembled Desktop + Shared modules with fail-closed trust.
+	surf := fr.AssembledSurface()
+	if !surf.HasModule(shellmanifest.ModWindowTree) || !surf.HasModule(shellmanifest.ModDoomModeline) || !surf.HasModule(shellmanifest.ModAgentRoom) {
+		t.Fatalf("Desktop assembled surface missing expected modules: %+v", surf)
+	}
+	if surf.AdmitSlot("approval.gate", false) || !surf.AdmitSlot("approval.gate", true) {
+		t.Fatalf("Desktop surface must enforce fail-closed approval.gate trust invariant")
+	}
+
+	// 2. Push a live marlin.ui.v1 Scheme snapshot containing a brand-new Scheme keybinding
+	// (`SPC w z -> custom-scheme-zoom`), a Scheme transient (`scheme-git`), and live Slots.
+	fr.ApplyWorkbenchSnapshot(schema.UIWorkbenchSnapshot{
+		Generation:   42,
+		ModelLabel:   "deepseek/deepseek-flash",
+		SessionLabel: "sess-scheme-live",
+		Keymap: []schema.UIKeyBindingSpec{
+			{Scope: schema.KeyScopeNormal, Sequence: []string{"SPC", "w", "z"}, CommandName: "custom-scheme-zoom"},
+		},
+		Transients: []schema.UITransient{
+			{
+				ID: "scheme-git",
+				Heads: []schema.UITransientHead{
+					{Key: "s", CommandName: "scheme-git-status", Label: "Git status", Exit: true},
+				},
+			},
+		},
+		Slots: []schema.SlotDeclaration{
+			{SlotID: "approval.gate", Cardinality: "single", FallbackRenderer: "host.gate", AllowUntrustedPlugin: true},
+			{SlotID: "workbench.inspector", Cardinality: "single", FallbackRenderer: "host.inspector", AllowUntrustedPlugin: true},
+		},
+	})
+
+	// Re-assembled surface admits workbench.inspector while STILL rejecting untrusted approval.gate!
+	surfAfter := fr.AssembledSurface()
+	if surfAfter.AdmitSlot("approval.gate", false) {
+		t.Fatalf("live snapshot MUST NOT weaken fail-closed approval.gate trust invariant")
+	}
+	if !surfAfter.AdmitSlot("workbench.inspector", false) {
+		t.Fatalf("expected live workbench.inspector slot to admit untrusted plugin")
+	}
+
+	// 3. Pressing SPC -> w -> z dispatches the brand-new Scheme command with ZERO Go code!
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyW)
+	tt.Frame()
+	if fr.KeypadPrefix() != "SPC w" {
+		t.Fatalf("expected SPC w keypad, got %q", fr.KeypadPrefix())
+	}
+	if !tt.HasText("custom-scheme-zoom") || !tt.HasText("User Only Window") {
+		t.Fatalf("expected BOTH live Scheme head (custom-scheme-zoom) and user TOML overlay (User Only Window) in SPC w, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	tt.Key(0, ui.KeyZ)
+	tt.Frame()
+	if len(invoked) != 1 || invoked[0] != "custom-scheme-zoom" {
+		t.Fatalf("expected SPC w z to dispatch live Scheme command custom-scheme-zoom, got %v", invoked)
+	}
+
+	// 4. Opening a live Scheme UITransient (`scheme-git`) and pressing `s` dispatches `scheme-git-status`.
+	fr.OpenHydra("scheme-git")
+	tt.Frame()
+	if !tt.HasText("Git status") {
+		t.Fatalf("expected live Scheme transient scheme-git rendered, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	tt.Key(0, ui.KeyS)
+	tt.Frame()
+	if len(invoked) != 2 || invoked[1] != "scheme-git-status" {
+		t.Fatalf("expected Scheme transient head s to dispatch scheme-git-status, got %v", invoked)
+	}
+}
+
+func TestSchemeUIFrameMultiWindowSyncAndInteractiveExtensionBuffer(t *testing.T) {
+	var invoked []string
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	sh.Desktop.OnCommandInvoke = func(name string) {
+		invoked = append(invoked, name)
+	}
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-scheme-win"},
+	})
+	defer fr.Close()
+
+	// Stream a live Scheme UIWorkbenchSnapshot with:
+	//  - 2-window UIFrame (*conversation* | *Git Status* Scheme extension)
+	//  - Reactive ElemTemplate reading {{model}} & {{workspace}}
+	//  - Interactive ElemButton invoking native Doom "window-split-below" + custom "git-stage-all"
+	//  - 1 invalid empty-kind extension that MUST be rejected by MAR-UI-R03 ValidateBounds
+	fr.ApplyWorkbenchSnapshot(schema.UIWorkbenchSnapshot{
+		Generation:   99,
+		ModelLabel:   "deepseek/deepseek-flash",
+		SessionLabel: "sess-scheme-win",
+		Frame: schema.UIFrame{
+			SelectedWindow: "win-2",
+			Windows: []schema.UIWindow{
+				{ID: "win-1", BufferID: "*conversation*"},
+				{ID: "win-2", BufferID: "git-status"},
+			},
+		},
+		Extensions: []schema.UIExtensionRegion{
+			{
+				ID:    "git-status",
+				Label: "*Git Status*",
+				Content: schema.UIElement{
+					Kind: schema.ElemRows,
+					Children: []schema.UIElement{
+						{
+							Kind: schema.ElemTemplate,
+							Spans: []schema.UISpan{
+								{Text: "Branch main · {{model}} · {{workspace}}", Tone: schema.ToneInfo},
+							},
+						},
+						{
+							Kind:   schema.ElemButton,
+							ID:     "btn-stage-all",
+							Title:  "Stage All Changes",
+							Action: "git-stage-all",
+						},
+						{
+							Kind:   schema.ElemButton,
+							ID:     "btn-split-below",
+							Title:  "Split Pane Below",
+							Action: "window-split-below",
+						},
+					},
+				},
+			},
+			{
+				ID:      "broken-ext",
+				Label:   "*Broken*",
+				Content: schema.UIElement{}, // must be rejected by ValidateBounds!
+			},
+		},
+	})
+
+	// 1. Both panes render side-by-side with per-window Doom modeline (1 & 2),
+	//    reactive {{model}} / {{workspace}} bindings, and rejected invalid extension omitted.
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 2 {
+		t.Fatalf("expected Scheme UIFrame to sync 2 windows, got %d", fr.WorkspaceSnapshot().Active.WindowCount())
+	}
+	texts := strings.Join(tt.Texts(), " | ")
+	if !tt.HasText("Branch main · deepseek/deepseek-flash · main") || !tt.HasText("*Git Status*") || !tt.HasText("1") || !tt.HasText("2") {
+		t.Fatalf("expected side-by-side Scheme extension pane with reactive bindings & per-window modelines 1/2, got %q", texts)
+	}
+	if tt.HasText("*Broken*") {
+		t.Fatalf("invalid empty-kind Scheme extension must be rejected by ValidateBounds")
+	}
+
+	// 2. Clicking Scheme ElemButton ("Stage All Changes") dispatches custom Scheme RPC cleanly!
+	if err := tt.Click("Stage All Changes"); err != nil {
+		t.Fatalf("expected Scheme ElemButton 'Stage All Changes' clickable: %v", err)
+	}
+	tt.Frame()
+	if len(invoked) != 1 || invoked[0] != "git-stage-all" {
+		t.Fatalf("expected clicking Scheme button to dispatch git-stage-all, got %v", invoked)
+	}
+
+	// 3. Clicking Scheme ElemButton ("Split Pane Below") resolves native Doom action -> 3 windows!
+	if err := tt.Click("Split Pane Below"); err != nil {
+		t.Fatalf("expected Scheme ElemButton 'Split Pane Below' clickable: %v", err)
+	}
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 3 {
+		t.Fatalf("expected Scheme button action window-split-below to split native window tree to 3 panes, got %d", fr.WorkspaceSnapshot().Active.WindowCount())
+	}
+
+	// 4. SPC b b lists live Scheme extension buffer *Git Status*!
+	fr.OpenBufferSwitch()
+	tt.Frame()
+	if !tt.HasText("[scheme-ext]") {
+		t.Fatalf("expected SPC b b buffer switcher to list [scheme-ext] live Scheme extension, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 5. Winner-undo restores back through Scheme-synced layouts!
+	fr.WinnerUndo()
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 2 {
+		t.Fatalf("expected winner-undo to restore 2-window Scheme layout, got %d", fr.WorkspaceSnapshot().Active.WindowCount())
 	}
 }

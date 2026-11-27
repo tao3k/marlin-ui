@@ -12,6 +12,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 // commandCandidates projects the declarative TOML command catalog
@@ -54,16 +55,12 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 		if desc == "" {
 			desc = "Scheme marlin.ui.v1 command"
 		}
+		act, _, _ := uiframework.ResolveSchemeAction(name)
 		all = append(all, minibuffer.Candidate{
 			ID:   "scheme-" + name,
 			Name: name,
 			Desc: desc,
-			Run: func() {
-				if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.OnCommandInvoke != nil {
-					f.Adaptive.Desktop.OnCommandInvoke(name)
-				}
-				f.Echo("Executed M-x " + name)
-			},
+			Run:  func() { f.dispatchWidgetAction(act) },
 		})
 	}
 	if f.Adaptive != nil && f.Adaptive.Desktop != nil {
@@ -142,8 +139,34 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 		})
 	}
 
-	all := make([]minibuffer.Candidate, 0, len(cat))
+	// Include live Scheme UIExtensionRegion buffers right after active workspace
+	// buffers so SPC b b surfaces active Scheme extensions immediately without
+	// scrolling past [all] or [popup] buffers.
+	f.mu.Lock()
+	schemeExts := append([]schema.UIExtensionRegion(nil), f.schemeExts...)
+	f.mu.Unlock()
+	extCands := make([]minibuffer.Candidate, 0, len(schemeExts))
+	for _, ext := range schemeExts {
+		eid := ext.ID
+		if strings.TrimSpace(eid) == "" {
+			continue
+		}
+		lbl := strings.TrimSpace(ext.Label)
+		if lbl == "" {
+			lbl = "*" + eid + "*"
+		}
+		bufID := buffer.ID(uiframework.SchemeExtBufferPrefix + eid)
+		extCands = append(extCands, minibuffer.Candidate{
+			ID:   string(bufID),
+			Name: lbl,
+			Desc: "[scheme-ext] Live marlin.ui.v1 Scheme extension buffer",
+			Run:  func() { f.SelectFeature(string(bufID)) },
+		})
+	}
+
+	all := make([]minibuffer.Candidate, 0, len(cat)+len(extCands))
 	all = append(all, inWS...)
+	all = append(all, extCands...)
 	all = append(all, popups...)
 	all = append(all, other...)
 	return minibuffer.FilterCandidates(all, query)

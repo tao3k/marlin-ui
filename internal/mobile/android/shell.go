@@ -9,11 +9,14 @@
 package android
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/tao3k/marlin-mygo/pkg/schema"
+	"github.com/tao3k/marlin-mygo/runtime/mapper"
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
@@ -21,6 +24,8 @@ import (
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 	"github.com/tao3k/marlin-ui/internal/mobile"
+	"github.com/tao3k/marlin-ui/internal/shellmanifest"
+	"github.com/tao3k/marlin-ui/internal/uiframework"
 )
 
 // Config configures Marlin's Android Material 3 companion Shell.
@@ -43,9 +48,14 @@ type Shell struct {
 	Link           *hostlink.Link
 	AppCfg         appconfig.Config
 	Prefs          appconfig.UserPrefs
-	Theme          theme.Theme
-	ThemeCatalog   []theme.Theme
-	activeTab      mobile.Tab
+	Theme            theme.Theme
+	ThemeCatalog     []theme.Theme
+	assembledSurface uiframework.AssembledSurface
+	schemeExts       []schema.UIExtensionRegion
+	schemeStatus     []mapper.ResolvedStatusItem
+	schemeCmds       []uiframework.MappedCommand
+	activeModel      string
+	activeTab        mobile.Tab
 	onPrefsChanged func(appconfig.UserPrefs)
 	invalidate     func()
 }
@@ -70,21 +80,73 @@ func New(cfg Config) *Shell {
 			break
 		}
 	}
+	assembled, _ := uiframework.DefaultRegistry().AssembleSurface(shellmanifest.TargetMobileAndroid, nil)
 	return &Shell{
-		Adaptive:       cfg.Adaptive,
-		Link:           cfg.Link,
-		AppCfg:         cfg.AppConfig,
-		Prefs:          cfg.Prefs,
-		Theme:          selected,
-		ThemeCatalog:   catalog,
-		activeTab:      mobile.TabChat,
-		onPrefsChanged: cfg.OnPrefsChanged,
-		invalidate:     inv,
+		Adaptive:         cfg.Adaptive,
+		Link:             cfg.Link,
+		AppCfg:           cfg.AppConfig,
+		Prefs:            cfg.Prefs,
+		Theme:            selected,
+		ThemeCatalog:     catalog,
+		assembledSurface: assembled,
+		activeTab:        mobile.TabChat,
+		onPrefsChanged:   cfg.OnPrefsChanged,
+		invalidate:       inv,
 	}
 }
 
 // Platform identifies this shell as Android.
 func (s *Shell) Platform() mobile.Platform { return mobile.PlatformAndroid }
+
+// AssembledSurface returns Android's validated modular UI Component surface
+// (shared core modules + Android Material 3 modules + slot trust policies).
+func (s *Shell) AssembledSurface() uiframework.AssembledSurface {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.assembledSurface
+}
+
+// ApplyWorkbenchSnapshot admits a live `marlin.ui.v1` Scheme/Rust workbench
+// snapshot into the Android companion via the shared `uiframework.ProjectWorkbench`
+// pipeline (identical to Desktop and iOS).
+func (s *Shell) ApplyWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
+	proj, err := uiframework.ProjectWorkbench(uiframework.DefaultRegistry(), shellmanifest.TargetMobileAndroid, snap)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if len(snap.Slots) > 0 {
+		s.assembledSurface = proj.Surface
+	}
+	if len(snap.Extensions) > 0 {
+		s.schemeExts = append([]schema.UIExtensionRegion(nil), proj.Extensions...)
+	}
+	if len(snap.StatusItems) > 0 {
+		s.schemeStatus = append([]mapper.ResolvedStatusItem(nil), proj.StatusItems...)
+	}
+	if len(proj.Commands) > 0 {
+		s.schemeCmds = append([]uiframework.MappedCommand(nil), proj.Commands...)
+	}
+	if strings.TrimSpace(snap.ModelLabel) != "" {
+		s.activeModel = strings.TrimSpace(snap.ModelLabel)
+	}
+	s.mu.Unlock()
+	s.invalidate()
+}
+
+// SchemeExtensions returns bounds-validated live Scheme UIExtensionRegions.
+func (s *Shell) SchemeExtensions() []schema.UIExtensionRegion {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]schema.UIExtensionRegion(nil), s.schemeExts...)
+}
+
+// SchemeStatusItems returns mobile-width projected Scheme modeline status items.
+func (s *Shell) SchemeStatusItems() []mapper.ResolvedStatusItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]mapper.ResolvedStatusItem(nil), s.schemeStatus...)
+}
 
 // RoomSnapshot projects the single unified featurekit.RoomController snapshot
 // identically to Desktop and iOS (local Core or live Marlin Cove gRPC).

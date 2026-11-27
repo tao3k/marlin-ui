@@ -953,6 +953,92 @@ func (m *Manager) RaisePopup() (promoted buffer.ID, snap Snapshot) {
 	return promoted, m.snapshotLocked()
 }
 
+// SchemeWindowSpec describes one window leaf streamed from Scheme's
+// `marlin.ui.v1.UiFrame.Windows` topology.
+type SchemeWindowSpec struct {
+	ID     string
+	Buffer buffer.ID
+}
+
+// SyncSchemeWindows applies a Scheme-authored `UIFrame.Windows` layout onto
+// the active workspace's recursive window tree, preserving previous layouts in
+// `winner-mode` undo history so `SPC w u` seamlessly restores user splits.
+func (m *Manager) SyncSchemeWindows(windows []SchemeWindowSpec, selectedID string) Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 || len(windows) == 0 {
+		return m.snapshotLocked()
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+
+	valid := make([]SchemeWindowSpec, 0, len(windows))
+	for i, w := range windows {
+		if strings.TrimSpace(string(w.Buffer)) == "" {
+			continue
+		}
+		id := strings.TrimSpace(w.ID)
+		if id == "" {
+			id = fmt.Sprintf("scheme-w%d", i+1)
+		}
+		valid = append(valid, SchemeWindowSpec{ID: id, Buffer: w.Buffer})
+	}
+	if len(valid) == 0 {
+		return m.snapshotLocked()
+	}
+
+	// Skip no-op re-sync when the exact same window topology & selection are already live.
+	curLeaves := ws.Windows()
+	same := len(curLeaves) == len(valid)
+	if same {
+		for i := range valid {
+			if curLeaves[i].ID != valid[i].ID || curLeaves[i].Buffer != valid[i].Buffer {
+				same = false
+				break
+			}
+		}
+		if same && (selectedID == "" || ws.FocusedWindowID == selectedID) {
+			return m.snapshotLocked()
+		}
+	}
+
+	recordWinnerSnapshot(ws)
+	ws.WindowTree = buildBalancedSchemeTree(valid, SplitVertical)
+	targetFocus := strings.TrimSpace(selectedID)
+	if targetFocus == "" || findWindowLeaf(ws.WindowTree, targetFocus) == nil {
+		targetFocus = valid[0].ID
+	}
+	ws.FocusedWindowID = targetFocus
+	for _, w := range valid {
+		if !strings.HasPrefix(string(w.Buffer), "scheme-ext:") && !containsBuf(ws.Buffers, w.Buffer) {
+			ws.Buffers = append(ws.Buffers, w.Buffer)
+		}
+	}
+	syncLegacySplitFields(ws)
+	return m.snapshotLocked()
+}
+
+func buildBalancedSchemeTree(specs []SchemeWindowSpec, dir SplitMode) *WindowNode {
+	if len(specs) == 1 {
+		return &WindowNode{
+			ID:     specs[0].ID,
+			Buffer: specs[0].Buffer,
+		}
+	}
+	mid := len(specs) / 2
+	nextDir := SplitHorizontal
+	if dir == SplitHorizontal {
+		nextDir = SplitVertical
+	}
+	return &WindowNode{
+		Direction: dir,
+		Ratio:     0.50,
+		First:     buildBalancedSchemeTree(specs[:mid], nextDir),
+		Second:    buildBalancedSchemeTree(specs[mid:], nextDir),
+	}
+}
+
 func (m *Manager) activeIndexLocked() int {
 	for i := range m.workspaces {
 		if m.workspaces[i].ID == m.activeID {

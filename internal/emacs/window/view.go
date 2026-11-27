@@ -6,6 +6,7 @@ package window
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -30,6 +31,9 @@ type SplitProps struct {
 	FocusedWindowID    string
 	WindowCount        int
 	ShowChrome         bool
+	SchemeExts         []schema.UIExtensionRegion
+	MapCtx             mapper.Context
+	FeatHost           *features.Host
 	RenderPaneModeline func(c *ui.Context, leaf workspace.WindowLeafView)
 	OnFocusWindow      func(windowID string)
 	OnFocusPane        func(pane int)
@@ -82,7 +86,7 @@ func RenderBody(
 					return
 				}
 			}
-			buffer.Render(c, activeBuf, th, bc)
+			renderLeafBuffer(c, activeBuf, th, featHost, bc, split.SchemeExts, mapCtx)
 		})
 	}
 
@@ -156,7 +160,7 @@ func renderWindowTree(c *ui.Context, th theme.Theme, bc *buffer.Context, split S
 
 			ui.Column(c.Key("doom-pane-body-"+leaf.ID)).
 				Grow(1).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
-				buffer.Render(c, leaf.Buffer, th, bc)
+				renderLeafBuffer(c, leaf.Buffer, th, split.FeatHost, bc, split.SchemeExts, split.MapCtx)
 			})
 
 			// Authentic per-window Doom Modeline at the bottom of EVERY split pane
@@ -170,6 +174,40 @@ func renderWindowTree(c *ui.Context, th theme.Theme, bc *buffer.Context, split S
 	ui.Column(c.Key("doom-window-tree")).Grow(3).MinWidth(0).MinHeight(0).AlignItems(ui.Stretch).Clip().Children(func() {
 		renderNode(split.Tree, "root", 1, "")
 	})
+}
+
+// renderLeafBuffer paints a native Emacs buffer, a live Scheme UIExtensionRegion
+// buffer (`scheme-ext:<id>`), or a mounted feature buffer (`feature:<id>`)
+// seamlessly inside any single-pane or multi-window split leaf.
+func renderLeafBuffer(
+	c *ui.Context,
+	bufID buffer.ID,
+	th theme.Theme,
+	featHost *features.Host,
+	bc *buffer.Context,
+	schemeExts []schema.UIExtensionRegion,
+	mapCtx mapper.Context,
+) {
+	raw := string(bufID)
+	if strings.HasPrefix(raw, "scheme-ext:") {
+		extID := strings.TrimPrefix(raw, "scheme-ext:")
+		for i := range schemeExts {
+			if schemeExts[i].ID == extID {
+				ext := schemeExts[i]
+				ui.Scroll(c.Key("scheme-ext-scroll-"+ext.ID)).Grow(1).Padding(16, 24).Children(func() {
+					mapper.MapElement(c, ext.Content, th.ToMapperSkin(), mapCtx)
+				})
+				return
+			}
+		}
+	}
+	if strings.HasPrefix(raw, "feature:") && featHost != nil {
+		if renderFn, ok := featHost.Renderer(raw); ok {
+			renderFn(c, c.Theme())
+			return
+		}
+	}
+	buffer.Render(c, bufID, th, bc)
 }
 
 func applyDivider(c *ui.Context, el ui.Element, th theme.Theme, dir workspace.SplitMode) {
