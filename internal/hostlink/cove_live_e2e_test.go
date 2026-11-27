@@ -323,7 +323,7 @@ mention_policy = "required"
 		t.Fatalf("expected 2 tainted external bridge messages (Telegram + Discord) in #general, got %d", taintedCount)
 	}
 
-	// 12. Verify CoveRelayBridge binds featurekit.RoomBridge for Desktop & Mobile
+	// 12. Verify CoveRelayBridge binds featurekit.RoomController for Desktop, iOS & Android
 	// including 1:1 Direct Bot DM channels (`dm:agent:architect`) and async non-blocking DispatchTurn.
 	var dirtyCalls int
 	var dirtyMu sync.Mutex

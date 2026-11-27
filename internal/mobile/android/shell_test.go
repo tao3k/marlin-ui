@@ -12,6 +12,7 @@ import (
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
+	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/mobile"
 	"github.com/tao3k/marlin-ui/internal/mobile/android"
 )
@@ -22,6 +23,7 @@ func TestAndroidMaterialShellSharesMobileContractAndThemeParity(t *testing.T) {
 		FormFactor:     mygoshell.FormFactorAndroid,
 		MobilePlatform: mygoshell.MobilePlatformAndroid,
 	})
+	_, _, _ = featurekit.Mount("all", sh, nil, nil)
 	shell := android.New(android.Config{
 		Adaptive: sh,
 		AppConfig: appconfig.Config{
@@ -39,6 +41,11 @@ func TestAndroidMaterialShellSharesMobileContractAndThemeParity(t *testing.T) {
 		t.Fatalf("expected shared tokyo-night alias resolution, got %q", shell.ActiveTheme().ID)
 	}
 	shell.SelectTab(mobile.TabRooms)
+	snap := shell.RoomSnapshot()
+	if !snap.Available || len(snap.Channels) == 0 || len(snap.Participants) == 0 {
+		t.Fatalf("expected Android shell to share unified featurekit.RoomController snapshot, got available=%v channels=%d participants=%d",
+			snap.Available, len(snap.Channels), len(snap.Participants))
+	}
 
 	tt := ui.NewTester(shell.View, 412, 915)
 	tt.Frame()

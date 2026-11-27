@@ -18,6 +18,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
+	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 	"github.com/tao3k/marlin-ui/internal/mobile"
 )
@@ -84,6 +85,12 @@ func New(cfg Config) *Shell {
 
 // Platform identifies this shell as Android.
 func (s *Shell) Platform() mobile.Platform { return mobile.PlatformAndroid }
+
+// RoomSnapshot projects the single unified featurekit.RoomController snapshot
+// identically to Desktop and iOS (local Core or live Marlin Cove gRPC).
+func (s *Shell) RoomSnapshot() featurekit.RoomFullSnapshot {
+	return featurekit.AgentRoomSnapshot()
+}
 
 // ActiveTheme returns the active theme pack (thread-safe).
 func (s *Shell) ActiveTheme() theme.Theme {

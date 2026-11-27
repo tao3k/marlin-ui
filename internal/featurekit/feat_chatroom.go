@@ -33,17 +33,7 @@ func init() {
 		presenceOverrides: make(map[string]string),
 		botScope:          async.NewStructuredScope(context.Background()),
 	}
-	SetRoomStatsProvider(mod.liveStats)
-	SetRoomTaskBridge(mod.listTasks, mod.addTask, mod.cycleTask)
-	SetRoomBridge(RoomBridge{
-		Snapshot:       mod.fullSnapshot,
-		SelectChannel:  mod.selectChannel,
-		PostMessage:    mod.postMessage,
-		PostGateEmbed:  mod.postGateEmbed,
-		ToggleReaction: mod.toggleReaction,
-		OpenThread:     mod.openThread,
-		CloseThread:    mod.closeThread,
-	})
+	SetLocalRoomController(mod)
 	RegisterCompiled(mod)
 }
 
@@ -60,11 +50,12 @@ type dmMessage struct {
 }
 
 type bentoChatRoomModule struct {
-	inner       *chatroom.Module
-	activeTab   chatroom.ViewTab
-	draft       string
-	threadDraft string
-	itemDraft   string
+	inner            *chatroom.Module
+	activeTab        chatroom.ViewTab
+	draft            string
+	threadDraft      string
+	focusThreadInput bool
+	itemDraft        string
 
 	dmMu              sync.Mutex
 	activeDMID        string
@@ -464,6 +455,19 @@ func (m *bentoChatRoomModule) fullSnapshot() RoomFullSnapshot {
 			threadMsgs = append(threadMsgs, mv)
 		}
 	}
+	if snap.ActiveThreadID != "" && len(snap.ThreadReplies) > 0 {
+		seenThread := make(map[string]struct{}, len(threadMsgs))
+		for _, tm := range threadMsgs {
+			seenThread[tm.ID] = struct{}{}
+		}
+		for _, rm := range snap.ThreadReplies {
+			if _, dup := seenThread[rm.ID]; dup {
+				continue
+			}
+			seenThread[rm.ID] = struct{}{}
+			threadMsgs = append(threadMsgs, toMsg(rm))
+		}
+	}
 	return RoomFullSnapshot{
 		Available:       true,
 		ActiveChannelID: snap.ActiveChannelID,
@@ -793,3 +797,20 @@ func (m *bentoChatRoomModule) closeThread() {
 	m.dmMu.Unlock()
 	m.inner.View.Ctrl.CloseThread()
 }
+
+// RoomController interface implementation (single unified backend contract).
+func (m *bentoChatRoomModule) Snapshot() RoomFullSnapshot                        { return m.fullSnapshot() }
+func (m *bentoChatRoomModule) Stats() RoomStats                                  { return m.liveStats() }
+func (m *bentoChatRoomModule) Tasks() []RoomTask                                 { return m.listTasks() }
+func (m *bentoChatRoomModule) SelectChannel(channelID string) error              { return m.selectChannel(channelID) }
+func (m *bentoChatRoomModule) PostMessage(channelID, body, threadRootID string) error {
+	return m.postMessage(channelID, body, threadRootID)
+}
+func (m *bentoChatRoomModule) PostGateEmbed(channelID, botID, body, gateID string) error {
+	return m.postGateEmbed(channelID, botID, body, gateID)
+}
+func (m *bentoChatRoomModule) ToggleReaction(msgID, tag string) error { return m.toggleReaction(msgID, tag) }
+func (m *bentoChatRoomModule) OpenThread(msgID string) error          { return m.openThread(msgID) }
+func (m *bentoChatRoomModule) CloseThread()                           { m.closeThread() }
+func (m *bentoChatRoomModule) AddTask(title string) error             { return m.addTask(title) }
+func (m *bentoChatRoomModule) CycleTask(id string) error              { return m.cycleTask(id) }

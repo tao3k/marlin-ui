@@ -431,11 +431,11 @@ func (s *Shell) renderRoomThreadSheet(
 					}
 				})
 			})
-			ui.Row(c.Key("ios-room-thread-comp")).Padding(0, 14).Children(func() {
-				ui.Row(c).Grow(1).Padding(6, 8, 6, 12).Gap(8).Radius(22).AlignItems(ui.Center).
+			ui.Row(c.Key("ios-room-thread-comp")).Shrink(0).Padding(0, 14).Children(func() {
+				ui.Row(c).Grow(1).Height(42).Padding(5, 8, 5, 12).Gap(8).Radius(21).AlignItems(ui.Center).
 					Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.42)}).Children(func() {
 					inp := ui.TextInputBase(c.Key("ios-room-th-in"), threadDraft).
-						Placeholder("Reply in thread…").Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Grow(1).MinWidth(0)
+						Label("Thread reply").Placeholder("Reply in thread…").Font(kit.FontDisplay).FontSize(14).TextColor(th.Ink).Height(28).Grow(1).MinWidth(0)
 					sendThread := func() {
 						txt := strings.TrimSpace(*threadDraft)
 						if txt == "" {
@@ -454,7 +454,7 @@ func (s *Shell) renderRoomThreadSheet(
 					if canSend {
 						varType = theme.BtnGlassProminent
 					}
-					if theme.IconCircleButton(c, "ios-room-th-send", "Reply", theme.IconSend, 32, varType, th.Accent, false, th).Clicked() && canSend {
+					if theme.IconCircleButton(c, "ios-room-th-send", "Send thread reply", theme.IconSend, 32, varType, th.Accent, false, th).Clicked() && canSend {
 						sendThread()
 					}
 				})

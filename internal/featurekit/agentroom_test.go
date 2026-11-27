@@ -80,4 +80,37 @@ func TestDesktopAgentRoomAppleGeistParityAndLiveBotRouting(t *testing.T) {
 	if !tt.HasText("Reviewer Audit") {
 		t.Fatalf("expected @reviewer reply rendered in Desktop Agent Room, got %q", strings.Join(tt.Texts(), " | "))
 	}
+
+	// Verify opening a thread shows both root message and seeded reply, and replying
+	// via Enter or "Send thread reply" button updates THREAD REPLIES immediately.
+	if err := featurekit.OpenAgentRoomThread("msg-1"); err != nil {
+		t.Fatalf("OpenAgentRoomThread failed: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("THREAD REPLIES") || !tt.HasText("Verified zero cyclic imports") {
+		t.Fatalf("expected THREAD REPLIES drawer with seeded reply, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if err := tt.Click("Thread reply"); err != nil {
+		t.Fatalf("Click('Thread reply') failed: %v", err)
+	}
+	tt.Type("Hello inside thread!")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("Hello inside thread!") {
+		t.Fatalf("expected thread reply submitted via Enter to render in THREAD REPLIES, got %q", strings.Join(tt.Texts(), " | "))
+	}
+	if err := tt.Click("Thread reply"); err != nil {
+		t.Fatalf("Click('Thread reply') for button submit failed: %v", err)
+	}
+	tt.Type("Second reply via button!")
+	tt.Frame()
+	if err := tt.Click("Send thread reply"); err != nil {
+		t.Fatalf("Click('Send thread reply') failed: %v", err)
+	}
+	tt.Frame()
+	tt.Frame()
+	if !tt.HasText("Second reply via button!") {
+		t.Fatalf("expected thread reply submitted via Send button to render in THREAD REPLIES, got %q", strings.Join(tt.Texts(), " | "))
+	}
 }

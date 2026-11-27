@@ -537,7 +537,7 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshotWithThread(
 	}
 
 	return featurekit.RoomFullSnapshot{
-		Available:       true,
+		Available:       len(channels) > 0 && len(participants) > 0,
 		ActiveChannelID: activeChannelID,
 		ActiveThreadID:  activeThreadID,
 		CurrentActorID:  currentActorID,
@@ -546,7 +546,6 @@ func (s CoveRoomSnapshot) ToRoomFullSnapshotWithThread(
 		Participants:    participants,
 		Messages:        messages,
 		ThreadMessages:  threadMessages,
-		Tasks:           featurekit.AgentRoomTasks(),
 	}
 }
 

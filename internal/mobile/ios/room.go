@@ -258,6 +258,24 @@ func (s *Shell) renderRoomQuickStrip(c *ui.Context, th theme.Theme, snap feature
 		}
 	}
 	ui.ScrollHorizontal(c.Key("ios-room-qstrip")).FillWidth().Padding(0, 12, 8, 12).Gap(4).Children(func() {
+		// Unified Sync Status Pill (shared 1:1 with Desktop: Cove Live · gRPC / Cove Connecting… / Local Core).
+		if strings.TrimSpace(snap.SyncLabel) != "" {
+			syncTone := th.Info
+			switch snap.SyncMode {
+			case "cove-grpc":
+				syncTone = th.Success
+			case "cove-connecting":
+				syncTone = th.Warning
+			}
+			ui.Row(c.Key("ios-qstrip-sync")).Height(26).Padding(0, 9).Radius(13).Gap(5).
+				AlignItems(ui.Center).Shrink(0).
+				Background(kit.WithAlpha(syncTone, 0.14)).
+				Border(1, kit.WithAlpha(syncTone, 0.28)).Children(func() {
+				ui.Box(c).Width(6).Height(6).Radius(3).Background(syncTone)
+				ui.Text(c, snap.SyncLabel).Font(theme.FontMono).FontSize(10).FontWeight(700).TextColor(syncTone).SingleLine()
+			})
+		}
+
 		// High-signal Tasks shortcut pill pinned first so it is always visible without horizontal scrolling.
 		taskLbl := fmt.Sprintf("Tasks %d", openTasks)
 		if theme.StyledButton(c, theme.ButtonSpec{

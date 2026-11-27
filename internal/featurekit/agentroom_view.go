@@ -237,6 +237,16 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 					theme.SFIcon(c, "number", 15, th.Accent, false)
 				}
 				ui.Text(c, prefix+activeCh.Name).Font(kit.FontDisplay).FontSize(15).FontWeight(700).TextColor(th.Ink).SingleLine()
+				if snap.SyncLabel != "" {
+					syncTone := th.Success
+					if snap.SyncMode == "cove-connecting" {
+						syncTone = th.Warning
+					} else if snap.SyncMode == "local" {
+						syncTone = th.Info
+					}
+					ui.Text(c, snap.SyncLabel).Font(theme.FontMono).FontSize(10).FontWeight(600).TextColor(syncTone).
+						Padding(2, 8).Radius(theme.RadiusPill).Background(kit.WithAlpha(syncTone, 0.14)).SingleLine()
+				}
 				if activeCh.Topic != "" {
 					ui.Text(c, activeCh.Topic).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).
 						Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
@@ -512,40 +522,73 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 
 		// Optional Right Thread Drawer Card.
 		if snap.ActiveThreadID != "" {
-			ui.Column(c.Key("br-thread-card")).Width(296).Shrink(0).Radius(16).Background(panelBg).Border(1, hairline).
+			ui.Column(c.Key("br-thread-card")).Width(312).Shrink(0).MinHeight(0).Radius(16).Background(panelBg).Border(1, hairline).
 				Padding(14).Gap(10).AlignItems(ui.Stretch).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
 					ui.Text(c, "THREAD REPLIES").Font(theme.FontMono).FontSize(10.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.Info).SingleLine()
 					if theme.IconCircleButton(c, "br-th-close", "Close thread", theme.IconClose, 26, theme.BtnGhost, th.InkMuted, false, th).Clicked() {
 						closeThread = true
 					}
 				})
-				ui.Scroll(c.Key("br-th-scroll")).Grow(1).Children(func() {
+				ui.Scroll(c.Key("br-th-scroll")).Grow(1).Basis(0).MinHeight(0).Children(func() {
 					ui.Column(c).Gap(8).AlignItems(ui.Stretch).Children(func() {
+						// Render root message at top for clear thread context (matching iOS 1:1).
+						for _, rootMsg := range snap.Messages {
+							if rootMsg.ID == snap.ActiveThreadID {
+								rm := rootMsg
+								ui.Column(c.Key("br-th-root-"+rm.ID)).Radius(12).Background(kit.WithAlpha(th.Accent, 0.08)).
+									Border(1, kit.WithAlpha(th.Accent, 0.22)).Padding(10, 12).Gap(4).Children(func() {
+									ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+										theme.RoleEmblemAvatar(c, rm.AuthorName, rm.AuthorHandle, rm.IsAgent, rm.AuthorPresence, 20, th)
+										ui.Text(c, rm.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Ink).SingleLine()
+										ui.Spacer(c)
+										ui.Text(c, "Root").Font(theme.FontMono).FontSize(9.5).FontWeight(600).TextColor(th.Accent).SingleLine()
+									})
+									markdown.View(c.Key("br-th-root-md-"+rm.ID), strings.TrimSpace(rm.Body), theme.CompactMarkdownOptions(th))
+								})
+								break
+							}
+						}
+						if len(snap.ThreadMessages) == 0 {
+							ui.Text(c, "No replies yet. Write below or mention @architect to reply in this thread.").
+								Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).Padding(6, 4)
+						}
 						for _, rep := range snap.ThreadMessages {
 							r := rep
 							ui.Column(c.Key("br-rep-"+r.ID)).Radius(12).Background(insetBg).Padding(10, 12).Gap(4).Children(func() {
 								ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 									theme.RoleEmblemAvatar(c, r.AuthorName, r.AuthorHandle, r.IsAgent, r.AuthorPresence, 20, th)
 									ui.Text(c, r.AuthorName).Font(kit.FontDisplay).FontSize(12.5).FontWeight(700).TextColor(th.Accent).SingleLine()
+									if r.Timestamp != "" {
+										ui.Spacer(c)
+										ui.Text(c, r.Timestamp).Font(theme.FontMono).FontSize(10).TextColor(th.InkMuted).SingleLine()
+									}
 								})
 								markdown.View(c.Key("br-rep-md-"+r.ID), strings.TrimSpace(r.Body), theme.CompactMarkdownOptions(th))
 							})
 						}
 					})
 				})
-				ui.Row(c).Radius(16).Background(insetBg).Border(1, hairline).Padding(5, 6, 5, 10).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Row(c.Key("br-th-composer")).Height(40).Shrink(0).Radius(20).Background(insetBg).Border(1, hairline).
+					Padding(4, 6, 4, 12).Gap(6).AlignItems(ui.Center).Children(func() {
 					inp := ui.TextInputBase(c.Key("br-th-draft"), &m.threadDraft).
-						Placeholder("Reply in thread…").Font(kit.FontDisplay).FontSize(12.5).TextColor(th.Ink).Grow(1).MinWidth(0)
+						Label("Thread reply").Placeholder("Reply in thread…").
+						Font(kit.FontDisplay).FontSize(12.5).TextColor(th.Ink).Height(28).Grow(1).MinWidth(0)
+					if m.focusThreadInput {
+						inp.Focus()
+						m.focusThreadInput = false
+					}
 					if inp.Submitted() {
 						sendThread = true
 					}
 					canTh := strings.TrimSpace(m.threadDraft) != ""
 					tv := theme.BtnSolidIdle
+					tone := th.InkMuted
 					if canTh {
 						tv = theme.BtnGlassProminent
+						tone = th.Accent
 					}
-					if theme.IconCircleButton(c, "br-th-send", "Reply", theme.IconSend, 26, tv, th.Accent, false, th).Clicked() && canTh {
+					if theme.IconCircleButton(c, "br-th-send", "Send thread reply", theme.IconSend, 28, tv, tone, false, th).Clicked() && canTh {
 						sendThread = true
 					}
 				})
@@ -584,9 +627,11 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 		}
 	}
 	if openThread != "" {
+		m.focusThreadInput = true
 		_ = OpenAgentRoomThread(openThread)
 	}
 	if closeThread {
+		m.focusThreadInput = false
 		CloseAgentRoomThread()
 	}
 	if sendThread && snap.ActiveThreadID != "" && strings.TrimSpace(m.threadDraft) != "" {

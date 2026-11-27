@@ -512,7 +512,7 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 	fr.DeleteOtherWindows()
 	fr.SelectBuffer(buffer.Conversation)
 	tt.Frame()
-	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Deep Think") || !tt.HasText("@ Cite") {
+	if !tt.HasText("What would you like to build with Marlin?") || !tt.HasText("Deep Think") || !tt.HasText("Cite") {
 		t.Fatalf("expected empty *conversation* Hero Stage + docked Composer, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }

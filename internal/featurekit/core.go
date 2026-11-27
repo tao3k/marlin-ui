@@ -21,11 +21,6 @@ import (
 
 var (
 	compiled           []features.FeatureModule
-	roomStatsProvider  func() RoomStats
-	roomTasksProvider  func() []RoomTask
-	roomTaskAdder      func(title string) error
-	roomTaskCycler     func(id string) error
-	roomBridge         RoomBridge
 	roomResponderMu    sync.RWMutex
 	roomAgentResponder RoomAgentResponder
 	roomInvalidateFn   func()
@@ -127,9 +122,12 @@ type RoomMessageView struct {
 	Reactions       []RoomReactionView
 }
 
-// RoomFullSnapshot is a build-tag-free snapshot of Agent Room for iOS & Desktop views.
+// RoomFullSnapshot is the unified build-tag-free Agent Room snapshot shared
+// 1:1 across Desktop, iOS, and Android.
 type RoomFullSnapshot struct {
 	Available       bool
+	SyncMode        string // "local" | "cove-connecting" | "cove-live"
+	SyncLabel       string // "Local Core" | "Cove Connecting…" | "Cove Live · gRPC"
 	ActiveChannelID string
 	ActiveThreadID  string
 	CurrentActorID  string
@@ -140,78 +138,6 @@ type RoomFullSnapshot struct {
 	PinnedMessages  []RoomMessageView
 	ThreadMessages  []RoomMessageView
 	Tasks           []RoomTask
-}
-
-// RoomBridge exposes tag-safe Agent Room operations for mobile and desktop shells.
-type RoomBridge struct {
-	Snapshot          func() RoomFullSnapshot
-	SelectChannel     func(channelID string) error
-	PostMessage       func(channelID, body, threadRootID string) error
-	PostGateEmbed     func(channelID, botID, body, gateID string) error
-	ToggleReaction    func(msgID, tag string) error
-	OpenThread        func(msgID string) error
-	CloseThread       func()
-}
-
-// PostAgentRoomGateEmbed posts a bot message linked to a Tier-0 PromptGate so
-// humans can approve or reject inline inside the Agent Room stream.
-func PostAgentRoomGateEmbed(channelID, botID, body, gateID string) error {
-	if roomBridge.PostGateEmbed != nil {
-		return roomBridge.PostGateEmbed(channelID, botID, body, gateID)
-	}
-	return nil
-}
-
-// SetRoomBridge registers the live Agent Room controller bridge (empty under marlin_minimal).
-func SetRoomBridge(b RoomBridge) {
-	roomBridge = b
-}
-
-// AgentRoomSnapshot returns the live Agent Room snapshot (Available=false under marlin_minimal).
-func AgentRoomSnapshot() RoomFullSnapshot {
-	if roomBridge.Snapshot != nil {
-		return roomBridge.Snapshot()
-	}
-	return RoomFullSnapshot{}
-}
-
-// SelectAgentRoomChannel switches the active Agent Room channel.
-func SelectAgentRoomChannel(channelID string) error {
-	if roomBridge.SelectChannel != nil {
-		return roomBridge.SelectChannel(channelID)
-	}
-	return nil
-}
-
-// PostAgentRoomMessage sends a message (or thread reply) in Agent Room.
-func PostAgentRoomMessage(channelID, body, threadRootID string) error {
-	if roomBridge.PostMessage != nil {
-		return roomBridge.PostMessage(channelID, body, threadRootID)
-	}
-	return nil
-}
-
-// ToggleAgentRoomReaction toggles a reaction tag on an Agent Room message.
-func ToggleAgentRoomReaction(msgID, tag string) error {
-	if roomBridge.ToggleReaction != nil {
-		return roomBridge.ToggleReaction(msgID, tag)
-	}
-	return nil
-}
-
-// OpenAgentRoomThread opens a reply thread drawer for msgID.
-func OpenAgentRoomThread(msgID string) error {
-	if roomBridge.OpenThread != nil {
-		return roomBridge.OpenThread(msgID)
-	}
-	return nil
-}
-
-// CloseAgentRoomThread closes the active reply thread drawer.
-func CloseAgentRoomThread() {
-	if roomBridge.CloseThread != nil {
-		roomBridge.CloseThread()
-	}
 }
 
 // RoomTask is a lightweight projection of one collaborative Agent Room matter
@@ -230,50 +156,6 @@ type RoomStats struct {
 	TasksTotal   int
 	AgentsOnline int
 	AgentsTotal  int
-}
-
-// SetRoomStatsProvider registers an optional feature metrics provider.
-func SetRoomStatsProvider(fn func() RoomStats) {
-	roomStatsProvider = fn
-}
-
-// SetRoomTaskBridge registers optional real task CRUD hooks from Agent Room.
-func SetRoomTaskBridge(list func() []RoomTask, add func(string) error, cycle func(string) error) {
-	roomTasksProvider = list
-	roomTaskAdder = add
-	roomTaskCycler = cycle
-}
-
-// AgentRoomStats returns live Agent Room task & agent telemetry.
-func AgentRoomStats() RoomStats {
-	if roomStatsProvider != nil {
-		return roomStatsProvider()
-	}
-	return RoomStats{}
-}
-
-// AgentRoomTasks returns live collaborative tasks from Agent Room (empty under marlin_minimal).
-func AgentRoomTasks() []RoomTask {
-	if roomTasksProvider != nil {
-		return roomTasksProvider()
-	}
-	return nil
-}
-
-// AddAgentRoomTask creates a real task in the active Agent Room channel.
-func AddAgentRoomTask(title string) error {
-	if roomTaskAdder != nil {
-		return roomTaskAdder(title)
-	}
-	return nil
-}
-
-// CycleAgentRoomTask advances a task's real status (OPEN -> IN_PROGRESS -> DONE -> OPEN).
-func CycleAgentRoomTask(id string) error {
-	if roomTaskCycler != nil {
-		return roomTaskCycler(id)
-	}
-	return nil
 }
 
 // RegisterCompiled registers an opt-in FeatureModule linked via Go build tags.

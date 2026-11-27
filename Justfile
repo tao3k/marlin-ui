@@ -183,7 +183,26 @@ dev-room *args:
     MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
         "$cove_bin" serve >"$cove_log" 2>&1 &
     COVE_PID=$!
-    sleep 0.4
+    cove_host="${cove_bind%:*}"
+    cove_port="${cove_bind##*:}"
+    cove_ready=0
+    for _ in $(seq 1 50); do
+        if ! kill -0 "$COVE_PID" 2>/dev/null; then
+            echo "error: marlin-cove exited early:" >&2
+            cat "$cove_log" >&2
+            exit 1
+        fi
+        if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+            exec 3>&- 3<&-
+            cove_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "$cove_ready" -ne 1 ]; then
+        echo "warning: marlin-cove did not open $cove_bind within 5s (logs follow); UI will keep local fallback live:" >&2
+        cat "$cove_log" >&2 || true
+    fi
     echo "[dev-room] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
     exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop \
         -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \
@@ -253,7 +272,20 @@ dev-room-ios *args:
     MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
         "$cove_bin" serve >"$cove_log" 2>&1 &
     COVE_PID=$!
-    sleep 0.4
+    cove_host="${cove_bind%:*}"
+    cove_port="${cove_bind##*:}"
+    for _ in $(seq 1 50); do
+        if ! kill -0 "$COVE_PID" 2>/dev/null; then
+            echo "error: marlin-cove exited early:" >&2
+            cat "$cove_log" >&2
+            exit 1
+        fi
+        if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+            exec 3>&- 3<&-
+            break
+        fi
+        sleep 0.1
+    done
     echo "[dev-room-ios] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
     exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-mobile -platform ios \
         -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \

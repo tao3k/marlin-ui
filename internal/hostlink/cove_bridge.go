@@ -147,8 +147,9 @@ func RegisterMarlinGatewayGRPCServer(
 	})
 }
 
-// CoveRelayBridge binds marlin-ui's Agent Room directly to a live Marlin Cove
-// Cloud Relay over gRPC HTTP/2 server-streaming (`async.StructuredScope`).
+// CoveRelayBridge binds marlin-ui's unified Agent Room (`featurekit.RoomController`)
+// directly to a live Marlin Cove Cloud Relay over gRPC HTTP/2 server-streaming
+// (`async.StructuredScope`).
 type CoveRelayBridge struct {
 	client *CoveClient
 	roomID string
@@ -156,15 +157,21 @@ type CoveRelayBridge struct {
 	scope  *async.StructuredScope
 
 	mu              sync.RWMutex
+	hydrated        bool
 	snapshot        CoveRoomSnapshot
 	activeChannelID string
 	activeThreadID  string
 	thinkingBots    map[string]string
+	reactions       map[string]map[string][]string // msgID -> tag -> actors
 	onDirty         func()
 }
 
 // AttachCoveRelayBridge connects marlin-ui's Agent Room to a live marlin-cove
 // gRPC HTTP/2 server when cfg.CoveURL is configured, returning nil otherwise.
+//
+// Until Cove returns a hydrated snapshot with real channels and participants,
+// featurekit's unified RoomController hub transparently serves the local room
+// with a "Cove Connecting…" badge so Desktop, iOS, and Android never blank out.
 func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty func()) *CoveRelayBridge {
 	client := NewCoveClientFromConfig(cfg)
 	if client == nil {
@@ -181,27 +188,28 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 		scope:           async.NewStructuredScope(ctx),
 		activeChannelID: "general",
 		thinkingBots:    make(map[string]string),
+		reactions:       make(map[string]map[string][]string),
 		onDirty:         onDirty,
 	}
 
-	if snap, err := client.FetchSnapshot(ctx, roomID); err == nil {
+	// Best-effort bounded initial hydration so startup never hangs if Cove is still booting.
+	initCtx, cancelInit := context.WithTimeout(ctx, 2*time.Second)
+	if snap, err := client.FetchSnapshot(initCtx, roomID); err == nil {
 		bridge.setSnapshot(snap)
 	}
+	cancelInit()
 
-	featurekit.SetRoomBridge(featurekit.RoomBridge{
-		Snapshot:      bridge.projectedSnapshot,
-		SelectChannel: bridge.selectChannel,
-		PostMessage:   bridge.postMessage,
-		OpenThread:    bridge.openThread,
-		CloseThread:   bridge.closeThread,
-	})
+	featurekit.SetRemoteRoomController(bridge)
 
 	bridge.scope.Go(func(runCtx context.Context) {
 		for {
 			if runCtx.Err() != nil {
 				return
 			}
-			if snap, err := client.FetchSnapshot(runCtx, roomID); err == nil {
+			fetchCtx, cancelFetch := context.WithTimeout(runCtx, 5*time.Second)
+			snap, err := client.FetchSnapshot(fetchCtx, roomID)
+			cancelFetch()
+			if err == nil {
 				bridge.setSnapshot(snap)
 			}
 			_ = client.WatchEvents(runCtx, roomID, func(evt CoveRoomEvent) {
@@ -218,11 +226,12 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 	return bridge
 }
 
-// Close cancels and drains the gRPC HTTP/2 event stream and closes the client connection.
+// Close detaches the remote controller, drains the gRPC HTTP/2 stream, and closes the client.
 func (b *CoveRelayBridge) Close() {
 	if b == nil {
 		return
 	}
+	featurekit.ClearRemoteRoomController(b)
 	if b.scope != nil {
 		b.scope.CloseAndDrain()
 	}
@@ -231,16 +240,25 @@ func (b *CoveRelayBridge) Close() {
 	}
 }
 
+func (b *CoveRelayBridge) notify() {
+	featurekit.NotifyRoomChanged()
+	if b.onDirty != nil {
+		b.onDirty()
+	}
+}
+
 func (b *CoveRelayBridge) setSnapshot(snap CoveRoomSnapshot) {
+	if len(snap.Channels) == 0 && len(snap.Participants) == 0 {
+		return
+	}
 	b.mu.Lock()
+	b.hydrated = true
 	b.snapshot = snap
 	if b.activeChannelID == "" && len(snap.Channels) > 0 {
 		b.activeChannelID = snap.Channels[0].ID
 	}
 	b.mu.Unlock()
-	if b.onDirty != nil {
-		b.onDirty()
-	}
+	b.notify()
 }
 
 func (b *CoveRelayBridge) upsertMessageLocked(msg CoveMessage) {
@@ -294,13 +312,13 @@ func (b *CoveRelayBridge) applyEvent(evt CoveRoomEvent) {
 		}
 	}
 	b.mu.Unlock()
-	if b.onDirty != nil {
-		b.onDirty()
-	}
+	b.notify()
 }
 
-func (b *CoveRelayBridge) projectedSnapshot() featurekit.RoomFullSnapshot {
+// Snapshot implements featurekit.RoomController.
+func (b *CoveRelayBridge) Snapshot() featurekit.RoomFullSnapshot {
 	b.mu.RLock()
+	hydrated := b.hydrated
 	snap := b.snapshot
 	ch := b.activeChannelID
 	threadID := b.activeThreadID
@@ -309,19 +327,160 @@ func (b *CoveRelayBridge) projectedSnapshot() featurekit.RoomFullSnapshot {
 	for k, v := range b.thinkingBots {
 		thinkingCopy[k] = v
 	}
+	rxCopy := make(map[string]map[string][]string, len(b.reactions))
+	for msgID, tags := range b.reactions {
+		inner := make(map[string][]string, len(tags))
+		for tag, actors := range tags {
+			inner[tag] = append([]string(nil), actors...)
+		}
+		rxCopy[msgID] = inner
+	}
 	b.mu.RUnlock()
-	return snap.ToRoomFullSnapshotWithThread(ch, threadID, actor, thinkingCopy)
+
+	if !hydrated || len(snap.Channels) == 0 || len(snap.Participants) == 0 {
+		return featurekit.RoomFullSnapshot{
+			Available: false,
+			SyncMode:  "cove-connecting",
+			SyncLabel: "Cove Connecting…",
+		}
+	}
+	out := snap.ToRoomFullSnapshotWithThread(ch, threadID, actor, thinkingCopy)
+	out.SyncMode = "cove-live"
+	out.SyncLabel = "Cove Live · gRPC"
+	out.Tasks = b.Tasks()
+	for i := range out.Messages {
+		out.Messages[i].Reactions = projectCoveReactions(rxCopy[out.Messages[i].ID], actor)
+	}
+	for i := range out.ThreadMessages {
+		out.ThreadMessages[i].Reactions = projectCoveReactions(rxCopy[out.ThreadMessages[i].ID], actor)
+	}
+	return out
 }
 
-func (b *CoveRelayBridge) selectChannel(channelID string) error {
+// Stats implements featurekit.RoomController.
+func (b *CoveRelayBridge) Stats() featurekit.RoomStats {
+	b.mu.RLock()
+	participants := b.snapshot.Participants
+	b.mu.RUnlock()
+	var st featurekit.RoomStats
+	for _, p := range participants {
+		if p.Kind == "agent" {
+			st.AgentsTotal++
+			if p.Presence != "offline" {
+				st.AgentsOnline++
+			}
+		}
+	}
+	tasks := b.Tasks()
+	st.TasksTotal = len(tasks)
+	for _, tk := range tasks {
+		if tk.Status == "DONE" {
+			st.TasksDone++
+		}
+	}
+	return st
+}
+
+// Tasks implements featurekit.RoomController (delegating to shared local matters store).
+func (b *CoveRelayBridge) Tasks() []featurekit.RoomTask {
+	if local := featurekit.LocalRoomController(); local != nil {
+		return local.Tasks()
+	}
+	return nil
+}
+
+// AddTask implements featurekit.RoomController.
+func (b *CoveRelayBridge) AddTask(title string) error {
+	if local := featurekit.LocalRoomController(); local != nil {
+		return local.AddTask(title)
+	}
+	return nil
+}
+
+// CycleTask implements featurekit.RoomController.
+func (b *CoveRelayBridge) CycleTask(id string) error {
+	if local := featurekit.LocalRoomController(); local != nil {
+		return local.CycleTask(id)
+	}
+	return nil
+}
+
+// SelectChannel implements featurekit.RoomController.
+func (b *CoveRelayBridge) SelectChannel(channelID string) error {
 	b.mu.Lock()
 	b.activeChannelID = channelID
 	b.activeThreadID = ""
 	b.mu.Unlock()
-	if b.onDirty != nil {
-		b.onDirty()
-	}
+	b.notify()
 	return nil
+}
+
+// PostGateEmbed implements featurekit.RoomController.
+func (b *CoveRelayBridge) PostGateEmbed(channelID, botID, body, gateID string) error {
+	ch := strings.TrimSpace(channelID)
+	if ch == "" {
+		b.mu.RLock()
+		ch = b.activeChannelID
+		b.mu.RUnlock()
+	}
+	if ch == "" {
+		ch = "general"
+	}
+	b.scope.Go(func(runCtx context.Context) {
+		rpcCtx, cancel := context.WithTimeout(runCtx, 10*time.Second)
+		defer cancel()
+		_, _ = b.client.RequestGate(rpcCtx, b.roomID, ch, botID, body, gateID)
+	})
+	return nil
+}
+
+// ToggleReaction implements featurekit.RoomController.
+func (b *CoveRelayBridge) ToggleReaction(msgID, tag string) error {
+	if strings.TrimSpace(msgID) == "" || strings.TrimSpace(tag) == "" {
+		return nil
+	}
+	b.mu.Lock()
+	if b.reactions[msgID] == nil {
+		b.reactions[msgID] = make(map[string][]string)
+	}
+	actors := b.reactions[msgID][tag]
+	removed := false
+	next := make([]string, 0, len(actors)+1)
+	for _, who := range actors {
+		if who == b.actor {
+			removed = true
+			continue
+		}
+		next = append(next, who)
+	}
+	if !removed {
+		next = append(next, b.actor)
+	}
+	b.reactions[msgID][tag] = next
+	b.mu.Unlock()
+	b.notify()
+	return nil
+}
+
+func projectCoveReactions(raw map[string][]string, actor string) []featurekit.RoomReactionView {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]featurekit.RoomReactionView, 0, len(raw))
+	for tag, actors := range raw {
+		if len(actors) == 0 {
+			continue
+		}
+		reacted := false
+		for _, who := range actors {
+			if who == actor {
+				reacted = true
+				break
+			}
+		}
+		out = append(out, featurekit.RoomReactionView{Tag: tag, Count: len(actors), Reacted: reacted})
+	}
+	return out
 }
 
 func (b *CoveRelayBridge) resolveTargetAgent(channelID, body string) (botID string, handle string) {
@@ -348,7 +507,8 @@ func (b *CoveRelayBridge) resolveTargetAgent(channelID, body string) (botID stri
 	return "", ""
 }
 
-func (b *CoveRelayBridge) postMessage(channelID, body, threadRootID string) error {
+// PostMessage implements featurekit.RoomController with non-blocking 120Hz async dispatch.
+func (b *CoveRelayBridge) PostMessage(channelID, body, threadRootID string) error {
 	txt := strings.TrimSpace(body)
 	if txt == "" {
 		return nil
@@ -368,9 +528,7 @@ func (b *CoveRelayBridge) postMessage(channelID, body, threadRootID string) erro
 		b.mu.Lock()
 		b.thinkingBots[botID] = "thinking"
 		b.mu.Unlock()
-		if b.onDirty != nil {
-			b.onDirty()
-		}
+		b.notify()
 		b.scope.Go(func(runCtx context.Context) {
 			rpcCtx, cancel := context.WithTimeout(runCtx, 120*time.Second)
 			defer cancel()
@@ -394,9 +552,7 @@ func (b *CoveRelayBridge) postMessage(channelID, body, threadRootID string) erro
 				})
 			}
 			b.mu.Unlock()
-			if b.onDirty != nil {
-				b.onDirty()
-			}
+			b.notify()
 		})
 		return nil
 	}
@@ -408,31 +564,27 @@ func (b *CoveRelayBridge) postMessage(channelID, body, threadRootID string) erro
 			b.mu.Lock()
 			b.upsertMessageLocked(msg)
 			b.mu.Unlock()
-			if b.onDirty != nil {
-				b.onDirty()
-			}
+			b.notify()
 		}
 	})
 	return nil
 }
 
-func (b *CoveRelayBridge) openThread(msgID string) error {
+// OpenThread implements featurekit.RoomController.
+func (b *CoveRelayBridge) OpenThread(msgID string) error {
 	b.mu.Lock()
 	b.activeThreadID = msgID
 	b.mu.Unlock()
-	if b.onDirty != nil {
-		b.onDirty()
-	}
+	b.notify()
 	return nil
 }
 
-func (b *CoveRelayBridge) closeThread() {
+// CloseThread implements featurekit.RoomController.
+func (b *CoveRelayBridge) CloseThread() {
 	b.mu.Lock()
 	b.activeThreadID = ""
 	b.mu.Unlock()
-	if b.onDirty != nil {
-		b.onDirty()
-	}
+	b.notify()
 }
 
 func firstAgentMention(body string, participants []CoveParticipant) string {

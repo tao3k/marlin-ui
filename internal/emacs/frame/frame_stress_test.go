@@ -124,7 +124,7 @@ func TestMyGoNativeAutomatedTabClickSoakAndP99(t *testing.T) {
 	t0 := time.Now()
 	tt.Frame()
 	agentRoomDur := time.Since(t0)
-	if !tt.HasText("AGENT ROOM") {
+	if !tt.HasText("CHANNELS") || !tt.HasText("AI BOTS · DIRECT") {
 		t.Fatalf("expected *Agent Room* rendered after tab click")
 	}
 	if agentRoomDur > 250*time.Millisecond {
@@ -219,8 +219,8 @@ func TestTabSwitchSingleFrameZeroRedundantInvalidateAndEvalStorm(t *testing.T) {
 		if err := tt.Click("*Agent Room*"); err != nil {
 			t.Fatalf("round %d click *Agent Room*: %v", i, err)
 		}
-		if !tt.HasText("AGENT ROOM") {
-			t.Fatalf("round %d: expected AGENT ROOM immediately after click", i)
+		if !tt.HasText("CHANNELS") {
+			t.Fatalf("round %d: expected *Agent Room* channels immediately after click", i)
 		}
 	}
 
@@ -235,8 +235,8 @@ func TestTabSwitchSingleFrameZeroRedundantInvalidateAndEvalStorm(t *testing.T) {
 	// SelectFeature + 1 Frame() MUST immediately show target content on Frame 1.
 	f.SelectFeature("feature:chatroom")
 	tt.Frame()
-	if !tt.HasText("AGENT ROOM") {
-		t.Fatalf("expected AGENT ROOM visible on Frame 1 with zero stale frames")
+	if !tt.HasText("CHANNELS") {
+		t.Fatalf("expected *Agent Room* visible on Frame 1 with zero stale frames")
 	}
 	f.SelectBuffer(buffer.Sessions)
 	tt.Frame()
