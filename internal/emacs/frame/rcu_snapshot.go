@@ -39,6 +39,7 @@ type frameSnapshot struct {
 	CustomSidebar   *widgets.SidebarSpec
 	UIModules       widgets.Modules
 	ZenMode         bool
+	ZenStyle        ZenStyle
 	RailPinned      bool
 	ActiveBuffer    buffer.ID
 	ActiveFeatureID string
@@ -112,6 +113,7 @@ func (f *Frame) captureSnapshotLocked() frameSnapshot {
 		CustomSidebar:   f.customSidebar,
 		UIModules:       f.uiModules,
 		ZenMode:         f.zenMode,
+		ZenStyle:        f.zenStyle,
 		RailPinned:      f.railPinned,
 		ActiveBuffer:    f.activeBuffer,
 		ActiveFeatureID: f.activeFeatureID,

@@ -258,14 +258,16 @@ func (s *Shell) renderRoomQuickStrip(c *ui.Context, th theme.Theme, snap feature
 		}
 	}
 	ui.ScrollHorizontal(c.Key("ios-room-qstrip")).FillWidth().Padding(0, 12, 8, 12).Gap(4).Children(func() {
-		// Unified Sync Status Pill (shared 1:1 with Desktop: Cove Live · gRPC / Cove Connecting… / Local Core).
+		// Unified compact COVE status pill (green when live, amber when connecting, red on auth mismatch).
 		if strings.TrimSpace(snap.SyncLabel) != "" {
-			syncTone := th.Info
+			syncTone := th.InkMuted
 			switch snap.SyncMode {
-			case "cove-grpc":
+			case "cove-live", "cove-grpc":
 				syncTone = th.Success
 			case "cove-connecting":
 				syncTone = th.Warning
+			case "cove-auth-error":
+				syncTone = th.Danger
 			}
 			ui.Row(c.Key("ios-qstrip-sync")).Height(26).Padding(0, 9).Radius(13).Gap(5).
 				AlignItems(ui.Center).Shrink(0).

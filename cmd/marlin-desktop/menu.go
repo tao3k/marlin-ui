@@ -156,8 +156,12 @@ func buildDesktopMenu(fr *frame.Frame, invalidate func()) *mygo.Menu {
 					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleMotion(); invalidate() },
 				},
 				{
-					Label: "Toggle Zen Mode (SPC t z)",
+					Label: "Toggle Zen Writeroom (SPC t z)",
 					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleZenMode(); invalidate() },
+				},
+				{
+					Label: "Toggle Zen Fullscreen (SPC t Z)",
+					Click: func(_ *mygo.MenuItem, _ *mygo.Window) { fr.ToggleZenFullscreen(); invalidate() },
 				},
 				mygo.Separator(),
 				{Role: mygo.RoleToggleFullScreen},

@@ -217,10 +217,18 @@ action = "cmd:toggle-motion"
 [[heads]]
 prefix = "SPC t"
 key = "z"
-label = "Toggle Zen Mode"
+label = "Toggle Zen Writeroom (focus)"
 column = "Modules"
 exit = "true"
 action = "cmd:zen-mode"
+
+[[heads]]
+prefix = "SPC t"
+key = "Z"
+label = "Toggle Zen Fullscreen"
+column = "Modules"
+exit = "true"
+action = "cmd:zen-fullscreen"
 
 [[heads]]
 prefix = "SPC t"

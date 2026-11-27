@@ -74,8 +74,26 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		},
 	}
 
+	zen := bc != nil && bc.ZenMode
+	colMaxW := float32(860)
+	if zen {
+		colMaxW = 760
+	}
+
 	ui.Column(c.Key("conv-root")).Fill().AlignItems(ui.Stretch).Children(func() {
-		renderConversationHeaderBar(c, th, bc)
+		if zen {
+			// Calm Doom Writeroom header pill: zero noisy telemetry, 1-click exit.
+			ui.Row(c.Key("conv-writeroom-bar")).Padding(8, 20, 0, 20).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Grow(1).MaxWidth(colMaxW).AlignItems(ui.Center).Children(func() {
+					ui.Spacer(c)
+					if theme.ActionLink(c, "conv-zen-exit", "Writeroom · SPC t z to exit", th.InkMuted, th).Clicked() && bc.OnToggleZenMode != nil {
+						bc.OnToggleZenMode()
+					}
+				})
+			})
+		} else {
+			renderConversationHeaderBar(c, th, bc)
+		}
 
 		// Windowed virtualized slice: cap per-frame layout work to the most recent
 		// 60 entries (expandable on demand) so 10k-turn histories keep 120Hz frame budgets.
@@ -90,7 +108,8 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 
 		ui.Row(c.Key("conv-main-split")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			ui.Scroll(c.Key("conv-scroll")).Grow(3).MinWidth(0).Padding(20, 28).Children(func() {
-				ui.Column(c).MaxWidth(860).Gap(18).AlignItems(ui.Stretch).Children(func() {
+				ui.Row(c.Key("conv-center-wrap")).FillWidth().Justify(ui.Center).Children(func() {
+					ui.Column(c).Grow(1).MaxWidth(colMaxW).Gap(18).AlignItems(ui.Stretch).Children(func() {
 					if startIdx > 0 {
 						ui.Row(c.Key("conv-load-earlier")).Justify(ui.Center).Children(func() {
 							lbl := fmt.Sprintf("Show %d earlier turn(s)", startIdx)
@@ -138,6 +157,7 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 						}
 						i++
 					}
+					})
 				})
 			})
 
@@ -615,7 +635,11 @@ func renderConversationComposerBar(c *ui.Context, tr *mygoshell.TranscriptContro
 	ui.Row(c.Key("conv-composer-dock")).Padding(10, 24, 14, 24).Justify(ui.Center).
 		Background(dockBg).
 		BorderWidth(1, 0, 0, 0).BorderColor(kit.WithAlpha(th.BorderSubtle, 0.45)).Children(func() {
-		compCard := ui.Column(c.Key("conv-composer-card")).Grow(1).MaxWidth(860).Padding(12, 16, 10, 16).Gap(9).Radius(18).
+		compMaxW := float32(860)
+		if bc != nil && bc.ZenMode {
+			compMaxW = 760
+		}
+		compCard := ui.Column(c.Key("conv-composer-card")).Grow(1).MaxWidth(compMaxW).Padding(12, 16, 10, 16).Gap(9).Radius(18).
 			AlignItems(ui.Stretch)
 		if c.Vibrancy() {
 			compCard.Material(glass.Glass{

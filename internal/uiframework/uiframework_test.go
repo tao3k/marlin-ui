@@ -55,6 +55,10 @@ func TestProjectKeymapAndTransientsMapsCanonicalAndCustomSchemeBindings(t *testi
 		{Scope: schema.KeyScopeNormal, Sequence: []string{"SPC", "w", "z"}, CommandName: "custom-scheme-zoom"},
 		{Scope: schema.KeyScopeNormal, Sequence: []string{"SPC", "TAB", "n"}, CommandName: "workspace-new"},
 		{Scope: schema.KeyScopeNormal, Sequence: []string{"SPC", "~"}, CommandName: "popup-toggle"},
+		{Scope: schema.KeyScopeGlobal, Sequence: []string{"C-x", "o"}, CommandName: "window-other"},
+		{Scope: schema.KeyScopeGlobal, Sequence: []string{"C-x", "C-c"}, CommandName: "quit"},
+		{Scope: schema.KeyScopeGlobal, Sequence: []string{"C-x", "t", "2"}, CommandName: "workspace-new"},
+		{Scope: schema.KeyScopeGlobal, Sequence: []string{"C-c", "u"}, CommandName: "winner-undo"},
 	}
 	transients := []schema.UITransient{
 		{
@@ -87,6 +91,15 @@ func TestProjectKeymapAndTransientsMapsCanonicalAndCustomSchemeBindings(t *testi
 	}
 	if _, ok := mapped["SPC TAB"]; !ok {
 		t.Fatalf("expected SPC TAB workspace hydra projected from Scheme keymap")
+	}
+	if _, ok := mapped["C-x"]; !ok {
+		t.Fatalf("expected native Emacs global C-x keymap projected from Scheme")
+	}
+	if _, ok := mapped["C-x t"]; !ok {
+		t.Fatalf("expected native Emacs global C-x t tab-bar keymap projected from Scheme")
+	}
+	if _, ok := mapped["C-c"]; !ok {
+		t.Fatalf("expected native Emacs global C-c keymap projected from Scheme")
 	}
 	if _, ok := mapped["hydra:zoom"]; !ok {
 		t.Fatalf("expected Scheme transient body hydra:zoom projected")

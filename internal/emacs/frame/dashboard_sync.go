@@ -442,6 +442,14 @@ func (f *Frame) dispatchWidgetAction(action string) {
 		f.CycleTheme()
 	case "cmd:zen-mode":
 		f.ToggleZenMode()
+	case "cmd:zen-fullscreen":
+		f.ToggleZenFullscreen()
+	case "cmd:quit":
+		if f.onQuit != nil {
+			f.onQuit()
+		} else {
+			f.Echo("C-x C-c: Quit requested")
+		}
 	case "cmd:toggle-glass":
 		f.ToggleGlass()
 	case "cmd:cycle-glass-opacity":

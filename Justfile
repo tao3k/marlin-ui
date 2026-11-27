@@ -209,7 +209,7 @@ dev-room *args:
         fi
     fi
     echo "[dev-room] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
-    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop \
+    env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-desktop \
         -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \
         -cove "$cove_bind" -cove-token "$cove_token" {{args}}
 
@@ -255,7 +255,7 @@ dev-room-ios *args:
     }
     trap cleanup EXIT INT TERM
     bridge_token="${MARLIN_BRIDGE_TOKEN:-marlin-cove-dev-$(date +%s)}"
-    cove_token="${MARLIN_COVE_TOKEN:-cove-room-dev-$(date +%s)}"
+    cove_token="${MARLIN_COVE_TOKEN:-marlin-cove-local-dev}"
     MARLIN_BRIDGE_REAL_SESSION=1 MARLIN_BRIDGE_TOKEN="$bridge_token" MARLIN_CONFIG="$cfg_file" MARLIN_BRIDGE_CONFIG="$cfg_file" "$app_bin" >"$app_log" 2>&1 &
     APP_PID=$!
     app_addr=""
@@ -271,28 +271,33 @@ dev-room-ios *args:
         exit 1
     fi
     cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
-    MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
-    MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
-    MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
-    MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
-        "$cove_bin" serve >"$cove_log" 2>&1 &
-    COVE_PID=$!
     cove_host="${cove_bind%:*}"
     cove_port="${cove_bind##*:}"
-    for _ in $(seq 1 50); do
-        if ! kill -0 "$COVE_PID" 2>/dev/null; then
-            echo "error: marlin-cove exited early:" >&2
-            cat "$cove_log" >&2
-            exit 1
-        fi
-        if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
-            exec 3>&- 3<&-
-            break
-        fi
-        sleep 0.1
-    done
+    if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+        exec 3>&- 3<&-
+        echo "[dev-room-ios] reusing live marlin-cove at $cove_bind (shared room across Desktop & Mobile)"
+    else
+        MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
+        MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
+        MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
+        MARLIN_COVE_MARLIN_GATEWAY_TOKEN="$bridge_token" \
+            "$cove_bin" serve >"$cove_log" 2>&1 &
+        COVE_PID=$!
+        for _ in $(seq 1 50); do
+            if ! kill -0 "$COVE_PID" 2>/dev/null; then
+                echo "error: marlin-cove exited early:" >&2
+                cat "$cove_log" >&2
+                exit 1
+            fi
+            if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
+                exec 3>&- 3<&-
+                break
+            fi
+            sleep 0.1
+        done
+    fi
     echo "[dev-room-ios] marlin-app-server=$app_addr  marlin-cove=$cove_bind"
-    exec env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-mobile -platform ios \
+    env CGO_ENABLED=0 go run -tags "$tags" ./cmd/marlin-mobile -platform ios \
         -config "$cfg_file" -host "$app_addr" -token "$bridge_token" \
         -cove "$cove_bind" -cove-token "$cove_token" {{args}}
 

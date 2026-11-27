@@ -182,6 +182,19 @@ func TestDesktopAgentRoomAppleGeistParityAndLiveBotRouting(t *testing.T) {
 		t.Fatalf("Click('Mention @reviewer') failed: %v", err)
 	}
 	tt.Frame()
+
+	// Verify Doom Zen Writeroom hides the left CHANNELS/AGENTS rail and centers #workspace cleanly.
+	featurekit.SetRoomWriteroom(true)
+	defer featurekit.SetRoomWriteroom(false)
+	tt.Frame()
+	if tt.HasText("CHANNELS") || tt.HasText("AI BOTS · DIRECT") || !tt.HasText("Writeroom · Exit") {
+		t.Fatalf("expected Room Writeroom to hide left rail and show 'Writeroom · Exit', got %q", strings.Join(tt.Texts(), " | "))
+	}
+	featurekit.SetRoomWriteroom(false)
+	tt.Frame()
+	if !tt.HasText("CHANNELS") || tt.HasText("Writeroom · Exit") {
+		t.Fatalf("expected exiting Room Writeroom to restore CHANNELS rail, got %q", strings.Join(tt.Texts(), " | "))
+	}
 }
 
 func TestExtractRoomMentionsHandlesASCIIAndCJKPunctuation(t *testing.T) {

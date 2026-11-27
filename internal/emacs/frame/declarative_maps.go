@@ -303,31 +303,49 @@ func parseTOMLArraySections(raw string) ([]tomlArraySection, error) {
 
 func parseUIKeyWithMods(raw string) (ui.Key, ui.Modifiers, bool) {
 	trimmed := strings.TrimSpace(raw)
+	var extraMods ui.Modifiers
+	for {
+		if strings.HasPrefix(trimmed, "C-") && len(trimmed) > 2 {
+			extraMods |= ui.Ctrl
+			trimmed = trimmed[2:]
+			continue
+		}
+		if strings.HasPrefix(trimmed, "M-") && len(trimmed) > 2 {
+			extraMods |= ui.Alt
+			trimmed = trimmed[2:]
+			continue
+		}
+		break
+	}
 	switch trimmed {
 	case "~":
-		return ui.KeyBackquote, ui.Shift, true
+		return ui.KeyBackquote, extraMods | ui.Shift, true
 	case "`":
-		return ui.KeyBackquote, 0, true
+		return ui.KeyBackquote, extraMods, true
 	case "[":
-		return ui.KeyBracketLeft, 0, true
+		return ui.KeyBracketLeft, extraMods, true
 	case "]":
-		return ui.KeyBracketRight, 0, true
+		return ui.KeyBracketRight, extraMods, true
 	case "=":
-		return ui.KeyEqual, 0, true
+		return ui.KeyEqual, extraMods, true
+	case "+":
+		return ui.KeyEqual, extraMods | ui.Shift, true
 	case "-":
-		return ui.KeyMinus, 0, true
+		return ui.KeyMinus, extraMods, true
 	case ".":
-		return ui.KeyPeriod, 0, true
+		return ui.KeyPeriod, extraMods, true
 	case "/":
-		return ui.KeySlash, 0, true
+		return ui.KeySlash, extraMods, true
+	case "?":
+		return ui.KeySlash, extraMods | ui.Shift, true
 	}
 	lower := strings.ToLower(trimmed)
 	if lower == "tab" {
-		return ui.KeyTab, 0, true
+		return ui.KeyTab, extraMods, true
 	}
-	var mods ui.Modifiers
+	mods := extraMods
 	if len(trimmed) == 1 && trimmed[0] >= 'A' && trimmed[0] <= 'Z' {
-		mods = ui.Shift
+		mods |= ui.Shift
 	}
 	code, ok := parseUIKey(lower)
 	return code, mods, ok

@@ -27,7 +27,16 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 				{Key: "w", KeyCode: ui.KeyW, Label: "+windows", Column: "Navigation", IsPrefix: true, Action: "hydra:SPC w"},
 				{Key: "TAB", KeyCode: ui.KeyTab, Label: "+workspaces", Column: "Navigation", IsPrefix: true, Action: "hydra:SPC TAB"},
 				{Key: "~", KeyCode: ui.KeyBackquote, KeyMods: ui.Shift, Label: "Toggle last popup", Column: "Navigation", Exit: true, Action: "cmd:popup-toggle"},
+				{Key: "q", KeyCode: ui.KeyQ, Label: "+quit", Column: "System", IsPrefix: true, Action: "hydra:SPC q"},
 				{Key: "h", KeyCode: ui.KeyH, Label: "Documentation (*Help*)", Column: "System", Exit: true, Action: "buffer:*Help*"},
+			},
+		},
+		"SPC q": {
+			ID:     "quit",
+			Prefix: "SPC q",
+			Title:  "+quit / session",
+			Heads: []declarativeHeadDef{
+				{Key: "q", KeyCode: ui.KeyQ, Label: "Exit Marlin (C-x C-c)", Column: "System", Exit: true, Action: "cmd:quit"},
 			},
 		},
 		"SPC b": {
@@ -92,6 +101,66 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 				{Key: "4", KeyCode: ui.Key4, Label: "Switch to workspace #4", Column: "Jump", Exit: true, Action: "cmd:ws-4"},
 				{Key: "0", KeyCode: ui.Key0, Label: "Switch to final workspace", Column: "Jump", Exit: true, Action: "cmd:ws-final"},
 				{Key: "q", KeyCode: ui.KeyQ, Label: "Quit hydra", Column: "Jump", Exit: true},
+			},
+		},
+		// Canonical native Emacs ctl-x-map / C-c / C-h mirrored 1:1 from
+		// scheme/ui-meow/key-bindings.ss (active in BOTH Insert and Normal modes!).
+		"C-x": {
+			ID:     "emacs-ctl-x",
+			Prefix: "C-x",
+			Title:  "Emacs C-x (windows · buffers · tabs · zen)",
+			Heads: []declarativeHeadDef{
+				{Key: "0", KeyCode: ui.Key0, Label: "Delete window / workspace", Column: "Windows", Exit: true, Action: "cmd:win-delete"},
+				{Key: "1", KeyCode: ui.Key1, Label: "Delete other windows", Column: "Windows", Exit: true, Action: "cmd:win-only"},
+				{Key: "2", KeyCode: ui.Key2, Label: "Split window below", Column: "Windows", Exit: true, Action: "cmd:win-split-below"},
+				{Key: "3", KeyCode: ui.Key3, Label: "Split window right", Column: "Windows", Exit: true, Action: "cmd:win-split-right"},
+				{Key: "o", KeyCode: ui.KeyO, Label: "Other window", Column: "Windows", Exit: true, Action: "cmd:win-other"},
+				{Key: "O", KeyCode: ui.KeyO, KeyMods: ui.Shift, Label: "Previous window", Column: "Windows", Exit: true, Action: "cmd:win-prev"},
+				{Key: "+", KeyCode: ui.KeyEqual, KeyMods: ui.Shift, Label: "Balance windows", Column: "Windows", Exit: true, Action: "cmd:win-balance"},
+				{Key: "b", KeyCode: ui.KeyB, Label: "Switch buffer", Column: "Buffers", Exit: true, Action: "cmd:switch-buffer"},
+				{Key: "p", KeyCode: ui.KeyP, Label: "Toggle popup drawer", Column: "Buffers", Exit: true, Action: "cmd:popup-toggle"},
+				{Key: "w", KeyCode: ui.KeyW, Label: "+window-state", Column: "Emacs", IsPrefix: true, Action: "hydra:C-x w"},
+				{Key: "t", KeyCode: ui.KeyT, Label: "+tab-bar workspaces", Column: "Emacs", IsPrefix: true, Action: "hydra:C-x t"},
+				{Key: "z", KeyCode: ui.KeyZ, Label: "Toggle Zen Writeroom", Column: "Emacs", Exit: true, Action: "cmd:zen-mode"},
+				{Key: "Z", KeyCode: ui.KeyZ, KeyMods: ui.Shift, Label: "Toggle Zen Fullscreen", Column: "Emacs", Exit: true, Action: "cmd:zen-fullscreen"},
+				{Key: "C-c", KeyCode: ui.KeyC, KeyMods: ui.Ctrl, Label: "Exit Marlin", Column: "Emacs", Exit: true, Action: "cmd:quit"},
+			},
+		},
+		"C-x t": {
+			ID:     "emacs-ctl-x-t",
+			Prefix: "C-x t",
+			Title:  "Emacs C-x t (+workspaces / tab-bar)",
+			Heads: []declarativeHeadDef{
+				{Key: "2", KeyCode: ui.Key2, Label: "New workspace", Column: "Manage", Exit: true, Action: "cmd:ws-new"},
+				{Key: "0", KeyCode: ui.Key0, Label: "Kill workspace", Column: "Manage", Exit: true, Action: "cmd:ws-kill"},
+				{Key: "o", KeyCode: ui.KeyO, Label: "Next workspace", Column: "Manage", Exit: true, Action: "cmd:ws-next"},
+				{Key: "O", KeyCode: ui.KeyO, KeyMods: ui.Shift, Label: "Previous workspace", Column: "Manage", Exit: true, Action: "cmd:ws-prev"},
+			},
+		},
+		"C-x w": {
+			ID:     "emacs-ctl-x-w",
+			Prefix: "C-x w",
+			Title:  "Emacs 30 C-x w (window-state)",
+			Heads: []declarativeHeadDef{
+				{Key: "d", KeyCode: ui.KeyD, Label: "Toggle window dedicated", Column: "Emacs", Exit: true, Action: "cmd:win-dedicated"},
+			},
+		},
+		"C-c": {
+			ID:     "emacs-ctl-c",
+			Prefix: "C-c",
+			Title:  "Emacs C-c (winner-mode)",
+			Heads: []declarativeHeadDef{
+				{Key: "u", KeyCode: ui.KeyU, Label: "Winner undo layout", Column: "Emacs", Exit: true, Action: "cmd:win-undo"},
+				{Key: "U", KeyCode: ui.KeyU, KeyMods: ui.Shift, Label: "Winner redo layout", Column: "Emacs", Exit: true, Action: "cmd:win-redo"},
+			},
+		},
+		"C-h": {
+			ID:     "emacs-ctl-h",
+			Prefix: "C-h",
+			Title:  "Emacs C-h (help)",
+			Heads: []declarativeHeadDef{
+				{Key: "r", KeyCode: ui.KeyR, Label: "Open Marlin help", Column: "Emacs", Exit: true, Action: "buffer:*Help*"},
+				{Key: "?", KeyCode: ui.KeySlash, KeyMods: ui.Shift, Label: "Open Marlin help", Column: "Emacs", Exit: true, Action: "buffer:*Help*"},
 			},
 		},
 	}

@@ -38,8 +38,13 @@ action = "cmd:toggle-motion"
 
 [[commands]]
 name = "zen-mode"
-desc = "Toggle immersive Zen Mode (hide tabs & modeline, SPC t z)"
+desc = "Toggle Doom Zen Writeroom centered focus (SPC t z)"
 action = "cmd:zen-mode"
+
+[[commands]]
+name = "zen-fullscreen"
+desc = "Toggle Doom Zen Fullscreen (writeroom + OS fullscreen, SPC t Z)"
+action = "cmd:zen-fullscreen"
 
 [[commands]]
 name = "switch-themes"

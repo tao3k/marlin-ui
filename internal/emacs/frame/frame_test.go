@@ -954,3 +954,144 @@ func TestSchemeUIFrameMultiWindowSyncAndInteractiveExtensionBuffer(t *testing.T)
 		t.Fatalf("expected winner-undo to restore 2-window Scheme layout, got %d", fr.WorkspaceSnapshot().Active.WindowCount())
 	}
 }
+
+func TestDoomZenModeWriteroomAndFullscreenSubModes(t *testing.T) {
+	var lastWriteroom, lastFullscreen bool
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	sh.Desktop.Transcript.AppendUser("Focus check")
+
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-zen-modes"},
+		OnZenModeChanged: func(writeroom, fullscreen bool) {
+			lastWriteroom = writeroom
+			lastFullscreen = fullscreen
+		},
+	})
+	defer fr.Close()
+
+	fr.SelectBuffer(buffer.Conversation)
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+
+	// 1. SPC t z -> Doom Zen Writeroom (centered focus WITHOUT forcing OS fullscreen).
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyT)
+	tt.Frame()
+	tt.Key(0, ui.KeyZ)
+	tt.Frame()
+	if !fr.ZenMode() || fr.ZenFullscreen() || !lastWriteroom || lastFullscreen {
+		t.Fatalf("expected SPC t z -> ZenWriteroom (writeroom=true, fullscreen=false), got zen=%v fs=%v cb=(%v,%v)",
+			fr.ZenMode(), fr.ZenFullscreen(), lastWriteroom, lastFullscreen)
+	}
+	if !tt.HasText("Writeroom · SPC t z to exit") {
+		t.Fatalf("expected centered Writeroom bar in *conversation*, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 2. SPC t Z (Shift+Z) -> Doom Zen Fullscreen (writeroom + OS fullscreen).
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyT)
+	tt.Frame()
+	tt.Key(ui.Shift, ui.KeyZ)
+	tt.Frame()
+	if !fr.ZenMode() || !fr.ZenFullscreen() || !lastWriteroom || !lastFullscreen {
+		t.Fatalf("expected SPC t Z -> ZenFullscreen (writeroom=true, fullscreen=true), got zen=%v fs=%v cb=(%v,%v)",
+			fr.ZenMode(), fr.ZenFullscreen(), lastWriteroom, lastFullscreen)
+	}
+
+	// 3. Toggling SPC t Z again exits cleanly to ZenOff and restores OS fullscreen=false.
+	tt.Key(0, ui.KeySpace)
+	tt.Frame()
+	tt.Key(0, ui.KeyT)
+	tt.Frame()
+	tt.Key(ui.Shift, ui.KeyZ)
+	tt.Frame()
+	if fr.ZenMode() || fr.ZenFullscreen() || lastWriteroom || lastFullscreen {
+		t.Fatalf("expected second SPC t Z to restore ZenOff, got zen=%v fs=%v cb=(%v,%v)",
+			fr.ZenMode(), fr.ZenFullscreen(), lastWriteroom, lastFullscreen)
+	}
+}
+
+func TestNativeEmacsKeybindingsWorkInInsertAndNormalModes(t *testing.T) {
+	quitCalled := false
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	fr := frame.New(frame.Config{
+		Adaptive:  sh,
+		AppConfig: appconfig.Config{SessionID: "sess-emacs-native"},
+		OnQuit:    func() { quitCalled = true },
+	})
+	defer fr.Close()
+
+	// Switch to Insert Mode explicitly (verifying native Emacs bindings work in Insert mode!).
+	fr.EnterInsert()
+	if fr.KeyMode() != meow.ModeInsert {
+		t.Fatalf("expected Insert mode")
+	}
+	tt := ui.NewTester(fr.View, 1280, 900)
+	tt.Frame()
+
+	// 1. C-x 3 splits window right in Insert mode (2 windows, focused on window 2).
+	tt.Key(ui.Ctrl, ui.KeyX)
+	tt.Frame()
+	if fr.KeypadPrefix() != "C-x" {
+		t.Fatalf("expected C-x prefix active in Insert mode, got %q", fr.KeypadPrefix())
+	}
+	tt.Key(0, ui.Key3)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 2 || fr.WorkspaceSnapshot().Active.FocusedWindowNumber() != 2 {
+		t.Fatalf("expected C-x 3 in Insert mode to split into 2 windows focused on 2, got count=%d focus=%d",
+			fr.WorkspaceSnapshot().Active.WindowCount(), fr.WorkspaceSnapshot().Active.FocusedWindowNumber())
+	}
+
+	// 2. C-x o switches to other window (window 1) in Insert mode!
+	tt.Key(ui.Ctrl, ui.KeyX)
+	tt.Frame()
+	tt.Key(0, ui.KeyO)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.FocusedWindowNumber() != 1 {
+		t.Fatalf("expected C-x o in Insert mode to focus window 1, got %d", fr.WorkspaceSnapshot().Active.FocusedWindowNumber())
+	}
+
+	// 3. M-2 jumps directly to window 2 in Insert mode!
+	tt.Key(ui.Alt, ui.Key2)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.FocusedWindowNumber() != 2 {
+		t.Fatalf("expected M-2 in Insert mode to jump to window 2, got %d (keypad=%q mini=%v mode=%v)",
+			fr.WorkspaceSnapshot().Active.FocusedWindowNumber(), fr.KeypadPrefix(), fr.MiniMode(), fr.KeyMode())
+	}
+
+	// 4. C-x z toggles Zen Writeroom in Insert mode!
+	tt.Key(ui.Ctrl, ui.KeyX)
+	tt.Frame()
+	tt.Key(0, ui.KeyZ)
+	tt.Frame()
+	if !fr.ZenMode() || fr.ZenFullscreen() {
+		t.Fatalf("expected C-x z in Insert mode to enter Zen Writeroom, got zen=%v fs=%v", fr.ZenMode(), fr.ZenFullscreen())
+	}
+
+	// 5. C-c u triggers winner-undo in Insert mode (restoring 1 window)!
+	tt.Key(ui.Ctrl, ui.KeyC)
+	tt.Frame()
+	tt.Key(0, ui.KeyU)
+	tt.Frame()
+	if fr.WorkspaceSnapshot().Active.WindowCount() != 1 {
+		t.Fatalf("expected C-c u in Insert mode to undo split back to 1 window, got %d", fr.WorkspaceSnapshot().Active.WindowCount())
+	}
+
+	// 6. C-x C-c triggers OnQuit in Insert mode!
+	tt.Key(ui.Ctrl, ui.KeyX)
+	tt.Frame()
+	tt.Key(ui.Ctrl, ui.KeyC)
+	tt.Frame()
+	if !quitCalled {
+		t.Fatalf("expected C-x C-c in Insert mode to invoke OnQuit")
+	}
+}

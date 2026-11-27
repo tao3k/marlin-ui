@@ -4,7 +4,11 @@
 
 package meow
 
-import "github.com/egoist/mygo/ui"
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // Handlers decouples Meow/Emacs key dispatch from concrete Frame & Hydra actions.
 type Handlers struct {
@@ -24,6 +28,7 @@ type Handlers struct {
 	OnOpenThemeSwitch    func()
 	OnOpenHelp           func()
 	OnOpenSettings       func()
+	OnSelectWindowNumber func(num int)
 	OnStepCandidate      func(delta int)
 	OnStepCursor         func(delta int)
 	OnFocusMinibuffer    func()
@@ -130,6 +135,65 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 			return
 		}
 		return
+	}
+
+	// Active native Emacs Ctrl prefix (C-x, C-x t, C-x w, C-c, C-h) works
+	// identically in BOTH Insert mode AND Normal mode!
+	if kp := s.Keypad(); strings.HasPrefix(kp, "C-") {
+		if h.OnHydraKey != nil && h.OnHydraKey(c, h.Scope, kp) {
+			return
+		}
+		if modalShortcut(c, h.Scope, 0, ui.KeyQ) {
+			s.ClearKeypad()
+		}
+		return
+	}
+
+	// Universal native Emacs global bindings (Insert & Normal modes, mirrored
+	// from scheme/ui-meow/key-bindings.ss meow-global):
+	//   C-x -> ctl-x-map (C-x 0/1/2/3/o/O/+/b/p/z/Z/C-c/w/t)
+	//   C-c -> mode/winner-mode prefix (C-c u / C-c U)
+	//   C-h -> help prefix (C-h r / C-h ?)
+	//   C-s -> Helm search
+	//   M-1..M-9 -> direct winum window selection
+	switch {
+	case modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyX):
+		s.SetKeypad("C-x")
+		if h.OnReturnFocusToFrame != nil {
+			h.OnReturnFocusToFrame()
+		}
+		return
+	case modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyC):
+		s.SetKeypad("C-c")
+		if h.OnReturnFocusToFrame != nil {
+			h.OnReturnFocusToFrame()
+		}
+		return
+	case modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyH):
+		s.SetKeypad("C-h")
+		if h.OnReturnFocusToFrame != nil {
+			h.OnReturnFocusToFrame()
+		}
+		return
+	case modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyS):
+		s.ClearKeypad()
+		if h.OnOpenHelm != nil {
+			h.OnOpenHelm()
+		}
+		return
+	}
+	if h.OnSelectWindowNumber != nil {
+		numKeys := [9]ui.Key{
+			ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5,
+			ui.Key6, ui.Key7, ui.Key8, ui.Key9,
+		}
+		for idx, k := range numKeys {
+			if modalShortcut(c, h.Scope, ui.Alt, k) {
+				s.ClearKeypad()
+				h.OnSelectWindowNumber(idx + 1)
+				return
+			}
+		}
 	}
 
 	if s.Mode() != ModeNormal {

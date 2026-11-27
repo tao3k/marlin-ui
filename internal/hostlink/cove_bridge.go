@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +159,8 @@ type CoveRelayBridge struct {
 
 	mu              sync.RWMutex
 	hydrated        bool
+	authFailed      bool
+	lastErr         string
 	snapshot        CoveRoomSnapshot
 	activeChannelID string
 	activeThreadID  string
@@ -196,6 +199,8 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 	initCtx, cancelInit := context.WithTimeout(ctx, 2*time.Second)
 	if snap, err := client.FetchSnapshot(initCtx, roomID); err == nil {
 		bridge.setSnapshot(snap)
+	} else {
+		bridge.recordError(err)
 	}
 	cancelInit()
 
@@ -211,10 +216,14 @@ func AttachCoveRelayBridge(ctx context.Context, cfg appconfig.Config, onDirty fu
 			cancelFetch()
 			if err == nil {
 				bridge.setSnapshot(snap)
+			} else {
+				bridge.recordError(err)
 			}
-			_ = client.WatchEvents(runCtx, roomID, func(evt CoveRoomEvent) {
+			if werr := client.WatchEvents(runCtx, roomID, func(evt CoveRoomEvent) {
 				bridge.applyEvent(evt)
-			})
+			}); werr != nil && runCtx.Err() == nil {
+				bridge.recordError(werr)
+			}
 			select {
 			case <-runCtx.Done():
 				return
@@ -247,12 +256,38 @@ func (b *CoveRelayBridge) notify() {
 	}
 }
 
+func (b *CoveRelayBridge) recordError(err error) {
+	if err == nil {
+		return
+	}
+	code := status.Code(err)
+	isAuth := code == codes.Unauthenticated || code == codes.PermissionDenied
+	msg := err.Error()
+
+	b.mu.Lock()
+	changed := b.authFailed != isAuth || b.lastErr != msg
+	b.authFailed = isAuth
+	b.lastErr = msg
+	b.mu.Unlock()
+
+	if changed {
+		if isAuth {
+			log.Printf("[cove] authentication rejected (check MARLIN_COVE_TOKEN / stale marlin-cove process): %v", err)
+		} else {
+			log.Printf("[cove] sync retry (%s): %v", code, err)
+		}
+		b.notify()
+	}
+}
+
 func (b *CoveRelayBridge) setSnapshot(snap CoveRoomSnapshot) {
 	if len(snap.Channels) == 0 && len(snap.Participants) == 0 {
 		return
 	}
 	b.mu.Lock()
 	b.hydrated = true
+	b.authFailed = false
+	b.lastErr = ""
 	b.snapshot = snap
 	if b.activeChannelID == "" && len(snap.Channels) > 0 {
 		b.activeChannelID = snap.Channels[0].ID
@@ -319,6 +354,7 @@ func (b *CoveRelayBridge) applyEvent(evt CoveRoomEvent) {
 func (b *CoveRelayBridge) Snapshot() featurekit.RoomFullSnapshot {
 	b.mu.RLock()
 	hydrated := b.hydrated
+	authFailed := b.authFailed
 	snap := b.snapshot
 	ch := b.activeChannelID
 	threadID := b.activeThreadID
@@ -337,16 +373,23 @@ func (b *CoveRelayBridge) Snapshot() featurekit.RoomFullSnapshot {
 	}
 	b.mu.RUnlock()
 
+	if authFailed && !hydrated {
+		return featurekit.RoomFullSnapshot{
+			Available: false,
+			SyncMode:  "cove-auth-error",
+			SyncLabel: "COVE AUTH",
+		}
+	}
 	if !hydrated || len(snap.Channels) == 0 || len(snap.Participants) == 0 {
 		return featurekit.RoomFullSnapshot{
 			Available: false,
 			SyncMode:  "cove-connecting",
-			SyncLabel: "Cove Connecting…",
+			SyncLabel: "COVE…",
 		}
 	}
 	out := snap.ToRoomFullSnapshotWithThread(ch, threadID, actor, thinkingCopy)
 	out.SyncMode = "cove-live"
-	out.SyncLabel = "Cove Live · gRPC"
+	out.SyncLabel = "COVE"
 	out.Tasks = b.Tasks()
 	for i := range out.Messages {
 		out.Messages[i].Reactions = projectCoveReactions(rxCopy[out.Messages[i].ID], actor)

@@ -7,6 +7,7 @@ package featurekit
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // RoomController is the SINGLE authoritative Agent Room interface consumed
@@ -34,9 +35,44 @@ var (
 	roomCtrlMu     sync.RWMutex
 	localRoomCtrl  RoomController
 	remoteRoomCtrl RoomController
+	roomExitZenFn  func()
+	roomWriteroom  atomic.Bool
 	roomListeners  map[uint64]func()
 	roomListenerID uint64
 )
+
+// SetRoomWriteroom activates or deactivates Doom Zen Writeroom centered focus
+// inside *Agent Room* (hiding peripheral CHANNELS / AI AGENTS rails and
+// centering the active channel conversation).
+func SetRoomWriteroom(on bool) {
+	if roomWriteroom.Swap(on) != on {
+		NotifyRoomChanged()
+	}
+}
+
+// RoomWriteroom reports whether *Agent Room* is in Doom Zen Writeroom mode.
+func RoomWriteroom() bool {
+	return roomWriteroom.Load()
+}
+
+// SetRoomWriteroomExit registers the host callback invoked when the user clicks
+// "Writeroom · Exit" inside *Agent Room*.
+func SetRoomWriteroomExit(fn func()) {
+	roomCtrlMu.Lock()
+	roomExitZenFn = fn
+	roomCtrlMu.Unlock()
+}
+
+func exitRoomWriteroom() {
+	roomCtrlMu.RLock()
+	fn := roomExitZenFn
+	roomCtrlMu.RUnlock()
+	if fn != nil {
+		fn()
+		return
+	}
+	SetRoomWriteroom(false)
+}
 
 // SetLocalRoomController registers the built-in local RoomController (installed
 // by feat_chatroom.go when chatroom is compiled in).
@@ -134,14 +170,14 @@ func resolveActiveRoomController() (active RoomController, remoteSyncMode, remot
 		}
 		label := strings.TrimSpace(snap.SyncLabel)
 		if label == "" {
-			label = "Cove Connecting…"
+			label = "COVE…"
 		}
 		if local != nil {
 			return local, mode, label
 		}
 		return remote, mode, label
 	}
-	return local, "local", "Local Core"
+	return local, "local", "LOCAL"
 }
 
 // AgentRoomSnapshot returns the unified Agent Room snapshot for Desktop, iOS,
@@ -158,9 +194,9 @@ func AgentRoomSnapshot() RoomFullSnapshot {
 	if snap.SyncLabel == "" {
 		snap.SyncLabel = syncLabel
 	}
-	// If falling back to local while remote Cove is still connecting, preserve
-	// the connecting badge so operators see live status without losing agents.
-	if syncMode == "cove-connecting" {
+	// If falling back to local while remote Cove is connecting or rejected,
+	// preserve the status badge so operators see live status without losing agents.
+	if syncMode == "cove-connecting" || syncMode == "cove-auth-error" {
 		snap.SyncMode = syncMode
 		snap.SyncLabel = syncLabel
 	}

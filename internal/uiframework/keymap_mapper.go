@@ -41,6 +41,12 @@ var schemePrefixMeta = map[string]struct {
 	"SPC TAB": {id: "workspaces", label: "+workspaces", title: "+workspaces (Doom persp-mode)"},
 	"SPC t":   {id: "themes", label: "+themes", title: "+themes & toggles"},
 	"SPC m":   {id: "session", label: "+marlin", title: "+marlin session"},
+	"SPC q":   {id: "quit", label: "+quit", title: "+quit / session"},
+	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · tabs · zen)"},
+	"C-x t":   {id: "emacs-ctl-x-t", label: "+tab-bar", title: "Emacs C-x t (+workspaces / tab-bar)"},
+	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state)"},
+	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · mode)"},
+	"C-h":     {id: "emacs-ctl-h", label: "C-h", title: "Emacs C-h (help)"},
 }
 
 // ResolveSchemeAction maps canonical Scheme command symbols (declared in
@@ -113,6 +119,12 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:ws-4", "Switch to workspace #4", false
 	case "workspace-switch-final":
 		return "cmd:ws-final", "Switch to final workspace", false
+	case "zen-mode":
+		return "cmd:zen-mode", "Toggle Zen Writeroom", false
+	case "zen-fullscreen":
+		return "cmd:zen-fullscreen", "Toggle Zen Fullscreen", false
+	case "quit", "save-buffers-kill-terminal":
+		return "cmd:quit", "Exit Marlin", false
 	}
 	if strings.HasPrefix(cmd, "winum-select-window-") {
 		n := strings.TrimPrefix(cmd, "winum-select-window-")
@@ -162,14 +174,18 @@ func ProjectKeymapAndTransients(
 	}
 
 	for _, kb := range keymap {
-		if kb.Scope != schema.KeyScopeNormal && kb.Scope != "" {
+		if kb.Scope != schema.KeyScopeNormal && kb.Scope != schema.KeyScopeGlobal && kb.Scope != "" {
 			continue
 		}
-		if len(kb.Sequence) < 2 || strings.TrimSpace(kb.Sequence[0]) != "SPC" {
+		if len(kb.Sequence) < 2 {
+			continue
+		}
+		root := strings.TrimSpace(kb.Sequence[0])
+		if root != "SPC" && root != "C-x" && root != "C-c" && root != "C-h" {
 			continue
 		}
 		// Skip internal Scheme keypad modifier expansions (SPC c ... / SPC m ...).
-		if len(kb.Sequence) >= 3 && (kb.Sequence[1] == "c" || kb.Sequence[1] == "m") {
+		if root == "SPC" && len(kb.Sequence) >= 3 && (kb.Sequence[1] == "c" || kb.Sequence[1] == "m") {
 			continue
 		}
 		cmd := strings.TrimSpace(kb.CommandName)
@@ -269,11 +285,21 @@ func inferColumn(prefix, key, cmd string) string {
 			return "Popups"
 		}
 		return "Splits"
-	case "SPC TAB":
+	case "SPC TAB", "C-x t":
 		if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
 			return "Jump"
 		}
 		return "Manage"
+	case "C-x":
+		if key == "0" || key == "1" || key == "2" || key == "3" || key == "o" || key == "O" || key == "+" {
+			return "Windows"
+		}
+		if key == "b" || key == "p" {
+			return "Buffers"
+		}
+		return "Emacs"
+	case "C-c", "C-h", "C-x w":
+		return "Emacs"
 	default:
 		return "Scheme"
 	}

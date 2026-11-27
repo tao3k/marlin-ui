@@ -64,6 +64,8 @@ type Config struct {
 	OnReloadThemeBundle func() appconfig.UIThemeBundle
 	OnGlassChanged      func(enabled bool)
 	OnThemeChanged      func(isLight bool)
+	OnZenModeChanged    func(writeroom, fullscreen bool)
+	OnQuit              func()
 	RoomStats           func() (done, total, onlineAgents, totalAgents int)
 	RoomTasks           func() []widgets.TaskItem
 	OnAddTask           func(title string) error
@@ -72,6 +74,18 @@ type Config struct {
 	OnApplyFeatures     func(spec string)
 	Invalidate          func()
 }
+
+// ZenStyle selects Doom Emacs `:ui zen` presentation mode:
+//   - ZenOff: normal Emacs workbench chrome & sidebars
+//   - ZenWriteroom (SPC t z): centered focus / writeroom-mode without OS fullscreen
+//   - ZenFullscreen (SPC t Z): centered focus / writeroom-mode + native OS fullscreen
+type ZenStyle uint8
+
+const (
+	ZenOff ZenStyle = iota
+	ZenWriteroom
+	ZenFullscreen
+)
 
 // Frame owns the top-level Emacs Frame state and GPU ui.View entry point.
 type Frame struct {
@@ -102,6 +116,7 @@ type Frame struct {
 	assembledSurface   uiframework.AssembledSurface
 	uiModules          widgets.Modules
 	zenMode         bool
+	zenStyle        ZenStyle
 	railPinned      bool
 	dashPromptDraft   string
 	dashTaskDraft     string
@@ -146,6 +161,8 @@ type Frame struct {
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)
 	onThemeChanged      func(isLight bool)
+	onZenModeChanged    func(writeroom, fullscreen bool)
+	onQuit              func()
 	refocusFrame        atomic.Bool
 	inView              atomic.Bool
 	roomStatsFn         func() (done, total, onlineAgents, totalAgents int)
@@ -190,6 +207,8 @@ func New(cfg Config) *Frame {
 		onReloadThemeBundle: cfg.OnReloadThemeBundle,
 		onGlassChanged:      cfg.OnGlassChanged,
 		onThemeChanged:      cfg.OnThemeChanged,
+		onZenModeChanged:    cfg.OnZenModeChanged,
+		onQuit:              cfg.OnQuit,
 		roomStatsFn:         cfg.RoomStats,
 		roomTasksFn:         cfg.RoomTasks,
 		onAddTaskFn:         cfg.OnAddTask,
@@ -392,25 +411,68 @@ func (f *Frame) SelectFeature(fid string) {
 	f.requestFrame()
 }
 
-// ToggleZenMode switches immersive Zen Mode (hides sort-tab, doom-modeline, and
-// resting echo bar so the Bento widget desktop fills the entire window).
+// ToggleZenMode toggles Doom Emacs `:ui zen` Writeroom Mode (SPC t z):
+// centered focus column (hiding tabs, modeline, and peripheral chat rails)
+// without forcing OS fullscreen. Exiting from ZenFullscreen restores normal mode.
 func (f *Frame) ToggleZenMode() {
 	f.mu.Lock()
-	f.zenMode = !f.zenMode
-	on := f.zenMode
+	if f.zenStyle == ZenOff {
+		f.zenStyle = ZenWriteroom
+	} else {
+		f.zenStyle = ZenOff
+	}
+	f.zenMode = f.zenStyle != ZenOff
+	style := f.zenStyle
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	if f.onZenModeChanged != nil {
+		f.onZenModeChanged(style != ZenOff, style == ZenFullscreen)
+	}
 	f.refocusFrame.Store(true)
-	if on {
-		f.Echo("Zen Mode enabled (SPC t z to restore chrome)")
+	if style == ZenWriteroom {
+		f.Echo("Zen Writeroom enabled (centered focus · SPC t z to exit, SPC t Z fullscreen)")
 	} else {
 		f.Echo("Zen Mode disabled")
 	}
 }
 
-// ZenMode reports whether immersive Zen Mode is currently active.
+// ToggleZenFullscreen toggles Doom Emacs `+zen/toggle-fullscreen` (SPC t Z):
+// Writeroom centered focus combined with native OS fullscreen.
+func (f *Frame) ToggleZenFullscreen() {
+	f.mu.Lock()
+	if f.zenStyle == ZenFullscreen {
+		f.zenStyle = ZenOff
+	} else {
+		f.zenStyle = ZenFullscreen
+	}
+	f.zenMode = f.zenStyle != ZenOff
+	style := f.zenStyle
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	if f.onZenModeChanged != nil {
+		f.onZenModeChanged(style != ZenOff, style == ZenFullscreen)
+	}
+	f.refocusFrame.Store(true)
+	if style == ZenFullscreen {
+		f.Echo("Zen Fullscreen enabled (writeroom + fullscreen · SPC t Z to exit)")
+	} else {
+		f.Echo("Zen Fullscreen disabled")
+	}
+}
+
+// ZenMode reports whether immersive Zen Mode (Writeroom or Fullscreen) is active.
 func (f *Frame) ZenMode() bool {
 	return f.loadSnapshot().ZenMode
+}
+
+// ZenFullscreen reports whether Zen Fullscreen mode is currently active.
+func (f *Frame) ZenFullscreen() bool {
+	return f.loadSnapshot().ZenStyle == ZenFullscreen
+}
+
+// CurrentZenStyle returns the active ZenStyle (ZenOff, ZenWriteroom, or ZenFullscreen).
+func (f *Frame) CurrentZenStyle() ZenStyle {
+	return f.loadSnapshot().ZenStyle
 }
 
 // ToggleGlass hot-swaps the optional GPU Liquid Glass surface module via
@@ -1086,6 +1148,7 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 		OnOpenThemeSwitch:    f.OpenThemeSwitch,
 		OnOpenHelp:           func() { f.SelectBuffer(buffer.Help) },
 		OnOpenSettings:       f.OpenSettings,
+		OnSelectWindowNumber: f.SelectWindowNumber,
 		OnStepCandidate: func(delta int) {
 			if f.miniState.Mode() == minibuffer.ModeHelm && f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.HelmSearch != nil {
 				f.Adaptive.Desktop.HelmSearch.Engine.MoveSelection(delta)

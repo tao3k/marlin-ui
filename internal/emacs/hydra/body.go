@@ -12,7 +12,11 @@
 // Declared in dev/sysml/emacs-workbench.sysml as MUI-EMACS-A09 (emacsHydra).
 package hydra
 
-import "github.com/egoist/mygo/ui"
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // ForeignPolicy defines what happens when an unbound key is pressed inside a Hydra.
 type ForeignPolicy uint8
@@ -79,7 +83,13 @@ func (b Body) MatchKey(c *ui.Context) (Head, bool) {
 // frame's keypress, claiming keys on scope so no focused descendant button can
 // hijack Space/keys while a Hydra menu is active.
 func (b Body) MatchKeyInScope(c *ui.Context, scope ui.Element) (Head, bool) {
-	if c == nil || c.FocusTakesText() {
+	if c == nil {
+		return Head{}, false
+	}
+	// Native Emacs Ctrl prefixes (C-x, C-c, C-h) intentionally remain active
+	// even in Insert mode while a text input has focus.
+	allowDuringText := strings.HasPrefix(b.Prefix, "C-")
+	if !allowDuringText && c.FocusTakesText() {
 		return Head{}, false
 	}
 	// Check modified heads (e.g. Shift+W, Shift+U, Shift+N, ~) before unmodified heads

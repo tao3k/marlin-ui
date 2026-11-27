@@ -94,21 +94,48 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 		toggleRxTag      string
 	)
 
+	writeroom := RoomWriteroom()
 	railW := float32(252)
 	if snap.ActiveThreadID != "" {
 		railW = 220
 	}
 
-	ui.Row(c.Key("bento-room-stage")).Fill().Background(canvas).Padding(14, 18).Gap(12).
-		AlignItems(ui.Stretch).Clip().Children(func() {
+	stage := ui.Row(c.Key("bento-room-stage")).Fill().Background(canvas).Padding(14, 18).Gap(12).
+		AlignItems(ui.Stretch).Clip()
+	if writeroom {
+		stage.Justify(ui.Center).Padding(18, 28)
+	}
+	stage.Children(func() {
 		// Left Column: Dual-tier Channels & Direct Bots + HUMANS / AI AGENTS Roster.
-		ui.Column(c.Key("bento-room-rail")).Width(railW).Shrink(0).Gap(12).AlignItems(ui.Stretch).Clip().Children(func() {
+		// Hidden in Doom Zen Writeroom mode for centered distraction-free focus!
+		if !writeroom {
+			ui.Column(c.Key("bento-room-rail")).Width(railW).Shrink(0).Gap(12).AlignItems(ui.Stretch).Clip().Children(func() {
 			// Dual-tier Channel Directory Card.
 			ui.Column(c.Key("bento-room-channels")).Radius(16).Background(panelBg).Border(1, hairline).
 				Padding(12).Gap(10).AlignItems(ui.Stretch).Children(func() {
 				ui.Column(c).Gap(3).AlignItems(ui.Stretch).Children(func() {
-					ui.Text(c, "CHANNELS").Font(theme.FontMono).FontSize(10).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).
-						Padding(0, 6, 3, 6).SingleLine()
+					ui.Row(c.Key("br-ch-header")).Padding(0, 6, 3, 6).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "CHANNELS").Font(theme.FontMono).FontSize(10).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).SingleLine()
+						ui.Spacer(c)
+						if snap.SyncLabel != "" {
+							syncTone := th.Success
+							switch snap.SyncMode {
+							case "cove-connecting":
+								syncTone = th.Warning
+							case "cove-auth-error":
+								syncTone = th.Danger
+							case "local":
+								syncTone = th.InkMuted
+							}
+							ui.Row(c.Key("br-cove-badge")).Height(18).Padding(0, 7).Gap(4).Radius(theme.RadiusPill).
+								Background(kit.WithAlpha(syncTone, 0.14)).
+								Border(1, kit.WithAlpha(syncTone, 0.28)).
+								AlignItems(ui.Center).Shrink(0).Children(func() {
+								ui.Box(c).Width(6).Height(6).Radius(3).Background(syncTone)
+								ui.Text(c, snap.SyncLabel).Font(theme.FontMono).FontSize(9.5).FontWeight(700).LetterSpacing(0.4).TextColor(syncTone).SingleLine()
+							})
+						}
+					})
 					for _, ch := range snap.Channels {
 						if ch.IsDM {
 							continue
@@ -229,10 +256,15 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 					})
 				})
 			})
-		})
+			})
+		}
 
 		// Main Center Stage: Unified Header + Segmented View (Timeline | Tasks | Pinned | Roles).
-		ui.Column(c.Key("bento-room-main")).Basis(0).Grow(1).MinWidth(0).Gap(12).AlignItems(ui.Stretch).Children(func() {
+		mainCol := ui.Column(c.Key("bento-room-main")).Basis(0).Grow(1).MinWidth(0).Gap(12).AlignItems(ui.Stretch)
+		if writeroom {
+			mainCol.MaxWidth(840)
+		}
+		mainCol.Children(func() {
 			prefix := "#"
 			if activeCh.IsDM {
 				prefix = "@"
@@ -248,15 +280,10 @@ func (m *bentoChatRoomModule) renderBentoAgentRoom(c *ui.Context, t *ui.Theme) {
 					theme.SFIcon(c, "number", 15, th.Accent, false)
 				}
 				ui.Text(c, prefix+activeCh.Name).Font(kit.FontDisplay).FontSize(15).FontWeight(700).TextColor(th.Ink).SingleLine()
-				if snap.SyncLabel != "" {
-					syncTone := th.Success
-					if snap.SyncMode == "cove-connecting" {
-						syncTone = th.Warning
-					} else if snap.SyncMode == "local" {
-						syncTone = th.Info
+				if writeroom {
+					if theme.ActionLink(c, "br-writeroom-exit", "Writeroom · Exit", th.Accent, th).Clicked() {
+						exitRoomWriteroom()
 					}
-					ui.Text(c, snap.SyncLabel).Font(theme.FontMono).FontSize(10).FontWeight(600).TextColor(syncTone).
-						Padding(2, 8).Radius(theme.RadiusPill).Background(kit.WithAlpha(syncTone, 0.14)).SingleLine()
 				}
 				if activeCh.Topic != "" {
 					ui.Text(c, activeCh.Topic).Font(kit.FontDisplay).FontSize(12).TextColor(th.InkMuted).

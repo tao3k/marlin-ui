@@ -379,6 +379,15 @@ func main() {
 					applyWindowGlass(emacsWin.UIModules().Glass, isLight)
 				}
 			},
+			OnZenModeChanged: func(writeroom, fullscreen bool) {
+				featurekit.SetRoomWriteroom(writeroom)
+				if win != nil {
+					win.SetFullScreen(fullscreen)
+				}
+			},
+			OnQuit: func() {
+				mygo.App.Quit()
+			},
 			RoomStats: func() (int, int, int, int) {
 				st := featurekit.AgentRoomStats()
 				return st.TasksDone, st.TasksTotal, st.AgentsOnline, st.AgentsTotal
@@ -399,6 +408,12 @@ func main() {
 		})
 
 		mygo.App.SetMenu(buildDesktopMenu(emacsWin, invalidate))
+		featurekit.SetRoomWriteroomExit(func() {
+			if emacsWin != nil {
+				emacsWin.ToggleZenMode()
+				invalidate()
+			}
+		})
 		tray = setupDesktopTray(emacsWin, focusWindow, invalidate)
 
 		initGlass := emacsWin.UIModules().Glass
