@@ -5,6 +5,7 @@
 package android_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -80,5 +81,40 @@ func TestAndroidMaterialShellSharesMobileContractAndThemeParity(t *testing.T) {
 	if len(shell.SchemeExtensions()) != 1 || len(shell.SchemeStatusItems()) != 1 {
 		t.Fatalf("expected 1 Scheme extension and 1 mobile-width status item on Android, got exts=%d status=%d",
 			len(shell.SchemeExtensions()), len(shell.SchemeStatusItems()))
+	}
+
+	// Verify all 5 Material 3 tabs render real shared views cleanly!
+	// 1. Rooms tab renders live channels + compact status badge.
+	shell.SelectTab(mobile.TabRooms)
+	tt.Frame()
+	if !tt.HasText("Agent Rooms") || !tt.HasText("#workspace") {
+		t.Fatalf("expected Android Rooms tab to render Agent Rooms + #workspace, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 2. Bento Home tab renders live Scheme UIExtensionRegion + mobile status item!
+	shell.SelectTab(mobile.TabHome)
+	tt.Frame()
+	if !tt.HasText("SCHEME EXTENSIONS") || !tt.HasText("Android Scheme Telemetry Ready") || !tt.HasText("main") {
+		t.Fatalf("expected Android Bento Home to render Scheme Extensions & status items, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 3. Chat tab renders sent prompts cleanly.
+	shell.SendPrompt("Hello from Android Material 3")
+	shell.SelectTab(mobile.TabChat)
+	tt.Frame()
+	if !tt.HasText("Hello from Android Material 3") {
+		t.Fatalf("expected Android Chat tab to render sent prompt, got %q", strings.Join(tt.Texts(), " | "))
+	}
+
+	// 4. Search & Style tabs render shared views cleanly.
+	shell.SelectTab(mobile.TabSearch)
+	tt.Frame()
+	if !tt.HasText("Search") {
+		t.Fatalf("expected Android Search tab header")
+	}
+	shell.SelectTab(mobile.TabSettings)
+	tt.Frame()
+	if !tt.HasText("THEME PACKS") || !tt.HasText("Deep Think") {
+		t.Fatalf("expected Android Style tab to render shared THEME PACKS & Deep Think, got %q", strings.Join(tt.Texts(), " | "))
 	}
 }

@@ -277,7 +277,8 @@ func (f *Frame) appendMountedPluginTabs(snap frameSnapshot, featBufs []tabs.Feat
 		p := snap.MountedPlugins[i]
 		featBufs = append(featBufs, tabs.FeatureTab{
 			ID:    "pkg:" + p.ID,
-			Title: "*" + p.Name + "*",
+			Title: strings.Trim(p.Name, "*"),
+			Group: "plugin",
 		})
 		if snap.ActivePluginID == p.ID {
 			cp := p

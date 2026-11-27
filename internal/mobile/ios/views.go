@@ -13,7 +13,6 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 
-	"github.com/tao3k/marlin-mygo/engine/promptgate"
 	"github.com/tao3k/marlin-mygo/engine/search"
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/kit"
@@ -23,6 +22,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/featurekit"
 	"github.com/tao3k/marlin-ui/internal/hostlink"
+	mob "github.com/tao3k/marlin-ui/internal/mobile"
 )
 
 // renderBentoHome renders an authentic iOS 26 WidgetKit × Control Center Bento
@@ -263,59 +263,17 @@ func (s *Shell) renderBentoHome(c *ui.Context, th theme.Theme, hasFloatingTabBar
 			})
 
 			// Row 5 (Optional): Live Scheme UIExtensionRegions + Mobile Status Items
-			// streamed over marlin.ui.v1 and rendered natively via runtime/mapper.
-			if len(schemeExts) > 0 || len(schemeStatus) > 0 {
-				ui.Column(c.Key("ios-bento-scheme-exts")).Padding(16, 16, 14, 16).Gap(10).Radius(24).
-					Background(widgetFill).Border(1, widgetHairline).AlignItems(ui.Stretch).Children(func() {
-					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-						sfIcon(c, "puzzlepiece.extension", 14, th.Accent, false)
-						ui.Text(c, "SCHEME EXTENSIONS").Font(theme.FontMono).FontSize(10.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).SingleLine()
-					})
-					if len(schemeStatus) > 0 {
-						ui.Row(c.Key("ios-scheme-status-row")).Gap(6).Wrap().AlignItems(ui.Center).Children(func() {
-							for _, st := range schemeStatus {
-								ui.Row(c.Key("ios-st-"+st.ID)).Padding(3, 8).Radius(theme.RadiusPill).
-									Background(kit.WithAlpha(th.SurfaceElevated, 0.72)).Children(func() {
-									ui.Text(c, st.Text).Font(theme.FontMono).FontSize(10.5).FontWeight(600).TextColor(th.Info).NoWrap()
-								})
-							}
-						})
+			// streamed over marlin.ui.v1 and rendered via shared internal/mobile.
+			mob.RenderSchemeExtensionsCard(
+				c, "ios", th, widgetFill, widgetHairline, 24,
+				activeModel, s.AppCfg.SessionID, schemeExts, schemeStatus,
+				func(name string) {
+					if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnCommandInvoke != nil {
+						s.Adaptive.Desktop.OnCommandInvoke(name)
 					}
-					mapCtx := mapper.Context{
-						WidthCols: 42,
-						Sheet:     th.Sheet,
-						Bindings: map[string]string{
-							"model":   activeModel,
-							"session": s.AppCfg.SessionID,
-							"theme":   th.Name,
-						},
-						OnCommand: func(name string) {
-							if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnCommandInvoke != nil {
-								s.Adaptive.Desktop.OnCommandInvoke(name)
-							}
-							s.invalidate()
-						},
-						OnAction: func(action, _ string) {
-							if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnCommandInvoke != nil {
-								s.Adaptive.Desktop.OnCommandInvoke(action)
-							}
-							s.invalidate()
-						},
-					}
-					for _, ext := range schemeExts {
-						lbl := strings.TrimSpace(ext.Label)
-						if lbl == "" {
-							lbl = ext.ID
-						}
-						ui.Column(c.Key("ios-scheme-ext-"+ext.ID)).Padding(10, 12).Gap(6).Radius(16).
-							Background(kit.WithAlpha(th.Canvas, 0.45)).Border(1, kit.WithAlpha(th.BorderSubtle, 0.50)).
-							AlignItems(ui.Stretch).Children(func() {
-							ui.Text(c, lbl).Font(theme.FontMono).FontSize(11).FontWeight(700).TextColor(th.Accent).SingleLine()
-							mapper.MapElement(c, ext.Content, th.ToMapperSkin(), mapCtx)
-						})
-					}
-				})
-			}
+					s.invalidate()
+				},
+			)
 		})
 	})
 }
@@ -589,59 +547,7 @@ func (s *Shell) renderGatesView(c *ui.Context, th theme.Theme, hasFloatingTabBar
 
 	ui.Scroll(c.Key("ios-gates-scroll")).Grow(1).MinWidth(0).MinHeight(0).Padding(4, 16, padBot, 16).Children(func() {
 		ui.Column(c.Key("ios-gates-col")).Gap(12).AlignItems(ui.Stretch).Children(func() {
-			if pg != nil && pg.Queue != nil {
-				if req, _, total, ok := pg.Queue.Active(); ok {
-					card := ui.Column(c.Key("ios-gate-card")).Padding(18).Gap(12).Radius(24).
-						Material(glass.Glass{Style: glass.Regular, Tint: kit.WithAlpha(th.SurfaceElevated, 0.38)}).
-						Shadow(0, 8, 24, -6, kit.WithAlpha(ui.RGB(0, 0, 0), 0.30))
-					if !c.Vibrancy() {
-						card.Border(1, kit.WithAlpha(th.Warning, 0.45))
-					}
-					card.Children(func() {
-						ui.Text(c, fmt.Sprintf("APPROVAL REQUIRED (%d)", total)).
-							Font(theme.FontMono).FontSize(10.5).FontWeight(700).TextColor(th.Warning).
-							SingleLine().Ellipsis("…").MinWidth(0).Clip()
-						ui.Text(c, req.Title).Font(kit.FontDisplay).FontSize(17).FontWeight(700).TextColor(th.Ink)
-						ui.Text(c, req.Prompt).Font(kit.FontDisplay).FontSize(13.5).LineHeight(1.48).TextColor(th.InkMuted)
-						ui.Row(c).Gap(10).Children(func() {
-							approve := theme.StyledButton(c, theme.ButtonSpec{
-								Key: "ios-gate-yes", Label: "Approve", Icon: theme.IconApprove, Variant: theme.BtnGlassProminent, Size: theme.BtnSizeLG, Tone: th.Success, Pill: true, FullWidth: true,
-							}, th)
-							if approve.Clicked() {
-								mygo.Haptics.Success()
-								if r, resp, err := pg.Queue.Resolve(req.ID, promptgate.PromptResponse{
-									PromptID: req.ID, Action: promptgate.ActionApproveOnce, IdempotencyKey: "ios-yes-" + req.ID,
-								}); err == nil && pg.OnResolve != nil {
-									pg.OnResolve(r, resp)
-								}
-								s.invalidate()
-							}
-							reject := theme.StyledButton(c, theme.ButtonSpec{
-								Key: "ios-gate-no", Label: "Reject", Icon: theme.IconReject, Variant: theme.BtnDestructive, Size: theme.BtnSizeLG, Tone: th.Danger, Pill: true, FullWidth: true,
-							}, th)
-							if reject.Clicked() {
-								mygo.Haptics.Warning()
-								if r, resp, err := pg.Queue.Resolve(req.ID, promptgate.PromptResponse{
-									PromptID: req.ID, Action: promptgate.ActionReject, IdempotencyKey: "ios-no-" + req.ID,
-								}); err == nil && pg.OnResolve != nil {
-									pg.OnResolve(r, resp)
-								}
-								s.invalidate()
-							}
-						})
-					})
-					return
-				}
-			}
-
-			ui.Column(c.Key("ios-gates-empty")).Padding(28, 16).Gap(8).Radius(24).AlignItems(ui.Center).
-				Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.36, 0.64)).
-				Border(1, kit.WithAlpha(ui.RGB(255, 255, 255), 0.08)).Children(func() {
-				sfIcon(c, "checkmark.shield", 30, th.Success, true)
-				ui.Text(c, "All Clear").Font(kit.FontDisplay).FontSize(17).FontWeight(700).TextColor(th.Ink)
-				ui.Text(c, "No pending tool or policy approvals from Marlin Core.").
-					Font(kit.FontDisplay).FontSize(13).TextColor(th.InkMuted)
-			})
+			mob.RenderGateReviewCard(c, "ios", th, pg, 24, s.invalidate)
 		})
 	})
 }
@@ -662,49 +568,8 @@ func (s *Shell) renderSettingsView(c *ui.Context, th theme.Theme, hasFloatingTab
 
 	ui.Scroll(c.Key("ios-settings-scroll")).Grow(1).MinWidth(0).MinHeight(0).Padding(4, 0, padBot, 0).Children(func() {
 		ui.Column(c.Key("ios-settings-col")).Gap(16).AlignItems(ui.Stretch).Children(func() {
-			// 1. Visual 2-Column Theme Swatch Bento Grid (iOS 26 Appearance Studio).
-			ui.Column(c.Key("ios-theme-grid-wrap")).Padding(0, 16).Gap(8).AlignItems(ui.Stretch).Children(func() {
-				ui.Text(c, "THEME PACKS").Font(theme.FontMono).FontSize(10.5).FontWeight(700).LetterSpacing(0.6).TextColor(th.InkMuted).SingleLine()
-				for i := 0; i < len(catalog); i += 2 {
-					ui.Row(c.Key(fmt.Sprintf("ios-th-row-%d", i))).Gap(10).AlignItems(ui.Stretch).Children(func() {
-						for j := i; j < i+2 && j < len(catalog); j++ {
-							pk := catalog[j]
-							active := pk.ID == th.ID
-							borderCol := kit.WithAlpha(ui.RGB(255, 255, 255), 0.10)
-							borderW := float32(1)
-							if active {
-								borderCol = th.Accent
-								borderW = 2
-							}
-							card := kit.ActionControl(ui.ButtonBase(c.Key("ios-th-"+pk.ID)).Label(pk.Name).
-								Basis(0).Grow(1).MinWidth(0).Padding(12).Radius(20).Gap(10).
-								Column().AlignItems(ui.Stretch).
-								Background(pk.Canvas).Border(borderW, borderCol))
-							card.Children(func() {
-								// Mini abstract window preview showing real theme tokens.
-								ui.Row(c).FillWidth().Height(36).Padding(6, 8).Gap(6).Radius(12).AlignItems(ui.Center).
-									Background(pk.SurfaceElevated).Children(func() {
-									ui.Box(c).Width(14).Height(14).Radius(7).Background(pk.Accent)
-									ui.Column(c).Basis(0).Grow(1).Gap(4).Children(func() {
-										ui.Box(c).FillWidth().Height(5).Radius(2.5).Background(kit.WithAlpha(pk.Ink, 0.72))
-										ui.Box(c).Width(38).Height(4).Radius(2).Background(kit.WithAlpha(pk.Info, 0.65))
-									})
-								})
-								ui.Row(c).AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-									ui.Text(c, pk.Name).Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(pk.Ink).
-										SingleLine().Ellipsis("…").MinWidth(0).Clip()
-									if active {
-										sfIcon(c, "checkmark.circle", 16, pk.Accent, true)
-									}
-								})
-							})
-							if card.Clicked() {
-								s.SetTheme(pk.ID)
-							}
-						}
-					})
-				}
-			})
+			// 1. Visual 2-Column Theme Swatch Bento Grid shared with Android.
+			mob.RenderThemeSwatchGrid(c, "ios", th, catalog, 20, s.SetTheme)
 
 			// 2. Liquid Glass Opacity Studio via native MyGo ui.Segmented.
 			ui.Column(c.Key("ios-set-glass-wrap")).Padding(0, 16).Gap(6).AlignItems(ui.Stretch).Children(func() {

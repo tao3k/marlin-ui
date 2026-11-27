@@ -34,6 +34,10 @@ func RenderPopup(c *ui.Context, body Body, th theme.Theme, onExit func()) {
 				ui.Text(c, body.Prefix+"-").Font(theme.FontMono).FontSize(theme.FontSizeMeta).FontWeight(700).TextColor(th.Accent).NoWrap()
 			})
 			ui.Text(c, body.Title).Font(kit.FontDisplay).FontSize(13).FontWeight(700).TextColor(th.Ink).NoWrap()
+			if body.Hint != "" {
+				ui.Text(c, "· "+body.Hint).Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted).
+					SingleLine().Ellipsis("…").MinWidth(0).Clip()
+			}
 			ui.Spacer(c)
 			if theme.ActionLink(c, "hydra-cancel", "C-g / ESC quit", th.InkMuted, th).Clicked() && onExit != nil {
 				onExit()
@@ -109,6 +113,12 @@ func renderHeadRow(c *ui.Context, key string, h Head, th theme.Theme) ui.Element
 		ui.Text(c, "→").Font(theme.FontMono).FontSize(11.5).TextColor(th.TabSeparator).NoWrap()
 		ui.Text(c, h.Label).Font(kit.FontDisplay).FontSize(theme.FontSizeUI).FontWeight(500).TextColor(labelCol).
 			Basis(0).Grow(1).SingleLine().Ellipsis("…").MinWidth(0).Clip()
+		if h.AltHint != "" {
+			ui.Text(c, h.AltHint).Font(theme.FontMono).FontSize(10).FontWeight(600).
+				TextColor(kit.WithAlpha(th.InkMuted, 0.85)).
+				Padding(1, 5).Radius(theme.RadiusSmall).
+				Background(kit.WithAlpha(th.SurfaceElevated, 0.45)).NoWrap().Shrink(0)
+		}
 	})
 	return row
 }

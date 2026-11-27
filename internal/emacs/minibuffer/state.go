@@ -33,12 +33,13 @@ const (
 	ModeWorkspaceCreate
 )
 
-// Candidate represents one Vertico completion candidate.
+// Candidate represents one Vertico / Marginalia completion candidate.
 type Candidate struct {
-	ID   string
-	Name string
-	Desc string
-	Run  func()
+	ID         string
+	Name       string
+	Desc       string
+	Annotation string // optional Marginalia right-aligned shortcut or metadata badge
+	Run        func()
 }
 
 // helmVisualFrame holds the last committed non-empty Helm render frame so

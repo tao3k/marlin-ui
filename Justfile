@@ -156,6 +156,9 @@ dev-room *args:
     cove_log="$tmp_dir/marlin-cove.log"
     cleanup() {
         kill "${COVE_PID:-}" "${APP_PID:-}" 2>/dev/null || true
+        if [ -n "${COVE_STAMP:-}" ]; then
+            rm -f "$COVE_STAMP"
+        fi
         rm -rf "$tmp_dir"
     }
     trap cleanup EXIT INT TERM
@@ -179,10 +182,28 @@ dev-room *args:
     cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
     cove_host="${cove_bind%:*}"
     cove_port="${cove_bind##*:}"
+    reuse_cove=0
+    stamp_file="/tmp/marlin-cove-${cove_port}.token"
     if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
         exec 3>&- 3<&-
-        echo "[dev-room] reusing live marlin-cove at $cove_bind (shared room across Desktop & Mobile)"
-    else
+        if [ -f "$stamp_file" ] && [ "$(cat "$stamp_file" 2>/dev/null)" = "$cove_token" ]; then
+            reuse_cove=1
+            echo "[dev-room] reusing live marlin-cove at $cove_bind (matching token; shared across Desktop & Mobile)"
+        else
+            echo "[dev-room] warning: $cove_bind is occupied by an older/mismatched-token listener; picking a clean local port" >&2
+            for cand_port in 18091 18092 18093 18094 18095 18096 18097 18098 18099; do
+                if ! (exec 3<>"/dev/tcp/$cove_host/$cand_port") 2>/dev/null; then
+                    cove_port="$cand_port"
+                    cove_bind="${cove_host}:${cove_port}"
+                    stamp_file="/tmp/marlin-cove-${cove_port}.token"
+                    break
+                else
+                    exec 3>&- 3<&-
+                fi
+            done
+        fi
+    fi
+    if [ "$reuse_cove" -eq 0 ]; then
         MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
         MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
         MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
@@ -199,6 +220,8 @@ dev-room *args:
             if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
                 exec 3>&- 3<&-
                 cove_ready=1
+                printf '%s' "$cove_token" >"$stamp_file"
+                COVE_STAMP="$stamp_file"
                 break
             fi
             sleep 0.1
@@ -251,6 +274,9 @@ dev-room-ios *args:
     cove_log="$tmp_dir/marlin-cove.log"
     cleanup() {
         kill "${COVE_PID:-}" "${APP_PID:-}" 2>/dev/null || true
+        if [ -n "${COVE_STAMP:-}" ]; then
+            rm -f "$COVE_STAMP"
+        fi
         rm -rf "$tmp_dir"
     }
     trap cleanup EXIT INT TERM
@@ -273,10 +299,35 @@ dev-room-ios *args:
     cove_bind="${MARLIN_COVE_RELAY_GRPC_BIND:-127.0.0.1:18090}"
     cove_host="${cove_bind%:*}"
     cove_port="${cove_bind##*:}"
+    reuse_cove=0
+    stamp_file="/tmp/marlin-cove-${cove_port}.token"
     if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
         exec 3>&- 3<&-
-        echo "[dev-room-ios] reusing live marlin-cove at $cove_bind (shared room across Desktop & Mobile)"
-    else
+        if [ -f "$stamp_file" ] && [ "$(cat "$stamp_file" 2>/dev/null)" = "$cove_token" ]; then
+            reuse_cove=1
+            echo "[dev-room-ios] reusing live marlin-cove at $cove_bind (matching token; shared across Desktop & Mobile)"
+        else
+            for cand_port in 18091 18092 18093 18094 18095 18096 18097 18098 18099; do
+                cand_stamp="/tmp/marlin-cove-${cand_port}.token"
+                if (exec 3<>"/dev/tcp/$cove_host/$cand_port") 2>/dev/null; then
+                    exec 3>&- 3<&-
+                    if [ -f "$cand_stamp" ] && [ "$(cat "$cand_stamp" 2>/dev/null)" = "$cove_token" ]; then
+                        cove_port="$cand_port"
+                        cove_bind="${cove_host}:${cove_port}"
+                        reuse_cove=1
+                        echo "[dev-room-ios] reusing live marlin-cove at $cove_bind (matching token; shared across Desktop & Mobile)"
+                        break
+                    fi
+                else
+                    cove_port="$cand_port"
+                    cove_bind="${cove_host}:${cove_port}"
+                    stamp_file="$cand_stamp"
+                    break
+                fi
+            done
+        fi
+    fi
+    if [ "$reuse_cove" -eq 0 ]; then
         MARLIN_COVE_RELAY_GRPC_BIND="$cove_bind" \
         MARLIN_COVE_RELAY_AUTH_TOKEN="$cove_token" \
         MARLIN_COVE_MARLIN_GATEWAY_ENDPOINT="http://$app_addr" \
@@ -291,6 +342,8 @@ dev-room-ios *args:
             fi
             if (exec 3<>"/dev/tcp/$cove_host/$cove_port") 2>/dev/null; then
                 exec 3>&- 3<&-
+                printf '%s' "$cove_token" >"$stamp_file"
+                COVE_STAMP="$stamp_file"
                 break
             fi
             sleep 0.1

@@ -73,6 +73,14 @@ func ActionLink(c *ui.Context, key, label string, tone ui.Color, th Theme) ui.El
 // VerticoRow renders one soft-rounded Vertico / Helm candidate row styled by
 // `.vertico-row`, `.vertico-row.selected`, `.vertico-row:hover`, and `.match-hit`.
 func VerticoRow(c *ui.Context, key, name, desc, query string, nameWidth float32, selected bool, th Theme) ui.Element {
+	return VerticoRowAnnotated(c, key, name, desc, "", query, nameWidth, selected, th)
+}
+
+// VerticoRowAnnotated renders a Vertico / Marginalia candidate row with an
+// optional right-aligned monospace annotation pill (e.g., live keybindings
+// `SPC w v · C-x 3` or window badges `win #2`) without shifting the title or
+// description columns.
+func VerticoRowAnnotated(c *ui.Context, key, name, desc, annotation, query string, nameWidth float32, selected bool, th Theme) ui.Element {
 	if nameWidth <= 0 {
 		nameWidth = 240
 	}
@@ -116,6 +124,22 @@ func VerticoRow(c *ui.Context, key, name, desc, query string, nameWidth float32,
 		renderHighlightedRuns(c, name, query, FontSizeUI, weight, nameCol, nameWidth, false, th)
 		if desc != "" {
 			renderHighlightedRuns(c, desc, query, FontSizeMeta, 400, th.InkMuted, 0, true, th)
+		} else if annotation != "" {
+			ui.Spacer(c)
+		}
+		if annotation != "" {
+			pillFg := th.InkMuted
+			pillBg := GlassTone(c, th.SurfaceElevated, th, 0.36, 0.62)
+			pillRim := kit.WithAlpha(th.BorderSubtle, 0.55)
+			if selected {
+				pillFg = th.Accent
+				pillBg = kit.WithAlpha(th.Accent, 0.14)
+				pillRim = kit.WithAlpha(th.Accent, 0.34)
+			}
+			ui.Row(c.Key(key+"-marg")).Padding(2, 8).Radius(RadiusSmall).Shrink(0).
+				Background(pillBg).Border(1, pillRim).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, annotation).Font(FontMono).FontSize(10.5).FontWeight(600).TextColor(pillFg).NoWrap()
+			})
 		}
 	})
 	return row

@@ -27,6 +27,7 @@ type MappedHydra struct {
 	ID     string
 	Prefix string
 	Title  string
+	Hint   string
 	Heads  []MappedHead
 }
 
@@ -237,6 +238,7 @@ func ProjectKeymapAndTransients(
 			ID:     tr.ID,
 			Prefix: pref,
 			Title:  fmt.Sprintf("Hydra · %s", tr.ID),
+			Hint:   extractHintText(tr.Hint),
 		}
 		for _, th := range tr.Heads {
 			action, defLbl, _ := ResolveSchemeAction(th.CommandName)
@@ -262,6 +264,30 @@ func ProjectKeymapAndTransients(
 	}
 
 	return out
+}
+
+func extractHintText(el schema.UIElement) string {
+	if t := strings.TrimSpace(el.Title); t != "" {
+		return t
+	}
+	var sb strings.Builder
+	for _, sp := range el.Spans {
+		if t := strings.TrimSpace(sp.Text); t != "" {
+			if sb.Len() > 0 {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(t)
+		}
+	}
+	if sb.Len() > 0 {
+		return sb.String()
+	}
+	for _, ch := range el.Children {
+		if t := extractHintText(ch); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 func inferColumn(prefix, key, cmd string) string {

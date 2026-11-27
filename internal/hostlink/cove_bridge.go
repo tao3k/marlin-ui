@@ -579,6 +579,9 @@ func (b *CoveRelayBridge) PostMessage(channelID, body, threadRootID string) erro
 			b.mu.Lock()
 			delete(b.thinkingBots, botID)
 			if err == nil {
+				if threadRootID == "" && !strings.HasPrefix(ch, "dm:") && resp.AgentReply.ThreadRootID == "" && resp.UserMessage.ID != "" {
+					resp.AgentReply.ThreadRootID = resp.UserMessage.ID
+				}
 				b.upsertMessageLocked(resp.UserMessage)
 				b.upsertMessageLocked(resp.AgentReply)
 			} else {

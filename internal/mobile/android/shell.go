@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-mygo/pkg/schema"
 	"github.com/tao3k/marlin-mygo/runtime/mapper"
@@ -56,8 +55,12 @@ type Shell struct {
 	schemeCmds       []uiframework.MappedCommand
 	activeModel      string
 	activeTab        mobile.Tab
-	onPrefsChanged func(appconfig.UserPrefs)
-	invalidate     func()
+	chatDraft        string
+	roomDraft        string
+	searchQuery      string
+	deepThink        bool
+	onPrefsChanged   func(appconfig.UserPrefs)
+	invalidate       func()
 }
 
 // New constructs an Android Material 3 companion Shell aligned with Desktop
@@ -194,13 +197,73 @@ func (s *Shell) SetTheme(id string) {
 	s.invalidate()
 }
 
-// View paints the Android Material 3 companion surface.
-func (s *Shell) View(c *ui.Context) {
+// ActiveTab returns the currently selected Material 3 destination tab.
+func (s *Shell) ActiveTab() mobile.Tab {
 	s.mu.Lock()
-	th := s.Theme
-	s.mu.Unlock()
-	theme.ApplyToMyGo(c, th)
-	if s.Adaptive != nil {
-		s.Adaptive.View(c)
+	defer s.mu.Unlock()
+	return s.activeTab
+}
+
+// SendPrompt dispatches a user prompt to the unified Desktop/Mobile transcript
+// and switches focus to Chat.
+func (s *Shell) SendPrompt(prompt string) {
+	txt := strings.TrimSpace(prompt)
+	if txt == "" {
+		return
 	}
+	if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnSendPrompt != nil {
+		s.Adaptive.Desktop.OnSendPrompt(txt)
+	} else if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.Transcript != nil {
+		s.Adaptive.Desktop.Transcript.AppendUser(txt)
+	}
+	s.invalidate()
+}
+
+// NewChat starts a fresh conversation session.
+func (s *Shell) NewChat() {
+	if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.OnNewSession != nil {
+		s.Adaptive.Desktop.OnNewSession()
+	}
+	s.SelectTab(mobile.TabChat)
+	s.invalidate()
+}
+
+func (s *Shell) toggleDeepThink() {
+	s.mu.Lock()
+	s.deepThink = !s.deepThink
+	on := s.deepThink
+	s.mu.Unlock()
+	if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.Transcript != nil {
+		s.Adaptive.Desktop.Transcript.SetDeepThink(on)
+	}
+	s.invalidate()
+}
+
+func (s *Shell) setDeepThink(on bool) {
+	s.mu.Lock()
+	s.deepThink = on
+	s.mu.Unlock()
+	if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.Transcript != nil {
+		s.Adaptive.Desktop.Transcript.SetDeepThink(on)
+	}
+	s.invalidate()
+}
+
+func (s *Shell) currentModelLabelLocked() string {
+	if s.activeModel != "" {
+		return s.activeModel
+	}
+	if s.AppCfg.ModelCfg.Loaded {
+		return s.AppCfg.ModelCfg.SummaryLabel()
+	}
+	return "marlin-core"
+}
+
+func (s *Shell) pendingGateCount() int {
+	if s.Adaptive != nil && s.Adaptive.Desktop != nil && s.Adaptive.Desktop.PromptGate != nil && s.Adaptive.Desktop.PromptGate.Queue != nil {
+		if _, _, total, ok := s.Adaptive.Desktop.PromptGate.Queue.Active(); ok {
+			return total
+		}
+	}
+	return 0
 }

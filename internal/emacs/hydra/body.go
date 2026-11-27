@@ -32,6 +32,7 @@ type Head struct {
 	KeyCode  ui.Key       // matching MyGo keyboard key
 	KeyMods  ui.Modifiers // optional modifiers (e.g. ui.Shift for "W", "U", "N", "~")
 	Label    string       // short description (e.g. "+buffers", "Helm search")
+	AltHint  string       // optional cross-hint chord (e.g. "C-x 3" next to "SPC w v")
 	Column   string       // visual column heading (e.g. "Commands", "Buffers", "Theme")
 	Exit     bool         // true = close hydra after running; false = repeatable red head
 	IsPrefix bool         // true = transitions to a nested Hydra prefix
@@ -43,6 +44,7 @@ type Body struct {
 	ID      string
 	Prefix  string // e.g. "SPC", "SPC b", "SPC t", "SPC m"
 	Title   string // e.g. "Doom Leader", "+buffers", "+themes"
+	Hint    string // optional Scheme UITransient.Hint or contextual footer note
 	Foreign ForeignPolicy
 	Heads   []Head
 }

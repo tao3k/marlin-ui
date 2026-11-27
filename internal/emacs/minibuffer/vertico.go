@@ -39,7 +39,7 @@ func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items 
 		}
 		for i := 0; i < limit; i++ {
 			it := items[i]
-			if theme.VerticoRow(c, "vrow-"+it.ID, it.Name, it.Desc, query, 240, i == sel, th).Clicked() {
+			if theme.VerticoRowAnnotated(c, "vrow-"+it.ID, it.Name, it.Desc, it.Annotation, query, 240, i == sel, th).Clicked() {
 				if it.Run != nil {
 					it.Run()
 				}
@@ -49,7 +49,8 @@ func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items 
 	})
 }
 
-// FilterCandidates performs case-insensitive substring matching across name and description.
+// FilterCandidates performs case-insensitive substring matching across name,
+// description, and Marginalia keybinding annotations.
 func FilterCandidates(all []Candidate, query string) []Candidate {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
@@ -57,7 +58,7 @@ func FilterCandidates(all []Candidate, query string) []Candidate {
 	}
 	var out []Candidate
 	for _, it := range all {
-		if strings.Contains(strings.ToLower(it.Name+" "+it.Desc), q) {
+		if strings.Contains(strings.ToLower(it.Name+" "+it.Desc+" "+it.Annotation), q) {
 			out = append(out, it)
 		}
 	}

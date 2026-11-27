@@ -556,12 +556,15 @@ func (m *bentoChatRoomModule) postMessage(channelID, body, threadRootID string) 
 	if channelID == "" {
 		channelID = snap.ActiveChannelID
 	}
-	if _, err := ctrl.PostMessage(channelID, snap.CurrentActorID, txt, threadRootID); err != nil {
+	posted, err := ctrl.PostMessage(channelID, snap.CurrentActorID, txt, threadRootID)
+	if err != nil {
 		return err
 	}
 
 	// Group channel routing rule (Anti-Loop Guardrail: human-authored only,
 	// explicit @mention triggers targeted bots, capped at 2 bots per turn).
+	// Replies to top-level channel @mentions automatically nest in a Thread
+	// under the triggering user message so the main channel stays uncluttered.
 	mentions := extractRoomMentions(txt)
 	if len(mentions) > 0 {
 		chName := channelID
@@ -591,7 +594,12 @@ func (m *bentoChatRoomModule) postMessage(channelID, body, threadRootID string) 
 			}
 		}
 		if len(targets) > 0 {
-			m.dispatchBotReplies(channelID, chName, false, threadRootID, txt, targets, snap)
+			replyThreadID := threadRootID
+			if replyThreadID == "" {
+				replyThreadID = posted.ID
+			}
+			freshSnap := ctrl.Snapshot()
+			m.dispatchBotReplies(channelID, chName, false, replyThreadID, txt, targets, freshSnap)
 		}
 	}
 	return nil

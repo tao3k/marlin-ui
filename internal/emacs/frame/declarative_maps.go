@@ -32,6 +32,7 @@ type declarativeHydraDef struct {
 	ID     string
 	Prefix string
 	Title  string
+	Hint   string
 	Heads  []declarativeHeadDef
 }
 
@@ -91,6 +92,7 @@ func projectMappedHydras(mapped map[string]uiframework.MappedHydra) map[string]d
 			ID:     mh.ID,
 			Prefix: mh.Prefix,
 			Title:  mh.Title,
+			Hint:   mh.Hint,
 			Heads:  make([]declarativeHeadDef, 0, len(mh.Heads)),
 		}
 		for _, hd := range mh.Heads {
@@ -235,6 +237,10 @@ func parseKeymapsTOML(raw string) (map[string]declarativeHydraDef, error) {
 }
 
 func (f *Frame) materializeHydra(def declarativeHydraDef) hydra.Body {
+	f.mu.Lock()
+	allHydras := f.tomlHydras
+	f.mu.Unlock()
+
 	heads := make([]hydra.Head, 0, len(def.Heads))
 	for _, h := range def.Heads {
 		act := h.Action
@@ -242,11 +248,13 @@ func (f *Frame) materializeHydra(def declarativeHydraDef) hydra.Body {
 		if act != "" {
 			run = func() { f.dispatchWidgetAction(act) }
 		}
+		alt := crossHintForAction(allHydras, def.Prefix, act)
 		heads = append(heads, hydra.Head{
 			Key:      h.Key,
 			KeyCode:  h.KeyCode,
 			KeyMods:  h.KeyMods,
 			Label:    h.Label,
+			AltHint:  alt,
 			Column:   h.Column,
 			Exit:     h.Exit,
 			IsPrefix: h.IsPrefix,
@@ -257,8 +265,76 @@ func (f *Frame) materializeHydra(def declarativeHydraDef) hydra.Body {
 		ID:     def.ID,
 		Prefix: def.Prefix,
 		Title:  def.Title,
+		Hint:   def.Hint,
 		Heads:  heads,
 	}
+}
+
+// crossHintForAction derives the paired shortcut from the opposite keymap family
+// (native Emacs C-x/C-c/C-h when viewing a Doom SPC menu, or Doom SPC when
+// viewing a native Emacs menu) directly from the live effective keymaps.
+func crossHintForAction(all map[string]declarativeHydraDef, currentPrefix, action string) string {
+	if action == "" || strings.HasPrefix(action, "hydra:") {
+		return ""
+	}
+	wantNative := strings.HasPrefix(currentPrefix, "SPC")
+	wantDoom := strings.HasPrefix(currentPrefix, "C-")
+	if !wantNative && !wantDoom {
+		return ""
+	}
+	// Deterministic check order for common prefixes.
+	prefOrder := []string{"C-x", "C-x t", "C-x w", "C-c", "C-h", "SPC", "SPC w", "SPC b", "SPC TAB", "SPC t", "SPC m", "SPC q"}
+	seen := make(map[string]bool, len(prefOrder))
+	check := func(pref string, def declarativeHydraDef) string {
+		if pref == currentPrefix {
+			return ""
+		}
+		if wantNative && !strings.HasPrefix(pref, "C-") {
+			return ""
+		}
+		if wantDoom && !strings.HasPrefix(pref, "SPC") {
+			return ""
+		}
+		for _, hd := range def.Heads {
+			if hd.Action == action {
+				return pref + " " + hd.Key
+			}
+		}
+		return ""
+	}
+	for _, pref := range prefOrder {
+		seen[pref] = true
+		if def, ok := all[pref]; ok {
+			if hit := check(pref, def); hit != "" {
+				return hit
+			}
+		}
+	}
+	for pref, def := range all {
+		if seen[pref] {
+			continue
+		}
+		if hit := check(pref, def); hit != "" {
+			return hit
+		}
+	}
+	// Direct global Emacs shortcuts not living under a prefix hydra.
+	if wantNative {
+		switch action {
+		case "cmd:mx":
+			return "M-x"
+		case "cmd:helm":
+			return "C-s"
+		default:
+			if strings.HasPrefix(action, "cmd:win-") && len(action) == len("cmd:win-1") {
+				d := action[len(action)-1]
+				if d >= '1' && d <= '9' {
+					return "M-" + string(d)
+				}
+			}
+		}
+	}
+	return ""
 }
 
 type tomlArraySection struct {

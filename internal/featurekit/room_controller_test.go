@@ -5,8 +5,11 @@
 package featurekit_test
 
 import (
+	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tao3k/marlin-mygo/runtime/mygoshell"
 
@@ -103,4 +106,68 @@ func TestRoomControllerZeroBlankScreenFallbackAndSeamlessPromotion(t *testing.T)
 	if notifications.Load() < 3 {
 		t.Fatalf("expected SubscribeRoomChanged notifications on lifecycle transitions, got %d", notifications.Load())
 	}
+}
+
+func TestChannelMentionRepliesThreadUnderUserMessage(t *testing.T) {
+	sh := mygoshell.NewAdaptiveShell(mygoshell.AdaptiveShellConfig{
+		BrandTitle: "Marlin",
+		FormFactor: mygoshell.FormFactorDesktop,
+	})
+	_, _, _ = featurekit.Mount("chatroom", sh, nil, nil)
+	featurekit.ClearRemoteRoomController(nil)
+
+	done := make(chan string, 1)
+	featurekit.SetRoomAgentResponder(func(_ context.Context, req featurekit.RoomAgentRequest) (string, error) {
+		done <- req.ThreadRootID
+		return "Audit ready in thread.", nil
+	})
+	defer featurekit.SetRoomAgentResponder(nil)
+
+	before := featurekit.AgentRoomSnapshot()
+	if err := featurekit.PostAgentRoomMessage(before.ActiveChannelID, "@reviewer hello", ""); err != nil {
+		t.Fatalf("PostAgentRoomMessage failed: %v", err)
+	}
+
+	var gotThreadRoot string
+	select {
+	case gotThreadRoot = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for @reviewer responder")
+	}
+	if strings.TrimSpace(gotThreadRoot) == "" {
+		t.Fatalf("expected @reviewer channel mention to set non-empty ThreadRootID on bot reply")
+	}
+
+	// Wait briefly for appendBotReply to commit and verify the reply is nested
+	// under the user's message thread (ThreadCount == 1) rather than top-level.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap := featurekit.AgentRoomSnapshot()
+		for _, m := range snap.Messages {
+			if m.ID == gotThreadRoot && m.ThreadCount >= 1 {
+				if err := featurekit.OpenAgentRoomThread(m.ID); err != nil {
+					t.Fatalf("OpenAgentRoomThread failed: %v", err)
+				}
+				tsnap := featurekit.AgentRoomSnapshot()
+				foundReply := false
+				for _, tm := range tsnap.ThreadMessages {
+					if strings.Contains(tm.Body, "Audit ready in thread.") {
+						foundReply = true
+						break
+					}
+				}
+				if !foundReply {
+					t.Fatalf("expected Reviewer reply inside ThreadMessages, got %+v", tsnap.ThreadMessages)
+				}
+				for _, top := range tsnap.Messages {
+					if strings.Contains(top.Body, "Audit ready in thread.") {
+						t.Fatalf("Reviewer reply must NOT appear as top-level channel message")
+					}
+				}
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected user message %q to receive threaded reply (ThreadCount >= 1)", gotThreadRoot)
 }
