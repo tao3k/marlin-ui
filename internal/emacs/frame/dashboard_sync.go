@@ -640,6 +640,9 @@ func (f *Frame) dispatchWidgetAction(action string) {
 			}
 		}
 	default:
+		if f.dispatchModeAction(act) {
+			return
+		}
 		f.Echo("Widget action: " + act)
 	}
 }

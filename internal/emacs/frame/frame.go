@@ -134,6 +134,10 @@ type Frame struct {
 	miniState      *minibuffer.State
 	modeReg        *modes.Registry
 	bufModes       map[buffer.ID]modes.BufferState
+	chatSessions   map[buffer.ID]string
+	activeSpanCode string
+	activeSpanLang string
+	helpData       *buffer.HelpIntrospectionData
 	chatSeq        int
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
@@ -151,6 +155,7 @@ type Frame struct {
 	snapStore      *async.SnapshotStore[frameSnapshot]
 	reloadLane     *async.FencedLane[struct{}, appconfig.UIThemeBundle]
 	wbSyncLane     *async.FencedLane[schema.UIWorkbenchSnapshot, schema.UIWorkbenchSnapshot]
+	modesSyncLane  *async.FencedLane[struct{}, []modes.ModeRecord]
 	pacer          *async.FramePacer
 	pkgStore       *marketplace.PackageStore
 	pkgRefreshLane *async.FencedLane[struct{}, marketplace.PackageStoreSnapshot]

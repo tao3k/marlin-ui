@@ -136,7 +136,7 @@ func DefaultRegistry() *Registry {
 		},
 		{
 			ID: "marlin-tabulated-mode", Title: "Tabulated-List", Parent: "marlin-special-mode", ReadOnly: true,
-			DisplayAction:     DisplayPopupBottom,
+			DisplayAction:     DisplayReuseWindow,
 			DefaultMinorModes: []string{"meow-normal-mode", "read-only-mode"},
 			ModelineSegments:  []string{"key-mode", "buffer-name", "major-mode", "row-count", "activity", "gate-badge"},
 		},
@@ -276,6 +276,7 @@ func DefaultRegistry() *Registry {
 		{Prefix: "feature:webisland", MajorMode: "marlin-workflow-mode", Creatable: false, CreateLabel: "Workflow Canvas", CreateAction: "feature:webisland"},
 		{Prefix: "*Dashboard*", MajorMode: "marlin-dashboard-mode", Creatable: true, CreateLabel: "Dashboard (*Dashboard*)", CreateAction: "buffer:*Dashboard*"},
 		{Prefix: "*Sessions*", MajorMode: "marlin-tabulated-mode", Creatable: true, CreateLabel: "Sessions (*Sessions*)", CreateAction: "buffer:*Sessions*"},
+		{Prefix: "*Ibuffer*", MajorMode: "marlin-tabulated-mode", Creatable: true, CreateLabel: "Ibuffer (*Ibuffer* by Major Mode)", CreateAction: "cmd:ibuffer"},
 		{Prefix: "*Targets*", MajorMode: "marlin-tabulated-mode", Creatable: true, CreateLabel: "Targets (*Targets*)", CreateAction: "buffer:*Targets*"},
 		{Prefix: "*Processes*", MajorMode: "marlin-tabulated-mode", Creatable: true, CreateLabel: "Processes (*Processes*)", CreateAction: "buffer:*Processes*"},
 		{Prefix: "*Models*", MajorMode: "marlin-tabulated-mode", Creatable: true, CreateLabel: "Models (*Models*)", CreateAction: "buffer:*Models*"},

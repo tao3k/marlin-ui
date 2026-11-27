@@ -455,3 +455,27 @@ func (r *Registry) MajorModeFor(id string) (MajorMode, bool) {
 	m, ok := r.majors[id]
 	return m, ok
 }
+
+// InnerModeFor returns a copy of a Polymode Inner Mode definition for id.
+func (r *Registry) InnerModeFor(id string) (MajorMode, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.inners[id]
+	return m, ok
+}
+
+// MinorModeFor returns a copy of a MinorMode definition for id.
+func (r *Registry) MinorModeFor(id string) (MinorMode, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	m, ok := r.minors[id]
+	return m, ok
+}
+
+// PolymodeFor returns the PolymodeSpec bound to hostMode, if any.
+func (r *Registry) PolymodeFor(hostMode string) (PolymodeSpec, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.polymodes[hostMode]
+	return p, ok
+}

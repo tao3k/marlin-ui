@@ -23,20 +23,20 @@ import (
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 )
 
-// SelectBuffer focuses an Emacs buffer via Doom's popup rule & workspace
-// isolation engine: auxiliary buffers (*Help*, *Messages*, *Processes*, *Models*)
-// open non-destructively in their governed frosted-glass Popup Drawer without
-// disturbing the main window, while primary buffers isolate per workspace.
+// SelectBuffer focuses an Emacs buffer via Scheme `ui-modes` display-buffer-alist,
+// Doom popup rules, dedicated-window protection, and per-buffer session switching.
 func (f *Frame) SelectBuffer(id buffer.ID) {
 	wasMini := f.miniState.IsCompletionActive()
 	f.miniState.Close()
 	f.meowState.ClearKeypad()
+	eff := f.EffectiveModeStack(id)
+	f.syncChatSessionForBuffer(id)
 	if f.wsMgr != nil {
-		asPopup, wsSnap := f.wsMgr.OpenBuffer(id)
+		asPopup, wsSnap := f.wsMgr.OpenBufferWithAction(id, string(eff.DisplayAction))
 		f.mu.Lock()
 		wasWeb := f.activeFeatureID == "feature:webisland" || f.activePluginID != ""
 		if !asPopup {
-			f.activeBuffer = wsSnap.Active.ActiveBuffer
+			f.activeBuffer = wsSnap.Active.FocusedBuffer()
 			f.activeFeatureID = ""
 			f.activeExtID = ""
 			f.activePluginID = ""

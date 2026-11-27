@@ -69,6 +69,16 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:helm", "Helm live search", false
 	case "help":
 		return "buffer:*Help*", "Documentation (*Help*)", false
+	case "describe-mode":
+		return "cmd:describe-mode", "Describe active Major/Minor/Polymode (C-h m)", false
+	case "kill-buffer":
+		return "cmd:kill-buffer", "Kill current buffer (C-x k)", false
+	case "ibuffer":
+		return "cmd:ibuffer", "Open *Ibuffer* grouped by Major Mode (C-c b)", false
+	case "previous-buffer":
+		return "cmd:prev-buffer", "Previous buffer", true
+	case "next-buffer":
+		return "cmd:next-buffer", "Next buffer", true
 	case "switch-themes":
 		return "cmd:switch-theme", "Switch theme", false
 	case "window-split-right", "split-window-right":

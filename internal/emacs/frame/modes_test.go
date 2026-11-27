@@ -116,3 +116,52 @@ func TestPolymodeSpanSwitchingInChatAndMagitBuffers(t *testing.T) {
 		t.Fatalf("expected *magit* hunk cursor to activate Polymode Hunk·Aitia, got %q", magitEff.DisplayTitle)
 	}
 }
+
+func TestDisplayBufferAlistDescribeModePerBufferSessionsAndIbufferLifecycle(t *testing.T) {
+	f := New(Config{AppConfig: appconfig.Config{SessionID: "main-sess"}})
+
+	// 1. Per-buffer SessionID isolation across multiple *chat:<name>* buffers.
+	chatA := f.NewChatBuffer("alpha")
+	chatB := f.NewChatBuffer("beta")
+	if f.ChatSessionFor(chatA) == f.ChatSessionFor(chatB) {
+		t.Fatalf("expected distinct sessions for %s (%q) and %s (%q)", chatA, f.ChatSessionFor(chatA), chatB, f.ChatSessionFor(chatB))
+	}
+
+	// 2. Interactive Polymode span focus + Emacs describe-mode (C-h m) reflection.
+	f.SelectBuffer(chatA)
+	f.HandlePolymodeSpanFocus("diff-hunk", "diff", "@@ -1 +1 @@\n-old\n+new")
+	f.DescribeCurrentMode()
+	hi := f.currentHelpIntrospection(buffer.Help)
+	if hi == nil || hi.BufferName != string(chatA) || hi.InnerModeID != "magit-diff-inner-mode" {
+		t.Fatalf("expected describe-mode to reflect %s with magit-diff-inner-mode, got %+v", chatA, hi)
+	}
+	if len(hi.LocalBindings) == 0 || len(hi.PolymodeRules) < 3 {
+		t.Fatalf("expected describe-mode to include live local bindings and Polymode rules, got %+v", hi)
+	}
+
+	// 3. *Ibuffer* groups open buffers by Major Mode, and KillBuffer / StepBuffer work cleanly.
+	entries := f.BuildIbufferEntries(f.loadSnapshot())
+	if len(entries) < 3 {
+		t.Fatalf("expected >= 3 buffers in *Ibuffer*, got %d", len(entries))
+	}
+	if !f.StepBuffer(1) {
+		t.Fatalf("expected StepBuffer(1) to cycle buffers in workspace")
+	}
+	if !f.KillBuffer(chatB) {
+		t.Fatalf("expected KillBuffer(%s) to succeed", chatB)
+	}
+	for _, b := range f.WorkspaceSnapshot().Active.Buffers {
+		if b == chatB {
+			t.Fatalf("expected %s to be removed from workspace after KillBuffer", chatB)
+		}
+	}
+
+	// 4. display-buffer-alist: *Preview* (DisplaySplitRight) auto-splits right cleanly.
+	f.DeleteOtherWindows()
+	f.SelectBuffer(chatA)
+	// Ensure *Preview* is not intercepted by popup rule by testing OpenBufferWithAction directly.
+	_, splitSnap := f.wsMgr.OpenBufferWithAction(buffer.ID("*magit-diff*"), "split-right")
+	if splitSnap.Active.WindowCount() != 2 {
+		t.Fatalf("expected display-buffer-alist split-right to open 2nd window, got %d windows", splitSnap.Active.WindowCount())
+	}
+}

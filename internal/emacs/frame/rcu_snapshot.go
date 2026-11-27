@@ -21,6 +21,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/hydra"
+	"github.com/tao3k/marlin-ui/internal/emacs/modes"
 	"github.com/tao3k/marlin-ui/internal/emacs/theme"
 	"github.com/tao3k/marlin-ui/internal/emacs/workspace"
 	"github.com/tao3k/marlin-ui/internal/uiframework"
@@ -89,6 +90,38 @@ func (f *Frame) initAsyncRuntime() {
 			f.commitGRPCWorkbenchSnapshot(snap)
 		},
 	)
+	f.modesSyncLane = async.NewFencedLane[struct{}, []modes.ModeRecord](
+		func(ctx context.Context, _ struct{}) ([]modes.ModeRecord, error) {
+			if f.Link == nil || f.Link.Switcher == nil {
+				return nil, fmt.Errorf("no gRPC link")
+			}
+			raw, err := f.Link.FetchSchemeModeRecords(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]modes.ModeRecord, 0, len(raw))
+			for _, rec := range raw {
+				out = append(out, modes.ModeRecord{
+					RecordID: rec.RecordID,
+					Kind:     rec.Kind,
+					Title:    rec.Title,
+					Facets:   rec.Facets,
+				})
+			}
+			return out, nil
+		},
+		func(_ uint64, recs []modes.ModeRecord) {
+			if n := f.ApplySchemeModeRecords(recs); n > 0 {
+				f.mu.Lock()
+				f.logMessage(fmt.Sprintf("synced %d live Scheme ui-modes record(s) over gRPC", n))
+				f.publishSnapshotLocked()
+				f.mu.Unlock()
+			}
+		},
+	)
+	if f.Link != nil && f.Link.Switcher != nil {
+		f.modesSyncLane.Submit(struct{}{})
+	}
 	f.initMagitLane()
 }
 
@@ -312,6 +345,9 @@ func (f *Frame) Close() {
 	}
 	if f.wbSyncLane != nil {
 		f.wbSyncLane.Close()
+	}
+	if f.modesSyncLane != nil {
+		f.modesSyncLane.Close()
 	}
 	f.closePackageStore()
 }

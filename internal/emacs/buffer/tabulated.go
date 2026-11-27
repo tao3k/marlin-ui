@@ -219,33 +219,78 @@ func renderMessages(c *ui.Context, th theme.Theme, bc *Context) {
 	})
 }
 
-func renderHelp(c *ui.Context, th theme.Theme) {
+func renderHelp(c *ui.Context, th theme.Theme, bc *Context) {
 	bindings := [][2]string{
-		{"Enter", "Send prompt / confirm Vertico or Helm candidate"},
-		{"ESC", "Enter Meow NORMAL mode / dismiss active Doom Popup Drawer / close Minibuffer"},
-		{"i / a", "Enter Meow INSERT mode (focus Minibuffer)"},
-		{"SPC SPC / SPC x / M-x / Cmd+K", "Open Vertico M-x commands"},
-		{"SPC b b / Cmd+B", "Switch Emacs buffer (active workspace buffers prioritized first)"},
-		{"SPC w v / SPC w s", "Split active workspace vertically (left | right) or horizontally (top / bottom)"},
-		{"SPC w w / SPC w d / SPC w o", "Cycle focused pane / close split pane / delete other windows"},
-		{"SPC w p / SPC w r", "Toggle Doom Popup Drawer / raise popup buffer into main window"},
-		{"SPC l c / SPC l d / SPC l 1..4", "Create, kill, or jump between isolated persp-mode workspaces"},
-		{"SPC s / Cmd+P", "Open 120Hz Helm live multi-source search"},
-		{"SPC t t / v / a / z", "Switch theme / Liquid Glass / 120Hz Motion / Zen Mode"},
-		{"SPC t r", "Reload ~/.config/marlin/ui/ themes, CSS & custom S-exp/TOML widgets"},
-		{"SPC h", "Open *Help* keybindings popup drawer"},
-		{"Cmd+,", "Open *Settings* buffer (Theme, Remote Targets, Account, Features)"},
-		{"C-n / C-p / Up / Down", "Move candidate selection"},
-		{"j / k (Normal)", "Move selection down / up in tabulated buffers"},
-		{"C-g", "Cancel active keypad or minibuffer action"},
+		{"C-h m / SPC h m", "Describe active buffer's Major Mode, Minor Modes, Polymode & Keymap"},
+		{"C-x g / SPC g g", "Open *magit* AI-Native jj + Git + Lambda Aitia workbench"},
+		{"C-x M-g / SPC g d", "Open Magit dispatch transient (?)"},
+		{"C-c g / SPC g a", "Open 50/50 AI + Aitia Code Audit split"},
+		{"C-x b / SPC b b", "Buffer & Mode Creator Picker (switch buffer / + New LLM Chat / + Clone Window)"},
+		{"C-c b / SPC b i", "Open *Ibuffer* interactive buffer manager grouped by Major Mode"},
+		{"C-x k / SPC b d", "Kill active buffer in workspace"},
+		{"C-c [ / ] · SPC b [ / ]", "Cycle previous / next buffer in workspace"},
+		{"C-x 3 / C-x 2 · SPC w v / s", "Split window right / below (linked view of current buffer)"},
+		{"C-x o / C-x 0 / C-x 1", "Other window / close window / delete other windows"},
+		{"C-x w d / SPC w t", "Toggle dedicated-window-mode pin on focused window"},
+		{"C-c u / U · SPC w u / U", "Winner-mode undo / redo window layout"},
+		{"C-x p / SPC ~", "Toggle Doom Popup Drawer"},
+		{"C-x t N / SPC TAB N", "Create named isolated perspective workspace (persp-mode)"},
+		{"M-x / SPC SPC / Cmd+K", "Open Vertico M-x commands"},
+		{"C-s / SPC s / Cmd+P", "Open 120Hz Helm live multi-source search"},
+		{"ESC / C-g", "Return to Meow NORMAL mode / cancel keypad or minibuffer"},
 	}
 	ui.Column(c.Key("buf-help")).Fill().AlignItems(ui.Stretch).Children(func() {
-		theme.TabulatedHeader(c, []theme.TableColumn{
-			{Label: "KEYBINDING (MEOW / DOOM)", Width: 280},
-			{Label: "COMMAND"},
-		}, th)
-		ui.Scroll(c.Key("help-scroll")).Grow(1).Children(func() {
-			ui.Column(c).AlignItems(ui.Stretch).Children(func() {
+		ui.Scroll(c.Key("help-scroll")).Grow(1).Padding(10, 14).Children(func() {
+			ui.Column(c).Gap(10).AlignItems(ui.Stretch).Children(func() {
+				if bc != nil && bc.HelpIntrospection != nil {
+					hi := bc.HelpIntrospection
+					ui.Column(c.Key("help-describe-mode")).Padding(10, 14).Gap(6).Radius(8).
+						Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.48, 0.78)).
+						BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
+						ui.Text(c, fmt.Sprintf("Emacs describe-mode (C-h m) · %s", hi.BufferName)).
+							Font(theme.FontMono).FontSize(13).FontWeight(700).TextColor(th.Accent)
+						ui.Text(c, fmt.Sprintf("Major Mode: %s (%s) · Display: %s · Read-Only: %v",
+							hi.MajorTitle, hi.MajorModeID, hi.DisplayAction, hi.ReadOnly)).
+							Font(theme.FontMono).FontSize(11.5).TextColor(th.Ink)
+						if len(hi.ParentChain) > 0 {
+							ui.Text(c, "Inheritance: "+strings.Join(hi.ParentChain, " → ")).
+								Font(theme.FontMono).FontSize(11.5).TextColor(th.Info)
+						}
+						if len(hi.MinorLighters) > 0 {
+							ui.Text(c, "Active Minor Modes: "+strings.Join(hi.MinorLighters, " · ")).
+								Font(theme.FontMono).FontSize(11.5).TextColor(th.Success)
+						}
+						if hi.InnerModeID != "" {
+							ui.Text(c, fmt.Sprintf("Polymode Active Span: %s → Inner Mode: %s", hi.FocusedSpan, hi.InnerModeID)).
+								Font(theme.FontMono).FontSize(11.5).FontWeight(600).TextColor(th.Warning)
+						} else if len(hi.PolymodeRules) > 0 {
+							ui.Text(c, fmt.Sprintf("Polymode Host (%d inner span rules; current span: %s)", len(hi.PolymodeRules), hi.FocusedSpan)).
+								Font(theme.FontMono).FontSize(11.5).TextColor(th.InkMuted)
+						}
+						for i, pr := range hi.PolymodeRules {
+							ui.Text(c.Key(fmt.Sprintf("hpoly-%d", i)), fmt.Sprintf("  span %-11s → %-24s [%s]", pr[0], pr[1], pr[2])).
+								Font(theme.FontMono).FontSize(11).TextColor(th.InkMuted)
+						}
+					})
+					if len(hi.LocalBindings) > 0 {
+						theme.TabulatedHeader(c, []theme.TableColumn{
+							{Label: "TIER", Width: 90},
+							{Label: "KEY", Width: 110},
+							{Label: "LOCAL MODE / POLYMODE COMMAND"},
+						}, th)
+						for i, lb := range hi.LocalBindings {
+							theme.TabulatedRow(c, fmt.Sprintf("hlrow-%d", i), []theme.TableColumn{
+								{Label: lb[0], Width: 90, Color: th.Warning, Bold: true, Mono: true},
+								{Label: lb[1], Width: 110, Color: th.Info, Bold: true, Mono: true},
+								{Label: lb[2], Color: th.Ink},
+							}, false, th)
+						}
+					}
+				}
+				theme.TabulatedHeader(c, []theme.TableColumn{
+					{Label: "GLOBAL KEYBINDING (EMACS / DOOM)", Width: 280},
+					{Label: "COMMAND"},
+				}, th)
 				for _, b := range bindings {
 					theme.TabulatedRow(c, "hrow-"+b[0], []theme.TableColumn{
 						{Label: b[0], Width: 280, Color: th.Info, Bold: true, Mono: true},

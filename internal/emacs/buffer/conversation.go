@@ -70,7 +70,7 @@ func renderConversation(c *ui.Context, th theme.Theme, bc *Context) {
 		WrapCode:       true,
 		ShareSelection: true,
 		CodeBlock: func(ctx *ui.Context, b *markdown.CodeBlockView) {
-			renderEditorialCodeBlock(ctx, b, tr, th)
+			renderEditorialCodeBlock(ctx, b, tr, bc, th)
 		},
 	}
 

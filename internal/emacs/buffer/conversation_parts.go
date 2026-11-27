@@ -18,14 +18,27 @@ import (
 )
 
 // renderEditorialCodeBlock wraps MyGo's syntax-highlighted Markdown code body
-// in a modern Agent Platform frame: language badge, live streaming indicator,
-// and one-click Copy button.
-func renderEditorialCodeBlock(c *ui.Context, b *markdown.CodeBlockView, tr *mygoshell.TranscriptController, th theme.Theme) {
+// in a modern Agent Platform frame with live Polymode Span activation:
+// clicking/inspecting a diff block activates `magit-diff-inner-mode`
+// (Marlin-Chat[Diff·Aitia]), while a code fence activates `prog-code-inner-mode`
+// (Marlin-Chat[Code]) with Copy, Preview Split, and AI/Aitia Audit actions.
+func renderEditorialCodeBlock(c *ui.Context, b *markdown.CodeBlockView, tr *mygoshell.TranscriptController, bc *Context, th theme.Theme) {
 	lang := strings.TrimSpace(b.Language)
 	if lang == "" {
 		lang = "code"
 	}
 	codeStr := b.Code()
+	lowerLang := strings.ToLower(lang)
+	isDiff := lowerLang == "diff" || lowerLang == "patch" ||
+		(strings.Contains(codeStr, "\n@@ ") && (strings.Contains(codeStr, "\n+") || strings.Contains(codeStr, "\n-")))
+	spanKind := "code-block"
+	polyBadge := "Poly:Code"
+	badgeCol := th.Accent
+	if isDiff {
+		spanKind = "diff-hunk"
+		polyBadge = "Poly:Diff·Aitia"
+		badgeCol = th.Warning
+	}
 	ui.Column(c.Key(fmt.Sprintf("conv-codeblk-%d", b.Index))).Radius(10).
 		Background(theme.GlassTone(c, th.Bar, th, 0.54, 0.84)).
 		BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
@@ -33,15 +46,39 @@ func renderEditorialCodeBlock(c *ui.Context, b *markdown.CodeBlockView, tr *mygo
 			Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.42, 0.70)).
 			BorderWidth(0, 0, 1, 0).BorderColor(th.BorderSubtle).Children(func() {
 			ui.Text(c, strings.ToUpper(lang)).Font(theme.FontMono).FontSize(10.5).FontWeight(700).TextColor(th.Accent).NoWrap()
+			if bc != nil && bc.OnFocusPolymodeSpan != nil {
+				if theme.ActionLink(c, fmt.Sprintf("code-poly-%d", b.Index), polyBadge, badgeCol, th).Clicked() {
+					bc.OnFocusPolymodeSpan(spanKind, lang, codeStr)
+				}
+			}
 			if b.Open {
 				ui.Spinner(c).Size(11, 11)
 				ui.Text(c, "writing...").Font(theme.FontMono).FontSize(10.5).TextColor(th.Info).NoWrap()
 			}
 			ui.Spacer(c)
+			if bc != nil && bc.OnOpenFilePreview != nil && strings.TrimSpace(codeStr) != "" {
+				if theme.ActionLink(c, fmt.Sprintf("code-prev-%d", b.Index), "Preview", th.Info, th).Clicked() {
+					if bc.OnFocusPolymodeSpan != nil {
+						bc.OnFocusPolymodeSpan(spanKind, lang, codeStr)
+					}
+					bc.OnOpenFilePreview(fmt.Sprintf("Snippet (%s)", lang), "chat-span."+lowerLang, codeStr, 1)
+				}
+			}
+			if isDiff && bc != nil && bc.OnMagitAction != nil && strings.TrimSpace(codeStr) != "" {
+				if theme.ActionLink(c, fmt.Sprintf("code-audit-%d", b.Index), "Aitia Audit", th.Warning, th).Clicked() {
+					if bc.OnFocusPolymodeSpan != nil {
+						bc.OnFocusPolymodeSpan(spanKind, lang, codeStr)
+					}
+					bc.OnMagitAction("ai-audit", "")
+				}
+			}
 			if tr != nil && tr.OnCopyCode != nil && strings.TrimSpace(codeStr) != "" {
 				if theme.StyledButton(c, theme.ButtonSpec{
 					Key: fmt.Sprintf("code-copy-%d", b.Index), Label: "Copy", Icon: theme.IconCopy, Variant: theme.BtnGhost, Size: theme.BtnSizeSM,
 				}, th).Clicked() {
+					if bc != nil && bc.OnFocusPolymodeSpan != nil {
+						bc.OnFocusPolymodeSpan(spanKind, lang, codeStr)
+					}
 					tr.OnCopyCode(codeStr)
 				}
 			}
@@ -141,6 +178,9 @@ func renderExecutionTraceGroup(
 			}
 		})
 		if hdr.Clicked() && bc != nil && bc.ToggleThinking != nil {
+			if bc.OnFocusPolymodeSpan != nil {
+				bc.OnFocusPolymodeSpan("tool-gate", "trace", summary)
+			}
 			bc.ToggleThinking(key)
 		}
 

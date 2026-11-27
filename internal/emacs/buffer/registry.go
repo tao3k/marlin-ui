@@ -38,6 +38,7 @@ const (
 	Models       ID = "*Models*"
 	Messages     ID = "*Messages*"
 	Help         ID = "*Help*"
+	Ibuffer      ID = "*Ibuffer*"
 	Settings     ID = "*Settings*"
 	Packages     ID = "*Packages*"
 	Preview      ID = "*Preview*"
@@ -78,7 +79,8 @@ func Catalog() []Descriptor {
 		{ID: Models, Description: "Configured model routes"},
 		{ID: Packages, Description: "Official Marketplace package manager (themes, plugins, layouts)"},
 		{ID: Messages, Description: "UI diagnostics log"},
-		{ID: Help, Description: "Meow & Doom keyboard shortcuts"},
+		{ID: Help, Description: "Live Emacs describe-mode & keybindings introspection"},
+		{ID: Ibuffer, Description: "Interactive buffer manager grouped by Major Mode (C-c b / SPC b i)"},
 		{ID: Preview, Description: "Read-only source file preview popup"},
 		{ID: Settings, Description: "Customize appearance, remotes, account, features"},
 	}
@@ -102,6 +104,33 @@ type ArtifactSelection struct {
 	DataType string
 	Title    string
 	Payload  string
+}
+
+// HelpIntrospectionData carries live Emacs `describe-mode` (C-h m) reflection
+// data for the buffer that was focused when *Help* was invoked.
+type HelpIntrospectionData struct {
+	BufferName    string
+	MajorModeID   string
+	MajorTitle    string
+	ParentChain   []string
+	MinorLighters []string
+	FocusedSpan   string
+	InnerModeID   string
+	DisplayAction string
+	ReadOnly      bool
+	LocalBindings [][3]string // [tier, key, command + label]
+	PolymodeRules [][3]string // [span-kind, inner-mode, lighter]
+}
+
+// IbufferEntry describes one open buffer row in *Ibuffer* grouped by Major Mode.
+type IbufferEntry struct {
+	BufferID  ID
+	MajorMode string
+	InnerMode string
+	Workspace string
+	WindowNum int
+	ReadOnly  bool
+	Active    bool
 }
 
 // Context carries the live data and callbacks needed to render any Emacs buffer.
@@ -130,10 +159,15 @@ type Context struct {
 	ComposerPinned   bool
 	Customize        *CustomizeState
 	PackageSnap     marketplace.PackageStoreSnapshot
-	PackageFilter   string
-	Magit           *MagitViewState
+	PackageFilter       string
+	Magit               *MagitViewState
+	HelpIntrospection   *HelpIntrospectionData
+	IbufferRows         []IbufferEntry
+	ActivePolymodeSpan  string
 
 	OnSelectBuffer      func(ID)
+	OnKillBuffer        func(ID)
+	OnFocusPolymodeSpan func(spanKind, lang, payload string)
 	OnSetTheme          func(themeID string)
 	OnReloadThemes      func()
 	OnToggleGlass       func()
@@ -189,7 +223,9 @@ func Render(c *ui.Context, id ID, th theme.Theme, bc *Context) {
 	case Messages:
 		renderMessages(c, th, bc)
 	case Help:
-		renderHelp(c, th)
+		renderHelp(c, th, bc)
+	case Ibuffer:
+		renderIbuffer(c, th, bc)
 	case Preview:
 		renderFilePreview(c, th, bc)
 	case Settings:

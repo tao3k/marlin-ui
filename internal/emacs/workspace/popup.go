@@ -19,6 +19,13 @@ import (
 //   - Otherwise focuses buf in the active window and records it in this
 //     workspace's isolated buffer list.
 func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) {
+	return m.OpenBufferWithAction(buf, "")
+}
+
+// OpenBufferWithAction executes Emacs `display-buffer-alist` placement policy
+// (`reuse-window`, `split-right`, `split-below`, `popup-bottom`, `popup-right`)
+// alongside Doom popup rules and `dedicated-window-mode` protection.
+func (m *Manager) OpenBufferWithAction(buf buffer.ID, displayAction string) (openedAsPopup bool, snap Snapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	idx := m.activeIndexLocked()
@@ -36,10 +43,46 @@ func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) 
 		ws.LastPopup = buf
 		return true, m.snapshotLocked()
 	}
+	if !alreadyMainTab && (displayAction == "popup-bottom" || displayAction == "popup-right") {
+		side := SideBottom
+		if displayAction == "popup-right" {
+			side = SideRight
+		}
+		rc := PopupRule{Matcher: buf, Side: side, Size: 0.36, Select: true, Quit: QuitCurrent}
+		ws.PopupBuffer = buf
+		ws.PopupRule = &rc
+		ws.PopupVisible = true
+		ws.LastPopup = buf
+		return true, m.snapshotLocked()
+	}
 	if !alreadyMainTab {
 		ws.Buffers = append(ws.Buffers, buf)
 	}
 	focusLeaf := findWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	// Honor `split-right` / `split-below` display-buffer-alist rules when only
+	// one window is open and buf differs from the focused window's buffer.
+	if (displayAction == "split-right" || displayAction == "split-below") &&
+		focusLeaf != nil && focusLeaf.Buffer != buf && len(ws.Windows()) == 1 {
+		recordWinnerSnapshot(ws)
+		ws.NextWindowSeq++
+		newID := fmt.Sprintf("w%d", ws.NextWindowSeq)
+		dir := SplitVertical
+		if displayAction == "split-below" {
+			dir = SplitHorizontal
+		}
+		ws.WindowTree = mapWindowLeaf(ws.WindowTree, focusLeaf.ID, func(leaf *WindowNode) *WindowNode {
+			cp := *leaf
+			return &WindowNode{
+				Direction: dir,
+				Ratio:     0.50,
+				First:     &cp,
+				Second:    &WindowNode{ID: newID, Buffer: buf},
+			}
+		})
+		ws.FocusedWindowID = newID
+		syncLegacySplitFields(ws)
+		return false, m.snapshotLocked()
+	}
 	if focusLeaf != nil && focusLeaf.Dedicated && focusLeaf.Buffer != buf {
 		if other := firstUndedicatedLeaf(ws.WindowTree); other != nil {
 			ws.WindowTree = mapWindowLeaf(ws.WindowTree, other.ID, func(leaf *WindowNode) *WindowNode {
@@ -74,6 +117,91 @@ func (m *Manager) OpenBuffer(buf buffer.ID) (openedAsPopup bool, snap Snapshot) 
 	})
 	syncLegacySplitFields(ws)
 	return false, m.snapshotLocked()
+}
+
+// KillBuffer removes buf from the active workspace's buffer list (Emacs C-x k / SPC b d)
+// and replaces any window showing it with the nearest remaining buffer, never killing
+// the last remaining buffer in the workspace.
+func (m *Manager) KillBuffer(buf buffer.ID) (killed bool, fallback buffer.ID, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, "", Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.Buffers) <= 1 {
+		return false, ws.FocusedBuffer(), m.snapshotLocked()
+	}
+	pos := -1
+	for i, b := range ws.Buffers {
+		if b == buf {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return false, ws.FocusedBuffer(), m.snapshotLocked()
+	}
+	ws.Buffers = append(ws.Buffers[:pos], ws.Buffers[pos+1:]...)
+	if pos >= len(ws.Buffers) {
+		pos = len(ws.Buffers) - 1
+	}
+	fallback = ws.Buffers[pos]
+	// Replace every window leaf showing the killed buffer with fallback.
+	for _, lf := range ws.Windows() {
+		if lf.Buffer == buf {
+			ws.WindowTree = mapWindowLeaf(ws.WindowTree, lf.ID, func(leaf *WindowNode) *WindowNode {
+				cp := *leaf
+				cp.Buffer = fallback
+				return &cp
+			})
+		}
+	}
+	if ws.PopupBuffer == buf {
+		ws.PopupVisible = false
+		ws.PopupBuffer = ""
+		ws.PopupRule = nil
+	}
+	syncLegacySplitFields(ws)
+	return true, fallback, m.snapshotLocked()
+}
+
+// StepBuffer cycles the focused window to the previous (-1) or next (+1) buffer
+// in the active workspace's buffer list (Emacs C-x LEFT/RIGHT · Doom SPC b [ / ]).
+func (m *Manager) StepBuffer(delta int) (nextBuf buffer.ID, ok bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return "", false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.Buffers) <= 1 {
+		return ws.FocusedBuffer(), false, m.snapshotLocked()
+	}
+	cur := ws.FocusedBuffer()
+	curIdx := 0
+	for i, b := range ws.Buffers {
+		if b == cur {
+			curIdx = i
+			break
+		}
+	}
+	nextIdx := (curIdx + delta) % len(ws.Buffers)
+	if nextIdx < 0 {
+		nextIdx += len(ws.Buffers)
+	}
+	nextBuf = ws.Buffers[nextIdx]
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = nextBuf
+		return &cp
+	})
+	syncLegacySplitFields(ws)
+	return nextBuf, true, m.snapshotLocked()
 }
 
 // DismissPopup closes the active workspace's popup drawer without touching the
