@@ -42,6 +42,22 @@ type FileContent struct {
 	Content   string
 }
 
+// GrepHit describes one live consult-ripgrep match projected by the Rust host.
+type GrepHit struct {
+	RelPath string
+	Path    string
+	Line    int
+	Col     int
+	Snippet string
+}
+
+// ProjectInfo describes one real Git/jj repository discovered by the Rust host.
+type ProjectInfo struct {
+	Name string
+	Path string
+	VCS  string
+}
+
 // DefaultWorkspaceRoot returns the browser WASM default virtual root.
 func DefaultWorkspaceRoot() string { return "/" }
 
@@ -55,4 +71,12 @@ func (l *Link) ListProjectFiles(_ context.Context, _ string) (string, []FileEntr
 
 func (l *Link) ReadFileContent(_ context.Context, _ string) (FileContent, error) {
 	return FileContent{}, fmt.Errorf("connect a remote Marlin host to read files in WebAssembly")
+}
+
+func (l *Link) SearchProjectGrep(_ context.Context, _, _ string) ([]GrepHit, error) {
+	return nil, fmt.Errorf("connect a remote Marlin host for consult-ripgrep in WebAssembly")
+}
+
+func (l *Link) ListKnownProjects(_ context.Context, _ string) ([]ProjectInfo, error) {
+	return nil, fmt.Errorf("connect a remote Marlin host to list projects in WebAssembly")
 }

@@ -364,6 +364,12 @@ func (f *Frame) Close() {
 	if f.fileReadLane != nil {
 		f.fileReadLane.Close()
 	}
+	if f.grepLane != nil {
+		f.grepLane.Close()
+	}
+	if f.projectsLane != nil {
+		f.projectsLane.Close()
+	}
 	f.closePackageStore()
 }
 

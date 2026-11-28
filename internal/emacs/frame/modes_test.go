@@ -506,4 +506,31 @@ func TestVerticoFindFileProjectFindFileRecentfAndHonestLiveMagit(t *testing.T) {
 	if len(projCands) == 0 || projCands[0].Name != "pkg/hello.go" {
 		t.Fatalf("expected Orderless project-find-file 'pkg hello' -> pkg/hello.go, got %+v", projCands)
 	}
+
+	// 5. Unified consult-buffer (SPC , / C-x b) surfaces recentf virtual files alongside open buffers.
+	cbCands := f.bufferCandidates("hello.go")
+	if len(cbCands) == 0 || cbCands[0].Annotation != "recentf" {
+		t.Fatalf("expected consult-buffer virtual recentf candidate for hello.go, got %+v", cbCands)
+	}
+
+	// 6. consult-line (SPC l / C-c l) finds and jumps to exact line inside opened file preview.
+	f.OpenConsultLine()
+	lineCands := f.consultLineCandidates("func Hello")
+	if len(lineCands) == 0 || lineCands[0].Annotation != "L3" {
+		t.Fatalf("expected consult-line match on L3 for 'func Hello', got %+v", lineCands)
+	}
+	lineCands[0].Run()
+	f.mu.Lock()
+	jumpedLine := f.filePreview.Line
+	f.mu.Unlock()
+	if jumpedLine != 3 {
+		t.Fatalf("expected consult-line jump to set preview line=3, got %d", jumpedLine)
+	}
+
+	// 7. project-switch-project (SPC p p) rebinds active workspace ProjectRoot cleanly.
+	altRepo := t.TempDir()
+	f.SwitchActiveProjectRoot(altRepo)
+	if got := f.activeWorkspaceProjectRoot(); got != altRepo {
+		t.Fatalf("expected SwitchActiveProjectRoot -> %q, got %q", altRepo, got)
+	}
 }

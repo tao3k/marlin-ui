@@ -161,6 +161,9 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 	}{
 		{"find-file", "Open real file via Vertico directory browser (C-x C-f / SPC f f)", "cmd:find-file"},
 		{"project-find-file", "Fuzzy-find any real file in current Git/jj project (C-c p f / SPC p f)", "cmd:project-find-file"},
+		{"project-switch-project", "Switch active Git/jj repository (C-c p p / SPC p p)", "cmd:project-switch"},
+		{"consult-ripgrep", "Live Rust ripgrep across current project (SPC / · C-c /)", "cmd:consult-ripgrep"},
+		{"consult-line", "Orderless line search & jump in active buffer (SPC l · C-c l)", "cmd:consult-line"},
 		{"recentf-open-files", "Open recently visited real file (C-x C-r / SPC f r)", "cmd:recentf"},
 		{"describe-mode", "Describe active buffer Major/Minor/Polymode & local keymap", "cmd:describe-mode"},
 		{"describe-key", "Describe key or chord across active Emacs keymap precedence", "cmd:describe-key"},
@@ -429,6 +432,7 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 	// scrolling past [all] or [popup] buffers.
 	f.mu.Lock()
 	schemeExts := append([]schema.UIExtensionRegion(nil), f.schemeExts...)
+	recentPaths := append([]string(nil), f.recentFiles...)
 	f.mu.Unlock()
 	extCands := make([]minibuffer.Candidate, 0, len(schemeExts))
 	for _, ext := range schemeExts {
@@ -448,10 +452,31 @@ func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {
 			Run:  func() { f.SelectFeature(string(bufID)) },
 		})
 	}
+	// Unified Doom Emacs `consult-buffer` virtual source (`SPC ,` / `C-x b`):
+	// surface recently visited real files right alongside open buffers.
+	recentCands := make([]minibuffer.Candidate, 0, min(len(recentPaths), 12))
+	for i, p := range recentPaths {
+		if i >= 12 {
+			break
+		}
+		abs := p
+		base := abs
+		if idx := strings.LastIndex(abs, "/"); idx >= 0 && idx+1 < len(abs) {
+			base = abs[idx+1:]
+		}
+		recentCands = append(recentCands, minibuffer.Candidate{
+			ID:         "consult-rf-" + abs,
+			Name:       base,
+			Desc:       "[recentf] " + abs,
+			Annotation: "recentf",
+			Run:        func() { f.OpenDiskFile(abs) },
+		})
+	}
 
-	all := make([]minibuffer.Candidate, 0, len(cat)+len(extCands)+len(createCands))
+	all := make([]minibuffer.Candidate, 0, len(cat)+len(extCands)+len(createCands)+len(recentCands))
 	all = append(all, inWS...)
 	all = append(all, extCands...)
+	all = append(all, recentCands...)
 	all = append(all, createCands...)
 	all = append(all, popups...)
 	all = append(all, other...)

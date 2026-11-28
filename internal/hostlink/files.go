@@ -52,6 +52,22 @@ type FileContent struct {
 	Content   string
 }
 
+// GrepHit describes one live consult-ripgrep match projected by the Rust host.
+type GrepHit struct {
+	RelPath string
+	Path    string
+	Line    int
+	Col     int
+	Snippet string
+}
+
+// ProjectInfo describes one real Git/jj repository discovered by the Rust host.
+type ProjectInfo struct {
+	Name string
+	Path string
+	VCS  string
+}
+
 var ignoredProjectDirs = map[string]bool{
 	".git":         true,
 	".jj":          true,
@@ -208,6 +224,112 @@ func (l *Link) ReadFileContent(ctx context.Context, path string) (FileContent, e
 		}
 	}
 	return readFileContentLocal(clean)
+}
+
+// SearchProjectGrep runs live Doom Emacs `consult-ripgrep` natively on the Rust
+// Authority Host over HTTP/2 gRPC (`fs:grep[@root]?q=<pattern>`).
+func (l *Link) SearchProjectGrep(ctx context.Context, root, pattern string) ([]GrepHit, error) {
+	pat := strings.TrimSpace(pattern)
+	if pat == "" {
+		return nil, nil
+	}
+	if l != nil && l.Switcher != nil {
+		if target := l.Switcher.CurrentTarget(); target != nil && target.Projection() != nil {
+			q := "fs:grep"
+			if r := strings.TrimSpace(root); r != "" {
+				q += "@" + r
+			}
+			q += "?q=" + pat
+			qctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			resp, err := target.Projection().QueryProjectGraph(qctx, &projectionv1.QueryProjectGraphRequest{
+				ProjectId:        "default",
+				Query:            q,
+				SecretVisibility: projectionv1.SecretVisibility_SECRET_VISIBILITY_UNSPECIFIED,
+			})
+			cancel()
+			if err == nil {
+				if hits, ok := decodeGrepHitRecords(resp.GetRecords()); ok {
+					return hits, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("connect Marlin Authority Host (Rust) for live consult-ripgrep")
+}
+
+// ListKnownProjects fetches real Git/jj repositories around the workspace from
+// the Rust Authority Host over HTTP/2 gRPC (`fs:projects[@root]`), falling back
+// to the active local repo root when standalone.
+func (l *Link) ListKnownProjects(ctx context.Context, root string) ([]ProjectInfo, error) {
+	if l != nil && l.Switcher != nil {
+		if target := l.Switcher.CurrentTarget(); target != nil && target.Projection() != nil {
+			q := "fs:projects"
+			if r := strings.TrimSpace(root); r != "" {
+				q += "@" + r
+			}
+			qctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			resp, err := target.Projection().QueryProjectGraph(qctx, &projectionv1.QueryProjectGraphRequest{
+				ProjectId:        "default",
+				Query:            q,
+				SecretVisibility: projectionv1.SecretVisibility_SECRET_VISIBILITY_UNSPECIFIED,
+			})
+			cancel()
+			if err == nil {
+				if projs, ok := decodeProjectInfoRecords(resp.GetRecords()); ok {
+					return projs, nil
+				}
+			}
+		}
+	}
+	localRoot := discoverLocalRepoRoot(expandLocalPath(root, DefaultWorkspaceRoot()))
+	return []ProjectInfo{{
+		Name: filepath.Base(localRoot),
+		Path: localRoot,
+		VCS:  "local",
+	}}, nil
+}
+
+func decodeGrepHitRecords(records []*projectionv1.GraphRecordView) ([]GrepHit, bool) {
+	foundMeta := false
+	hits := make([]GrepHit, 0, len(records))
+	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
+		switch rec.GetKind() {
+		case "fs.grep_meta":
+			foundMeta = true
+		case "fs.grep_hit":
+			foundMeta = true
+			f := rec.GetFacets()
+			ln, _ := strconv.Atoi(f["line"])
+			col, _ := strconv.Atoi(f["col"])
+			hits = append(hits, GrepHit{
+				RelPath: f["rel_path"],
+				Path:    f["path"],
+				Line:    ln,
+				Col:     col,
+				Snippet: f["snippet"],
+			})
+		}
+	}
+	return hits, foundMeta
+}
+
+func decodeProjectInfoRecords(records []*projectionv1.GraphRecordView) ([]ProjectInfo, bool) {
+	out := make([]ProjectInfo, 0, len(records))
+	for _, rec := range records {
+		if rec == nil || rec.GetKind() != "fs.project" {
+			continue
+		}
+		f := rec.GetFacets()
+		out = append(out, ProjectInfo{
+			Name: f["name"],
+			Path: f["path"],
+			VCS:  f["vcs"],
+		})
+	}
+	return out, len(out) > 0
 }
 
 func decodeDirListingRecords(records []*projectionv1.GraphRecordView) (DirListing, bool) {

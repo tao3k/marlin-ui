@@ -27,8 +27,14 @@ type projectFilesResult struct {
 	errMsg string
 }
 
+type fileReadReq struct {
+	path string
+	line int
+}
+
 type fileReadResult struct {
 	fc     hostlink.FileContent
+	line   int
 	errMsg string
 }
 
@@ -83,22 +89,23 @@ func (f *Frame) initFileLanes() {
 			f.requestFrame()
 		},
 	)
-	f.fileReadLane = async.NewFencedLane[string, fileReadResult](
-		func(ctx context.Context, path string) (fileReadResult, error) {
-			fc, err := f.Link.ReadFileContent(ctx, path)
+	f.fileReadLane = async.NewFencedLane[fileReadReq, fileReadResult](
+		func(ctx context.Context, req fileReadReq) (fileReadResult, error) {
+			fc, err := f.Link.ReadFileContent(ctx, req.path)
 			if err != nil {
 				return fileReadResult{errMsg: err.Error()}, nil
 			}
-			return fileReadResult{fc: fc}, nil
+			return fileReadResult{fc: fc, line: req.line}, nil
 		},
 		func(_ uint64, res fileReadResult) {
 			if res.errMsg != "" {
 				f.Echo("Find file error: " + res.errMsg)
 				return
 			}
-			f.openLoadedFile(res.fc)
+			f.openLoadedFile(res.fc, res.line)
 		},
 	)
+	f.initConsultLanes()
 }
 
 func (f *Frame) activeWorkspaceProjectRoot() string {
@@ -394,12 +401,21 @@ func (f *Frame) recentFileCandidates(query string) []minibuffer.Candidate {
 // OpenDiskFile reads a real file from the active host (via Rust gRPC `fs:read@<path>`
 // or local disk when standalone) and displays it cleanly in the workbench.
 func (f *Frame) OpenDiskFile(path string) {
+	f.OpenDiskFileAtLine(path, 1)
+}
+
+// OpenDiskFileAtLine opens a real file from the host and highlights targetLine
+// inside *Preview* (used by consult-ripgrep and consult-line jumps).
+func (f *Frame) OpenDiskFileAtLine(path string, targetLine int) {
 	clean := strings.TrimSpace(path)
 	if clean == "" {
 		return
 	}
+	if targetLine < 1 {
+		targetLine = 1
+	}
 	if f.fileReadLane != nil {
-		f.fileReadLane.Submit(clean)
+		f.fileReadLane.Submit(fileReadReq{path: clean, line: targetLine})
 		return
 	}
 	fc, err := f.Link.ReadFileContent(context.Background(), clean)
@@ -407,11 +423,14 @@ func (f *Frame) OpenDiskFile(path string) {
 		f.Echo("Open file error: " + err.Error())
 		return
 	}
-	f.openLoadedFile(fc)
+	f.openLoadedFile(fc, targetLine)
 }
 
-func (f *Frame) openLoadedFile(fc hostlink.FileContent) {
+func (f *Frame) openLoadedFile(fc hostlink.FileContent, targetLine int) {
 	f.recordRecentFile(fc.Path)
+	if targetLine < 1 {
+		targetLine = 1
+	}
 	title := fc.Title
 	if title == "" {
 		title = fc.RelPath
@@ -424,7 +443,7 @@ func (f *Frame) openLoadedFile(fc hostlink.FileContent) {
 	f.filePreview = &buffer.FilePreviewState{
 		Title:   title,
 		Path:    pathLabel,
-		Line:    1,
+		Line:    targetLine,
 		Content: fc.Content,
 	}
 	f.publishSnapshotLocked()

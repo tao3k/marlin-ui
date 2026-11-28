@@ -784,6 +784,12 @@ func (f *Frame) dispatchModeAction(act string) bool {
 		f.OpenFindFile()
 	case "cmd:project-find-file":
 		f.OpenProjectFindFile()
+	case "cmd:project-switch":
+		f.OpenProjectSwitch()
+	case "cmd:consult-ripgrep":
+		f.OpenProjectGrep()
+	case "cmd:consult-line":
+		f.OpenConsultLine()
 	case "cmd:recentf":
 		f.OpenRecentFiles()
 	case "cmd:describe-key":

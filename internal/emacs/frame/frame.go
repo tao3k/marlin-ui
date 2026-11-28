@@ -195,9 +195,17 @@ type Frame struct {
 	projFilesLoading  bool
 	projFilesErr      string
 	recentFiles       []string
-	dirListLane      *async.FencedLane[string, dirLoadResult]
-	projFilesLane    *async.FencedLane[string, projectFilesResult]
-	fileReadLane     *async.FencedLane[string, fileReadResult]
+	dirListLane       *async.FencedLane[string, dirLoadResult]
+	projFilesLane     *async.FencedLane[string, projectFilesResult]
+	fileReadLane      *async.FencedLane[fileReadReq, fileReadResult]
+	grepHits          []hostlink.GrepHit
+	grepQuery         string
+	grepLoading       bool
+	grepErr           string
+	grepLane          *async.FencedLane[grepReq, grepResult]
+	knownProjects     []hostlink.ProjectInfo
+	projectsLoading   bool
+	projectsLane      *async.FencedLane[string, projectsResult]
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)

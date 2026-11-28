@@ -75,6 +75,12 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:find-file", "Find file (Vertico C-x C-f / SPC f f)", false
 	case "project-find-file":
 		return "cmd:project-find-file", "Find file in project (C-c p f / SPC p f)", false
+	case "project-switch-project":
+		return "cmd:project-switch", "Switch active Git/jj project (C-c p p / SPC p p)", false
+	case "consult-ripgrep":
+		return "cmd:consult-ripgrep", "Live project grep (SPC / · C-c /)", false
+	case "consult-line":
+		return "cmd:consult-line", "Search lines in active buffer (SPC l · C-c l)", false
 	case "recentf-open-files":
 		return "cmd:recentf", "Open recent file (C-x C-r / SPC f r)", false
 	case "switch-buffer":

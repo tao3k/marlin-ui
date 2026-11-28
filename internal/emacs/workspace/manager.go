@@ -252,6 +252,21 @@ func (m *Manager) CreateWorkspace(name, projectRoot string) Perspective {
 	return clonePerspective(ws)
 }
 
+// SetActiveProjectRoot updates the active workspace's bound Git/jj project root
+// (used by Doom Emacs `project-switch-project` / `SPC p p`).
+func (m *Manager) SetActiveProjectRoot(root string) Perspective {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clean := strings.TrimSpace(root)
+	for i := range m.workspaces {
+		if m.workspaces[i].ID == m.activeID {
+			m.workspaces[i].ProjectRoot = clean
+			return clonePerspective(m.workspaces[i])
+		}
+	}
+	return Perspective{}
+}
+
 // Switch activates the target workspace and restores its isolated buffer set,
 // split layout, and popup drawer state.
 func (m *Manager) Switch(id string) (Perspective, bool) {

@@ -42,6 +42,9 @@ const (
 	ModeFindFile
 	ModeProjectFindFile
 	ModeRecentFiles
+	ModeProjectGrep
+	ModeProjectSwitch
+	ModeConsultLine
 )
 
 // Candidate represents one Vertico / Marginalia completion candidate.

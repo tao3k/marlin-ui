@@ -85,15 +85,24 @@ func renderFilePreview(c *ui.Context, th theme.Theme, bc *Context) {
 			}
 		})
 
-		lines := strings.Split(fp.Content, "\n")
-		if len(lines) > 1200 {
-			lines = lines[:1200]
+		allLines := strings.Split(fp.Content, "\n")
+		startIdx := 0
+		endIdx := len(allLines)
+		const maxRenderLines = 1200
+		if endIdx > maxRenderLines {
+			if fp.Line > 900 {
+				startIdx = max(0, fp.Line-300)
+				endIdx = min(len(allLines), startIdx+maxRenderLines)
+			} else {
+				endIdx = maxRenderLines
+			}
 		}
+		lines := allLines[startIdx:endIdx]
 
 		ui.Scroll(c.Key("preview-scroll")).Grow(1).Padding(10, 14).Children(func() {
 			ui.Column(c).Gap(2).AlignItems(ui.Stretch).Children(func() {
 				for idx, line := range lines {
-					lineNum := idx + 1
+					lineNum := startIdx + idx + 1
 					highlighted := fp.Line > 0 && lineNum == fp.Line
 					row := ui.Row(c.Key(fmt.Sprintf("prev-ln-%d", lineNum))).Gap(12).Padding(1, 6).Radius(4).AlignItems(ui.Start)
 					if highlighted {

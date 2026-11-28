@@ -46,6 +46,10 @@ type RenderProps struct {
 	ProjectFileRoot         string
 	ProjectFileCands        func(query string) []Candidate
 	RecentFileCands         func(query string) []Candidate
+	ProjectGrepCands        func(query string) []Candidate
+	OnProjectGrepQuery      func(query string)
+	ProjectSwitchCands      func(query string) []Candidate
+	ConsultLineCands        func(query string) []Candidate
 	OnFindFileUp            func()
 	OnFindFileJump          func(path string)
 	OnSubmitPrompt          func(prompt string)
@@ -141,6 +145,21 @@ func Render(c *ui.Context, p RenderProps) {
 				items = p.RecentFileCands(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeProjectGrep:
+			if p.ProjectGrepCands != nil {
+				items = p.ProjectGrepCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeProjectSwitch:
+			if p.ProjectSwitchCands != nil {
+				items = p.ProjectSwitchCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeConsultLine:
+			if p.ConsultLineCands != nil {
+				items = p.ConsultLineCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
 		}
 
 		// 3. Echo Area when SPC Keypad/Hydra is active.
@@ -231,6 +250,19 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeRecentFiles:
 			prompt = fmt.Sprintf("%d/%d Recent file (C-x C-r): ", clampSel(sel, len(items)), len(items))
 			placeholder = "Filter recently opened files"
+		case ModeProjectGrep:
+			rootLbl := strings.TrimSpace(p.ProjectFileRoot)
+			if rootLbl == "" {
+				rootLbl = "project"
+			}
+			prompt = fmt.Sprintf("%d/%d Ripgrep (%s): ", clampSel(sel, len(items)), len(items), rootLbl)
+			placeholder = "Live Rust consult-ripgrep across project (RET jumps to file:line)"
+		case ModeProjectSwitch:
+			prompt = fmt.Sprintf("%d/%d Switch project (SPC p p): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Orderless filter real Git/jj repositories (rebinds find-file & Magit)"
+		case ModeConsultLine:
+			prompt = fmt.Sprintf("%d/%d Line (SPC l): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Orderless search lines in active buffer (RET jumps to line)"
 		case ModeHelm:
 			prompt = "Helm ›"
 			placeholder = "Search workspace, @lang:rust, @sym:name, #local, !exclude, (dsl ...)"
@@ -285,7 +317,7 @@ func Render(c *ui.Context, p RenderProps) {
 			switch mode {
 			case ModeHelm:
 				promptEl.Width(64)
-			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump, ModeEmbark, ModeFindFile, ModeProjectFindFile, ModeRecentFiles:
+			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump, ModeEmbark, ModeFindFile, ModeProjectFindFile, ModeRecentFiles, ModeProjectGrep, ModeProjectSwitch, ModeConsultLine:
 				promptEl.MinWidth(96)
 			}
 
@@ -310,6 +342,9 @@ func Render(c *ui.Context, p RenderProps) {
 				if mode == ModeHelm && p.Helm != nil {
 					gen := p.Helm.SetQuery(val)
 					s.MarkHelmPending(gen)
+				}
+				if mode == ModeProjectGrep && p.OnProjectGrepQuery != nil {
+					p.OnProjectGrepQuery(val)
 				}
 			}
 			if mode == ModeFindFile {
