@@ -165,3 +165,83 @@ func TestDisplayBufferAlistDescribeModePerBufferSessionsAndIbufferLifecycle(t *t
 		t.Fatalf("expected display-buffer-alist split-right to open 2nd window, got %d windows", splitSnap.Active.WindowCount())
 	}
 }
+
+func TestEmacsSelfDocMinorModeHooksOrderlessMxAndIbufferBatchKill(t *testing.T) {
+	f := New(Config{InitialThemeID: "doom-one"})
+	defer f.Close()
+
+	// 1. C-h k (describe-key) resolves local Magit bindings ahead of global bindings.
+	f.SelectBuffer(buffer.Magit)
+	f.DescribeKey("s")
+	hd := f.currentHelpIntrospection(buffer.Magit)
+	if hd == nil || hd.KeyDoc == nil || hd.KeyDoc.Tier != "MAJOR" || hd.KeyDoc.Command != "cmd:magit-stage" {
+		t.Fatalf("expected C-h k 's' in *magit* to resolve [MAJOR] cmd:magit-stage, got %+v", hd)
+	}
+
+	// C-h k also resolves global chords with equivalent Doom/Emacs aliases.
+	f.DescribeKey("C-x 3")
+	hd = f.currentHelpIntrospection(buffer.Magit)
+	if hd == nil || hd.KeyDoc == nil || hd.KeyDoc.Tier != "GLOBAL" || hd.KeyDoc.Command != "cmd:win-split-right" {
+		t.Fatalf("expected C-h k 'C-x 3' to resolve [GLOBAL] cmd:win-split-right, got %+v", hd)
+	}
+	if len(hd.KeyDoc.Aliases) < 2 {
+		t.Fatalf("expected paired Doom/Emacs aliases for C-x 3, got %v", hd.KeyDoc.Aliases)
+	}
+
+	// 2. C-h f (describe-function) & C-h b (describe-bindings) populate *Help* cards.
+	f.DescribeFunction("dedicated-window-mode")
+	hd = f.currentHelpIntrospection(buffer.Magit)
+	if hd == nil || hd.KeyDoc == nil || hd.KeyDoc.Tier != "MINOR-MODE" {
+		t.Fatalf("expected C-h f dedicated-window-mode -> MINOR-MODE doc, got %+v", hd)
+	}
+	f.DescribeBindings()
+	hd = f.currentHelpIntrospection(buffer.Magit)
+	if hd == nil || len(hd.GlobalBindings) < 10 {
+		t.Fatalf("expected C-h b to list live global bindings, got %d", len(hd.GlobalBindings))
+	}
+
+	// 3. Live Minor Mode Hooks: toggling dedicated-window-mode pins/unpins focused window,
+	//    and toggling read-only-mode updates EffectiveStack.ReadOnly on *conversation*.
+	f.SelectBuffer(buffer.Conversation)
+	if f.EffectiveModeStack(buffer.Conversation).ReadOnly {
+		t.Fatalf("expected *conversation* to start writable")
+	}
+	f.ToggleMinorModeOnActive("read-only-mode")
+	if !f.EffectiveModeStack(buffer.Conversation).ReadOnly {
+		t.Fatalf("expected read-only-mode toggle to mark *conversation* ReadOnly")
+	}
+	f.ToggleMinorModeOnActive("dedicated-window-mode")
+	if !f.WorkspaceSnapshot().Active.FocusedLeaf().Dedicated {
+		t.Fatalf("expected enter-minor-mode hook for dedicated-window-mode to pin active window")
+	}
+	f.ToggleMinorModeOnActive("dedicated-window-mode")
+	if f.WorkspaceSnapshot().Active.FocusedLeaf().Dedicated {
+		t.Fatalf("expected exit-minor-mode hook for dedicated-window-mode to unpin active window")
+	}
+
+	// 4. Orderless M-x surfaces live Minor Modes and mode-local commands.
+	cands := f.commandCandidates("dedicated mode")
+	if len(cands) == 0 {
+		t.Fatalf("expected Orderless M-x query 'dedicated mode' to match dedicated-window-mode")
+	}
+
+	// 5. *Ibuffer* mark, filter, and batch kill marked buffers.
+	c1 := f.NewChatBuffer("batch-1")
+	c2 := f.NewChatBuffer("batch-2")
+	f.SetIbufferFilter("Marlin-Chat")
+	if f.IbufferFilter() != "Marlin-Chat" {
+		t.Fatalf("expected IbufferFilter = Marlin-Chat, got %q", f.IbufferFilter())
+	}
+	f.ToggleIbufferMark(c1)
+	f.ToggleIbufferMark(c2)
+	if f.IbufferMarkedCount() != 2 {
+		t.Fatalf("expected 2 marked buffers in *Ibuffer*, got %d", f.IbufferMarkedCount())
+	}
+	killed := f.KillMarkedIbuffer()
+	if killed != 2 {
+		t.Fatalf("expected KillMarkedIbuffer to kill 2 buffers, got %d", killed)
+	}
+	if f.IbufferMarkedCount() != 0 {
+		t.Fatalf("expected marks cleared after KillMarkedIbuffer, got %d", f.IbufferMarkedCount())
+	}
+}

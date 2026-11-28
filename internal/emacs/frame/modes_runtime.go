@@ -6,11 +6,13 @@ package frame
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/modes"
 )
 
@@ -21,7 +23,30 @@ func (f *Frame) ensureModeRegistryLocked() *modes.Registry {
 	if f.bufModes == nil {
 		f.bufModes = make(map[buffer.ID]modes.BufferState, 16)
 	}
+	if f.ibufferMarked == nil {
+		f.ibufferMarked = make(map[buffer.ID]bool, 8)
+	}
+	if !f.modeHooksInstalled {
+		f.modeHooksInstalled = true
+		f.installDefaultModeHooksLocked(f.modeReg)
+	}
 	return f.modeReg
+}
+
+// installDefaultModeHooksLocked wires authentic Emacs lifecycle hooks onto
+// the Frame's mode registry so minor-mode toggles drive live runtime effects
+// (e.g. dedicated-window-mode pin sync) without ever re-acquiring f.mu.
+func (f *Frame) installDefaultModeHooksLocked(reg *modes.Registry) {
+	reg.AddHook(modes.HookEnterMinorMode, func(ev modes.HookEvent) {
+		if ev.MinorMode == "dedicated-window-mode" && f.wsMgr != nil {
+			f.wsMgr.SetWindowDedicated(true)
+		}
+	})
+	reg.AddHook(modes.HookExitMinorMode, func(ev modes.HookEvent) {
+		if ev.MinorMode == "dedicated-window-mode" && f.wsMgr != nil {
+			f.wsMgr.SetWindowDedicated(false)
+		}
+	})
 }
 
 // ModeRegistry returns the Frame's Major/Minor/Polymode & Hook registry.
@@ -84,6 +109,9 @@ func (f *Frame) FocusPolymodeSpan(id buffer.ID, span modes.SpanKind) modes.Buffe
 	next := f.ModeRegistry().SwitchSpan(cur, span)
 	f.mu.Lock()
 	f.bufModes[id] = next
+	if next.InnerMode != cur.InnerMode {
+		f.logMessage(fmt.Sprintf("hook[polymode-switch-span]: %s span=%s (%s -> %s)", id, span, cur.InnerMode, next.InnerMode))
+	}
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
 	f.requestFrame()
@@ -97,10 +125,31 @@ func (f *Frame) ToggleBufferMinorMode(id buffer.ID, minorID string) modes.Buffer
 	next := f.ModeRegistry().ToggleMinorMode(cur, minorID)
 	f.mu.Lock()
 	f.bufModes[id] = next
+	f.logMessage(fmt.Sprintf("hook[minor-mode]: toggled %s on %s", minorID, id))
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
 	f.requestFrame()
 	return next
+}
+
+// ToggleMinorModeOnActive toggles minorID on the currently focused buffer,
+// runs registered enter/exit hooks, and echoes the new state in the Echo Area.
+func (f *Frame) ToggleMinorModeOnActive(minorID string) bool {
+	buf := f.ActiveBuffer()
+	st := f.ToggleBufferMinorMode(buf, minorID)
+	enabled := false
+	for _, m := range st.MinorModes {
+		if m == minorID {
+			enabled = true
+			break
+		}
+	}
+	if enabled {
+		f.Echo(fmt.Sprintf("%s enabled in %s", minorID, buf))
+	} else {
+		f.Echo(fmt.Sprintf("%s disabled in %s", minorID, buf))
+	}
+	return enabled
 }
 
 // LookupModeKey resolves key against the active buffer's Emacs precedence chain:
@@ -356,6 +405,185 @@ func (f *Frame) DescribeCurrentMode() {
 	f.Echo(fmt.Sprintf("describe-mode: %s (%s)", target, data.MajorTitle))
 }
 
+// OpenDescribeKey opens the Emacs `C-h k` (`describe-key`) Minibuffer prompt.
+func (f *Frame) OpenDescribeKey() {
+	f.OpenMinibuffer(minibuffer.ModeDescribeKey)
+}
+
+// OpenDescribeFunction opens the Emacs `C-h f` (`describe-function`) Vertico picker.
+func (f *Frame) OpenDescribeFunction() {
+	f.OpenMinibuffer(minibuffer.ModeDescribeFunc)
+}
+
+// DescribeKey implements Emacs `C-h k` (`describe-key`): resolves chord against
+// the active buffer's exact Emacs precedence hierarchy
+// (`MINOR` -> `POLY` -> `MAJOR` -> `PARENT` -> `GLOBAL` / Doom/Emacs Hydras)
+// and displays a structured documentation card in *Help*.
+func (f *Frame) DescribeKey(chord string) {
+	query := strings.TrimSpace(chord)
+	if query == "" {
+		return
+	}
+	target := f.ActiveBuffer()
+	if target == "" || target == buffer.Help {
+		target = buffer.Conversation
+	}
+	data := f.BuildHelpIntrospection(target)
+	doc := &buffer.HelpKeyDoc{
+		Heading: "C-h k · describe-key",
+		Subject: query,
+		Tier:    "UNBOUND",
+		Command: "(unbound)",
+	}
+	// 1. Check active buffer's resolved mode-local stack first (MINOR -> POLY -> MAJOR -> PARENT).
+	for _, lb := range data.LocalBindings {
+		if strings.EqualFold(lb[1], query) {
+			doc.Tier = lb[0]
+			doc.Description = lb[2]
+			doc.Command = lb[2]
+			if idx := strings.LastIndex(lb[2], "("); idx >= 0 && strings.HasSuffix(lb[2], ")") {
+				doc.Command = strings.TrimSpace(lb[2][idx+1 : len(lb[2])-1])
+			}
+			doc.Aliases = []string{lb[1] + " (buffer-local in " + string(target) + ")"}
+			break
+		}
+	}
+	// 2. Fall through to live Global / Doom SPC / Emacs C-x / C-c / C-h Hydras.
+	if doc.Tier == "UNBOUND" {
+		f.mu.Lock()
+		hydras := f.tomlHydras
+		f.mu.Unlock()
+		var matchedAct string
+		for pref, def := range hydras {
+			for _, hd := range def.Heads {
+				full := strings.TrimSpace(pref + " " + hd.Key)
+				if strings.EqualFold(full, query) {
+					doc.Tier = "GLOBAL"
+					doc.Command = hd.Action
+					doc.Description = hd.Label
+					matchedAct = hd.Action
+					break
+				}
+			}
+			if matchedAct != "" {
+				break
+			}
+		}
+		if matchedAct != "" {
+			for pref, def := range hydras {
+				for _, hd := range def.Heads {
+					if hd.Action == matchedAct {
+						doc.Aliases = append(doc.Aliases, strings.TrimSpace(pref+" "+hd.Key))
+					}
+				}
+			}
+			sort.Strings(doc.Aliases)
+		} else if strings.EqualFold(query, "M-x") {
+			doc.Tier = "GLOBAL"
+			doc.Command = "cmd:mx"
+			doc.Description = "Execute extended command (Vertico + Orderless)"
+			doc.Aliases = []string{"M-x", "SPC SPC", "SPC x"}
+		} else if strings.EqualFold(query, "C-s") {
+			doc.Tier = "GLOBAL"
+			doc.Command = "cmd:helm"
+			doc.Description = "Open 120Hz Helm live multi-source search"
+			doc.Aliases = []string{"C-s", "SPC s"}
+		}
+	}
+	data.KeyDoc = doc
+	f.mu.Lock()
+	f.helpData = data
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.SelectBuffer(buffer.Help)
+	f.Echo(fmt.Sprintf("describe-key: %s -> [%s] %s", query, doc.Tier, doc.Command))
+}
+
+// DescribeFunction implements Emacs `C-h f` (`describe-function`): looks up
+// command metadata and all local/global chords bound to cmdName and opens *Help*.
+func (f *Frame) DescribeFunction(cmdName string) {
+	name := strings.TrimSpace(cmdName)
+	if name == "" {
+		return
+	}
+	target := f.ActiveBuffer()
+	if target == "" || target == buffer.Help {
+		target = buffer.Conversation
+	}
+	data := f.BuildHelpIntrospection(target)
+	doc := &buffer.HelpKeyDoc{
+		Heading: "C-h f · describe-function",
+		Subject: name,
+		Tier:    "COMMAND",
+		Command: name,
+	}
+	for _, cand := range f.commandCandidates("") {
+		if strings.EqualFold(cand.Name, name) {
+			doc.Description = cand.Desc
+			if cand.Annotation != "" {
+				doc.Aliases = append(doc.Aliases, cand.Annotation)
+			}
+			break
+		}
+	}
+	if mm, ok := f.ModeRegistry().MinorModeFor(name); ok {
+		doc.Tier = "MINOR-MODE"
+		doc.Description = fmt.Sprintf("Toggleable Emacs Minor Mode %s (lighter: %q, priority: %d)", mm.Title, mm.Lighter, mm.Priority)
+	}
+	data.KeyDoc = doc
+	f.mu.Lock()
+	f.helpData = data
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.SelectBuffer(buffer.Help)
+	f.Echo(fmt.Sprintf("describe-function: %s", name))
+}
+
+// DescribeBindings implements Emacs `C-h b` (`describe-bindings`): snapshots
+// every active local binding plus the complete live Doom/Emacs global keymap
+// table into *Help*.
+func (f *Frame) DescribeBindings() {
+	target := f.ActiveBuffer()
+	if target == "" || target == buffer.Help {
+		target = buffer.Conversation
+	}
+	data := f.BuildHelpIntrospection(target)
+	f.mu.Lock()
+	hydras := f.tomlHydras
+	f.mu.Unlock()
+	var globals [][2]string
+	for pref, def := range hydras {
+		for _, hd := range def.Heads {
+			if hd.Action == "" || hd.IsPrefix {
+				continue
+			}
+			chord := strings.TrimSpace(pref + " " + hd.Key)
+			desc := hd.Label
+			if desc == "" {
+				desc = hd.Action
+			} else {
+				desc = desc + "  (" + hd.Action + ")"
+			}
+			globals = append(globals, [2]string{chord, desc})
+		}
+	}
+	sort.Slice(globals, func(i, j int) bool { return globals[i][0] < globals[j][0] })
+	data.GlobalBindings = globals
+	data.KeyDoc = &buffer.HelpKeyDoc{
+		Heading:     "C-h b · describe-bindings",
+		Subject:     string(target),
+		Tier:        "ALL-KEYMAPS",
+		Command:     fmt.Sprintf("%d local · %d global bindings", len(data.LocalBindings), len(globals)),
+		Description: "Precedence: MINOR -> POLYMODE INNER -> MAJOR -> PARENT -> GLOBAL",
+	}
+	f.mu.Lock()
+	f.helpData = data
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.SelectBuffer(buffer.Help)
+	f.Echo(fmt.Sprintf("describe-bindings: %d local, %d global", len(data.LocalBindings), len(globals)))
+}
+
 // BuildIbufferEntries builds the live Major-Mode-grouped buffer rows for *Ibuffer*.
 func (f *Frame) BuildIbufferEntries(snap frameSnapshot) []buffer.IbufferEntry {
 	wsName := snap.Workspaces.Active.Name
@@ -372,6 +600,14 @@ func (f *Frame) BuildIbufferEntries(snap frameSnapshot) []buffer.IbufferEntry {
 	if len(bufs) == 0 {
 		bufs = snap.OpenTabs
 	}
+	f.mu.Lock()
+	marked := make(map[buffer.ID]bool, len(f.ibufferMarked))
+	for k, v := range f.ibufferMarked {
+		if v {
+			marked[k] = true
+		}
+	}
+	f.mu.Unlock()
 	out := make([]buffer.IbufferEntry, 0, len(bufs))
 	for _, bid := range bufs {
 		eff := f.EffectiveModeStack(bid)
@@ -395,9 +631,91 @@ func (f *Frame) BuildIbufferEntries(snap frameSnapshot) []buffer.IbufferEntry {
 			WindowNum: winNum[bid],
 			ReadOnly:  eff.ReadOnly,
 			Active:    bid == snap.ActiveBuffer,
+			Marked:    marked[bid],
 		})
 	}
 	return out
+}
+
+// ToggleIbufferMark marks or unmarks buf for batch deletion (`d` in *Ibuffer*).
+func (f *Frame) ToggleIbufferMark(id buffer.ID) bool {
+	f.mu.Lock()
+	if f.ibufferMarked == nil {
+		f.ibufferMarked = make(map[buffer.ID]bool, 8)
+	}
+	next := !f.ibufferMarked[id]
+	if next {
+		f.ibufferMarked[id] = true
+	} else {
+		delete(f.ibufferMarked, id)
+	}
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.requestFrame()
+	return next
+}
+
+// UnmarkAllIbuffer clears all [D] marks in *Ibuffer* (`U`).
+func (f *Frame) UnmarkAllIbuffer() {
+	f.mu.Lock()
+	clear(f.ibufferMarked)
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.requestFrame()
+	f.Echo("Ibuffer: cleared all marks")
+}
+
+// KillMarkedIbuffer kills every buffer marked with [D] in *Ibuffer* (`x`),
+// preserving at least one remaining buffer in the workspace.
+func (f *Frame) KillMarkedIbuffer() int {
+	f.mu.Lock()
+	targets := make([]buffer.ID, 0, len(f.ibufferMarked))
+	for bid, on := range f.ibufferMarked {
+		if on {
+			targets = append(targets, bid)
+		}
+	}
+	clear(f.ibufferMarked)
+	f.mu.Unlock()
+	killed := 0
+	for _, bid := range targets {
+		if f.KillBuffer(bid) {
+			killed++
+		}
+	}
+	if killed > 0 {
+		f.Echo(fmt.Sprintf("Ibuffer: killed %d marked buffer(s)", killed))
+	}
+	return killed
+}
+
+// SetIbufferFilter filters *Ibuffer* to a single Major Mode group ("" = All).
+func (f *Frame) SetIbufferFilter(majorMode string) {
+	f.mu.Lock()
+	f.ibufferFilter = strings.TrimSpace(majorMode)
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.requestFrame()
+}
+
+// IbufferFilter returns the active *Ibuffer* Major Mode filter ("" = All).
+func (f *Frame) IbufferFilter() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ibufferFilter
+}
+
+// IbufferMarkedCount returns the number of currently marked buffers in *Ibuffer*.
+func (f *Frame) IbufferMarkedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, on := range f.ibufferMarked {
+		if on {
+			n++
+		}
+	}
+	return n
 }
 
 // OpenIbuffer opens Emacs `*Ibuffer*` grouped by Major Mode (`C-c b` / `SPC b i`).
@@ -461,8 +779,26 @@ func (f *Frame) dispatchModeAction(act string) bool {
 	switch act {
 	case "cmd:describe-mode":
 		f.DescribeCurrentMode()
+	case "cmd:describe-key":
+		f.OpenDescribeKey()
+	case "cmd:describe-function":
+		f.OpenDescribeFunction()
+	case "cmd:describe-bindings":
+		f.DescribeBindings()
+	case "cmd:toggle-dedicated-mode":
+		f.ToggleMinorModeOnActive("dedicated-window-mode")
+	case "cmd:toggle-aitia-mode":
+		f.ToggleMinorModeOnActive("aitia-audit-minor-mode")
+	case "cmd:toggle-readonly-mode":
+		f.ToggleMinorModeOnActive("read-only-mode")
+	case "cmd:toggle-llm-assist-mode":
+		f.ToggleMinorModeOnActive("llm-inline-assist-mode")
 	case "cmd:ibuffer":
 		f.OpenIbuffer()
+	case "cmd:ibuffer-unmark-all":
+		f.UnmarkAllIbuffer()
+	case "cmd:ibuffer-kill-marked":
+		f.KillMarkedIbuffer()
 	case "cmd:kill-buffer":
 		f.KillActiveBuffer()
 	case "cmd:prev-buffer":

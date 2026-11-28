@@ -33,11 +33,13 @@ type RenderProps struct {
 	GateTitle     string
 	GatePrompt  string
 
-	CommandCandidates func(query string) []Candidate
-	BufferCandidates  func(query string) []Candidate
-	ThemeCandidates   func(query string) []Candidate
+	CommandCandidates   func(query string) []Candidate
+	BufferCandidates    func(query string) []Candidate
+	ThemeCandidates     func(query string) []Candidate
+	DescribeFuncCands   func(query string) []Candidate
 	OnSubmitPrompt      func(prompt string)
 	OnCreateWorkspace   func(spec string)
+	OnDescribeKey       func(chord string)
 	MagitPromptLabel    string
 	OnSubmitMagitPrompt func(text string)
 	OnHelmPreview       func(title, path, snippet string, line int)
@@ -89,6 +91,11 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeThemeSwitch:
 			if p.ThemeCandidates != nil {
 				items = p.ThemeCandidates(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeDescribeFunc:
+			if p.DescribeFuncCands != nil {
+				items = p.DescribeFuncCands(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
 		}
@@ -157,6 +164,12 @@ func Render(c *ui.Context, p RenderProps) {
 				prompt = "Magit: "
 			}
 			placeholder = "Enter message or branch name (Enter to execute, Esc to cancel)"
+		case ModeDescribeKey:
+			prompt = "Describe key (C-h k): "
+			placeholder = "Type chord e.g. SPC g g, C-x 3, C-h m, s, or Enter"
+		case ModeDescribeFunc:
+			prompt = fmt.Sprintf("%d/%d Describe function (C-h f): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Orderless filter command name (Enter to inspect in *Help*)"
 		default:
 			if p.KeyMode == meow.ModeInsert {
 				placeholder = "Type message and press Enter..."
@@ -193,7 +206,7 @@ func Render(c *ui.Context, p RenderProps) {
 			switch mode {
 			case ModeHelm:
 				promptEl.Width(64)
-			case ModeCommand, ModeBufferSwitch, ModeThemeSwitch:
+			case ModeCommand, ModeBufferSwitch, ModeThemeSwitch, ModeDescribeFunc:
 				promptEl.MinWidth(96)
 			}
 
@@ -255,6 +268,11 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 		s.Close()
 		if trimmed != "" && p.OnSubmitMagitPrompt != nil {
 			p.OnSubmitMagitPrompt(trimmed)
+		}
+	case ModeDescribeKey:
+		s.Close()
+		if trimmed != "" && p.OnDescribeKey != nil {
+			p.OnDescribeKey(trimmed)
 		}
 	default:
 		s.mu.Lock()

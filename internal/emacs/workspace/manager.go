@@ -782,6 +782,26 @@ func (m *Manager) ToggleWindowDedicated() (dedicated bool, snap Snapshot) {
 	return dedicated, m.snapshotLocked()
 }
 
+// SetWindowDedicated explicitly sets Emacs `dedicated-window-mode` state on the
+// focused window leaf, returning the updated Snapshot.
+func (m *Manager) SetWindowDedicated(dedicated bool) Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Dedicated = dedicated
+		return &cp
+	})
+	syncLegacySplitFields(ws)
+	return m.snapshotLocked()
+}
+
 // WinnerUndo restores the previous window configuration in the active workspace
 // (Doom per-workspace `winner-mode` / SPC w u).
 func (m *Manager) WinnerUndo() (ok bool, snap Snapshot) {

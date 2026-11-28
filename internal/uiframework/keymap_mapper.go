@@ -47,8 +47,10 @@ var schemePrefixMeta = map[string]struct {
 	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · Magit · tabs · zen)"},
 	"C-x t":   {id: "emacs-ctl-x-t", label: "+tab-bar", title: "Emacs C-x t (+workspaces / tab-bar)"},
 	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state)"},
-	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit)"},
-	"C-h":     {id: "emacs-ctl-h", label: "C-h", title: "Emacs C-h (help)"},
+	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit · toggles)"},
+	"C-c t":   {id: "emacs-ctl-c-t", label: "+toggles", title: "Emacs C-c t (minor-mode toggles · task tabs)"},
+	"C-h":     {id: "emacs-ctl-h", label: "C-h", title: "Emacs C-h (help & self-documentation)"},
+	"SPC h":   {id: "help", label: "+help", title: "+help (Emacs C-h self-documentation)"},
 }
 
 // ResolveSchemeAction maps canonical Scheme command symbols (declared in
@@ -71,6 +73,20 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "buffer:*Help*", "Documentation (*Help*)", false
 	case "describe-mode":
 		return "cmd:describe-mode", "Describe active Major/Minor/Polymode (C-h m)", false
+	case "describe-key":
+		return "cmd:describe-key", "Describe key or chord (C-h k)", false
+	case "describe-function":
+		return "cmd:describe-function", "Describe command or function (C-h f)", false
+	case "describe-bindings":
+		return "cmd:describe-bindings", "Describe all active keybindings (C-h b)", false
+	case "toggle-dedicated-window-mode":
+		return "cmd:toggle-dedicated-mode", "Toggle dedicated-window-mode", false
+	case "toggle-aitia-audit-mode":
+		return "cmd:toggle-aitia-mode", "Toggle aitia-audit-minor-mode", false
+	case "toggle-read-only-mode":
+		return "cmd:toggle-readonly-mode", "Toggle read-only-mode", false
+	case "toggle-llm-assist-mode":
+		return "cmd:toggle-llm-assist-mode", "Toggle llm-inline-assist-mode", false
 	case "kill-buffer":
 		return "cmd:kill-buffer", "Kill current buffer (C-x k)", false
 	case "ibuffer":

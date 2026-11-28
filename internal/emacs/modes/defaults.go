@@ -139,6 +139,11 @@ func DefaultRegistry() *Registry {
 			DisplayAction:     DisplayReuseWindow,
 			DefaultMinorModes: []string{"meow-normal-mode", "read-only-mode"},
 			ModelineSegments:  []string{"key-mode", "buffer-name", "major-mode", "row-count", "activity", "gate-badge"},
+			LocalKeymap: []ModeBinding{
+				{Key: "RET", Command: "cmd:table-select", Label: "Open selected row", Exit: true},
+				{Key: "U", Command: "cmd:ibuffer-unmark-all", Label: "Unmark all buffers", Exit: true},
+				{Key: "x", Command: "cmd:ibuffer-kill-marked", Label: "Kill marked buffers", Exit: true},
+			},
 		},
 		{
 			ID: "marlin-preview-mode", Title: "Preview-Mode", Parent: "marlin-special-mode", ReadOnly: true,

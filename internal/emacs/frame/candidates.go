@@ -27,7 +27,7 @@ func (f *Frame) buildActionShortcutIndex(hydras map[string]declarativeHydraDef) 
 	for i := 1; i <= 9; i++ {
 		emacsByAct[fmt.Sprintf("cmd:win-%d", i)] = fmt.Sprintf("M-%d", i)
 	}
-	prefOrder := []string{"SPC", "SPC w", "SPC b", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x t", "C-x w", "C-c", "C-h"}
+	prefOrder := []string{"SPC", "SPC w", "SPC b", "SPC h", "SPC g", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x t", "C-x w", "C-c", "C-c t", "C-h"}
 	seen := make(map[string]bool, len(prefOrder))
 	visit := func(pref string, def declarativeHydraDef) {
 		for _, hd := range def.Heads {
@@ -153,7 +153,104 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 			})
 		}
 	}
+
+	// Project live Emacs self-doc, buffer-lifecycle, active Mode-local commands,
+	// and Minor Mode toggle commands straight into M-x with live Marginalia badges.
+	builtinEmacs := []struct {
+		name, desc, act string
+	}{
+		{"describe-mode", "Describe active buffer Major/Minor/Polymode & local keymap", "cmd:describe-mode"},
+		{"describe-key", "Describe key or chord across active Emacs keymap precedence", "cmd:describe-key"},
+		{"describe-function", "Describe command documentation and all bound keybindings", "cmd:describe-function"},
+		{"describe-bindings", "List all active local and global keybindings in *Help*", "cmd:describe-bindings"},
+		{"ibuffer", "Open *Ibuffer* interactive buffer manager grouped by Major Mode", "cmd:ibuffer"},
+		{"kill-buffer", "Kill active buffer in the current workspace", "cmd:kill-buffer"},
+		{"previous-buffer", "Switch focused window to previous buffer in workspace", "cmd:prev-buffer"},
+		{"next-buffer", "Switch focused window to next buffer in workspace", "cmd:next-buffer"},
+		{"new-chat-buffer", "Create a new multi-instance LLM conversation (*chat:*)", "cmd:new-chat-buffer"},
+		{"clone-window", "Split window right viewing the same buffer (C-x 3)", "cmd:clone-window"},
+	}
+	for _, bc := range builtinEmacs {
+		if _, dup := seen[bc.name]; dup {
+			continue
+		}
+		seen[bc.name] = struct{}{}
+		act := bc.act
+		all = append(all, minibuffer.Candidate{
+			ID:         "emacs-" + bc.name,
+			Name:       bc.name,
+			Desc:       bc.desc,
+			Annotation: shortcuts[act],
+			Run:        func() { f.dispatchWidgetAction(act) },
+		})
+	}
+	activeBuf := f.ActiveBuffer()
+	activeState := f.BufferModeState(activeBuf)
+	activeMinorSet := make(map[string]bool, len(activeState.MinorModes))
+	for _, mid := range activeState.MinorModes {
+		activeMinorSet[mid] = true
+	}
+	for _, mm := range f.ModeRegistry().AllMinorModes() {
+		if _, dup := seen[mm.ID]; dup {
+			continue
+		}
+		seen[mm.ID] = struct{}{}
+		mid := mm.ID
+		stateBadge := "[off]"
+		if activeMinorSet[mid] {
+			stateBadge = "[ON]"
+		}
+		all = append(all, minibuffer.Candidate{
+			ID:         "minor-" + mid,
+			Name:       mid,
+			Desc:       fmt.Sprintf("Toggle minor mode %s (%s) on %s", mm.Title, mm.Lighter, activeBuf),
+			Annotation: stateBadge,
+			Run:        func() { f.ToggleMinorModeOnActive(mid) },
+		})
+	}
+	hi := f.BuildHelpIntrospection(activeBuf)
+	for _, lb := range hi.LocalBindings {
+		keyStr := lb[1]
+		label := lb[2]
+		cmdName := label
+		if idx := strings.LastIndex(label, "("); idx >= 0 && strings.HasSuffix(label, ")") {
+			cmdName = strings.TrimSpace(label[idx+1 : len(label)-1])
+		}
+		if cmdName == "" {
+			continue
+		}
+		if _, dup := seen[cmdName]; dup {
+			continue
+		}
+		seen[cmdName] = struct{}{}
+		act := cmdName
+		all = append(all, minibuffer.Candidate{
+			ID:         "local-" + cmdName,
+			Name:       cmdName,
+			Desc:       fmt.Sprintf("[%s · %s] %s", lb[0], hi.MajorTitle, label),
+			Annotation: keyStr,
+			Run:        func() { f.dispatchWidgetAction(act) },
+		})
+	}
 	return minibuffer.FilterCandidates(all, query)
+}
+
+// describeFunctionCandidates projects all M-x commands for Emacs `C-h f`
+// (`describe-function`) so selecting any candidate opens its documentation card in *Help*.
+func (f *Frame) describeFunctionCandidates(query string) []minibuffer.Candidate {
+	base := f.commandCandidates(query)
+	out := make([]minibuffer.Candidate, 0, len(base))
+	for _, cand := range base {
+		c := cand
+		out = append(out, minibuffer.Candidate{
+			ID:         "doc-" + c.ID,
+			Name:       c.Name,
+			Desc:       c.Desc,
+			Annotation: c.Annotation,
+			Run:        func() { f.DescribeFunction(c.Name) },
+		})
+	}
+	return out
 }
 
 func (f *Frame) bufferCandidates(query string) []minibuffer.Candidate {

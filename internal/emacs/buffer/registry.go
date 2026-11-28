@@ -106,20 +106,34 @@ type ArtifactSelection struct {
 	Payload  string
 }
 
-// HelpIntrospectionData carries live Emacs `describe-mode` (C-h m) reflection
-// data for the buffer that was focused when *Help* was invoked.
+// HelpKeyDoc carries structured Emacs `describe-key` (`C-h k`) or
+// `describe-function` (`C-h f`) introspection rendered at the top of *Help*.
+type HelpKeyDoc struct {
+	Heading     string   // e.g. "C-h k · describe-key" or "C-h f · describe-function"
+	Subject     string   // e.g. "SPC g g" or "magit-status"
+	Tier        string   // e.g. "MINOR" | "POLY" | "MAJOR" | "PARENT" | "GLOBAL" | "UNBOUND"
+	Command     string   // e.g. "cmd:magit-status"
+	Description string   // human-readable description
+	Aliases     []string // all equivalent Doom/Emacs bindings
+}
+
+// HelpIntrospectionData carries live Emacs `describe-mode` (C-h m),
+// `describe-key` (C-h k), `describe-function` (C-h f), and `describe-bindings`
+// (C-h b) reflection data for the buffer focused when *Help* was invoked.
 type HelpIntrospectionData struct {
-	BufferName    string
-	MajorModeID   string
-	MajorTitle    string
-	ParentChain   []string
-	MinorLighters []string
-	FocusedSpan   string
-	InnerModeID   string
-	DisplayAction string
-	ReadOnly      bool
-	LocalBindings [][3]string // [tier, key, command + label]
-	PolymodeRules [][3]string // [span-kind, inner-mode, lighter]
+	BufferName     string
+	MajorModeID    string
+	MajorTitle     string
+	ParentChain    []string
+	MinorLighters  []string
+	FocusedSpan    string
+	InnerModeID    string
+	DisplayAction  string
+	ReadOnly       bool
+	KeyDoc         *HelpKeyDoc
+	LocalBindings  [][3]string // [tier, key, command + label]
+	GlobalBindings [][2]string // [chord, command + label] for C-h b
+	PolymodeRules  [][3]string // [span-kind, inner-mode, lighter]
 }
 
 // IbufferEntry describes one open buffer row in *Ibuffer* grouped by Major Mode.
@@ -131,6 +145,7 @@ type IbufferEntry struct {
 	WindowNum int
 	ReadOnly  bool
 	Active    bool
+	Marked    bool
 }
 
 // Context carries the live data and callbacks needed to render any Emacs buffer.
@@ -163,10 +178,17 @@ type Context struct {
 	Magit               *MagitViewState
 	HelpIntrospection   *HelpIntrospectionData
 	IbufferRows         []IbufferEntry
+	IbufferFilter       string
+	IbufferMarkedCount  int
 	ActivePolymodeSpan  string
 
 	OnSelectBuffer      func(ID)
 	OnKillBuffer        func(ID)
+	OnToggleIbufferMark func(ID)
+	OnUnmarkAllIbuffer  func()
+	OnKillMarkedIbuffer func()
+	OnFilterIbuffer     func(majorMode string)
+	OnNewChatBuffer     func()
 	OnFocusPolymodeSpan func(spanKind, lang, payload string)
 	OnSetTheme          func(themeID string)
 	OnReloadThemes      func()

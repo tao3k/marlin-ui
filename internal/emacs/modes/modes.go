@@ -346,8 +346,12 @@ func (r *Registry) EffectiveStack(st BufferState) EffectiveStack {
 
 	minorIDs := make([]string, 0, len(minors))
 	lighters := make([]string, 0, len(minors))
+	readOnly := host.ReadOnly
 	for _, m := range minors {
 		minorIDs = append(minorIDs, m.ID)
+		if m.ID == "read-only-mode" {
+			readOnly = true
+		}
 		if m.Lighter != "" {
 			lighters = append(lighters, m.Lighter)
 		}
@@ -378,7 +382,7 @@ func (r *Registry) EffectiveStack(st BufferState) EffectiveStack {
 		ParentChain:      r.parentChainLocked(st.MajorMode),
 		DisplayTitle:     title,
 		DisplayAction:    disp,
-		ReadOnly:         host.ReadOnly,
+		ReadOnly:         readOnly,
 		ModelineSegments: segs,
 		HasSegment:       segMap,
 	}
@@ -470,6 +474,23 @@ func (r *Registry) MinorModeFor(id string) (MinorMode, bool) {
 	defer r.mu.RUnlock()
 	m, ok := r.minors[id]
 	return m, ok
+}
+
+// AllMinorModes returns every registered Minor Mode sorted by descending priority.
+func (r *Registry) AllMinorModes() []MinorMode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]MinorMode, 0, len(r.minors))
+	for _, m := range r.minors {
+		out = append(out, m)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority > out[j].Priority
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
 }
 
 // PolymodeFor returns the PolymodeSpec bound to hostMode, if any.

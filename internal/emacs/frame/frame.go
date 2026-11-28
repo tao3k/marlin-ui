@@ -130,15 +130,18 @@ type Frame struct {
 	tableCursor     int
 	messagesLog     []string
 
-	meowState      *meow.State
-	miniState      *minibuffer.State
-	modeReg        *modes.Registry
-	bufModes       map[buffer.ID]modes.BufferState
-	chatSessions   map[buffer.ID]string
-	activeSpanCode string
-	activeSpanLang string
-	helpData       *buffer.HelpIntrospectionData
-	chatSeq        int
+	meowState          *meow.State
+	miniState          *minibuffer.State
+	modeReg            *modes.Registry
+	modeHooksInstalled bool
+	bufModes           map[buffer.ID]modes.BufferState
+	chatSessions       map[buffer.ID]string
+	activeSpanCode     string
+	activeSpanLang     string
+	helpData           *buffer.HelpIntrospectionData
+	ibufferMarked      map[buffer.ID]bool
+	ibufferFilter      string
+	chatSeq            int
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
 	thinkingMu          sync.RWMutex

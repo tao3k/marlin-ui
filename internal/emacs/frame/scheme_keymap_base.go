@@ -37,7 +37,24 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 			Title:  "+help (Emacs C-h self-documentation)",
 			Heads: []declarativeHeadDef{
 				{Key: "m", KeyCode: ui.KeyM, Label: "Describe active mode & Polymode (C-h m)", Column: "Help", Exit: true, Action: "cmd:describe-mode"},
+				{Key: "k", KeyCode: ui.KeyK, Label: "Describe key or chord (C-h k)", Column: "Help", Exit: true, Action: "cmd:describe-key"},
+				{Key: "f", KeyCode: ui.KeyF, Label: "Describe function / command (C-h f)", Column: "Help", Exit: true, Action: "cmd:describe-function"},
+				{Key: "b", KeyCode: ui.KeyB, Label: "Describe all active bindings (C-h b)", Column: "Help", Exit: true, Action: "cmd:describe-bindings"},
 				{Key: "r", KeyCode: ui.KeyR, Label: "Open *Help* keybindings (C-h r)", Column: "Help", Exit: true, Action: "buffer:*Help*"},
+			},
+		},
+		"SPC t": {
+			ID:     "toggles",
+			Prefix: "SPC t",
+			Title:  "+themes & minor-mode toggles",
+			Heads: []declarativeHeadDef{
+				{Key: "t", KeyCode: ui.KeyT, Label: "Switch theme (C-x t t)", Column: "Themes", Exit: true, Action: "cmd:switch-theme"},
+				{Key: "d", KeyCode: ui.KeyD, Label: "Toggle dedicated-window-mode (C-c t d)", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-dedicated-mode"},
+				{Key: "a", KeyCode: ui.KeyA, Label: "Toggle aitia-audit-minor-mode (C-c t a)", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-aitia-mode"},
+				{Key: "r", KeyCode: ui.KeyR, Label: "Toggle read-only-mode (C-c t r)", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-readonly-mode"},
+				{Key: "l", KeyCode: ui.KeyL, Label: "Toggle llm-inline-assist-mode (C-c t l)", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-llm-assist-mode"},
+				{Key: "z", KeyCode: ui.KeyZ, Label: "Toggle Zen Writeroom (C-x z)", Column: "Focus", Exit: true, Action: "cmd:zen-mode"},
+				{Key: "Z", KeyCode: ui.KeyZ, KeyMods: ui.Shift, Label: "Toggle Zen Fullscreen (C-x Z)", Column: "Focus", Exit: true, Action: "cmd:zen-fullscreen"},
 			},
 		},
 		"SPC q": {
@@ -164,7 +181,7 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 		"C-c": {
 			ID:     "emacs-ctl-c",
 			Prefix: "C-c",
-			Title:  "Emacs C-c (winner-mode · Magit AI audit)",
+			Title:  "Emacs C-c (winner-mode · Magit AI audit · toggles)",
 			Heads: []declarativeHeadDef{
 				{Key: "u", KeyCode: ui.KeyU, Label: "Winner undo layout", Column: "Emacs", Exit: true, Action: "cmd:win-undo"},
 				{Key: "U", KeyCode: ui.KeyU, KeyMods: ui.Shift, Label: "Winner redo layout", Column: "Emacs", Exit: true, Action: "cmd:win-redo"},
@@ -173,14 +190,29 @@ func loadSchemeBaseKeymaps() map[string]declarativeHydraDef {
 				{Key: "b", KeyCode: ui.KeyB, Label: "Open *Ibuffer* by Major Mode", Column: "Buffers", Exit: true, Action: "cmd:ibuffer"},
 				{Key: "[", KeyCode: ui.KeyBracketLeft, Label: "Previous buffer", Column: "Buffers", Exit: true, Action: "cmd:prev-buffer"},
 				{Key: "]", KeyCode: ui.KeyBracketRight, Label: "Next buffer", Column: "Buffers", Exit: true, Action: "cmd:next-buffer"},
+				{Key: "t", KeyCode: ui.KeyT, Label: "+toggles (minor modes)", Column: "Emacs", IsPrefix: true, Action: "hydra:C-c t"},
+			},
+		},
+		"C-c t": {
+			ID:     "emacs-ctl-c-t",
+			Prefix: "C-c t",
+			Title:  "Emacs C-c t (minor-mode toggles)",
+			Heads: []declarativeHeadDef{
+				{Key: "d", KeyCode: ui.KeyD, Label: "Toggle dedicated-window-mode", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-dedicated-mode"},
+				{Key: "a", KeyCode: ui.KeyA, Label: "Toggle aitia-audit-minor-mode", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-aitia-mode"},
+				{Key: "r", KeyCode: ui.KeyR, Label: "Toggle read-only-mode", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-readonly-mode"},
+				{Key: "l", KeyCode: ui.KeyL, Label: "Toggle llm-inline-assist-mode", Column: "Minor Modes", Exit: true, Action: "cmd:toggle-llm-assist-mode"},
 			},
 		},
 		"C-h": {
 			ID:     "emacs-ctl-h",
 			Prefix: "C-h",
-			Title:  "Emacs C-h (help & describe-mode)",
+			Title:  "Emacs C-h (self-documentation)",
 			Heads: []declarativeHeadDef{
 				{Key: "m", KeyCode: ui.KeyM, Label: "Describe active Major/Minor/Polymode", Column: "Emacs", Exit: true, Action: "cmd:describe-mode"},
+				{Key: "k", KeyCode: ui.KeyK, Label: "Describe key or chord", Column: "Emacs", Exit: true, Action: "cmd:describe-key"},
+				{Key: "f", KeyCode: ui.KeyF, Label: "Describe command or function", Column: "Emacs", Exit: true, Action: "cmd:describe-function"},
+				{Key: "b", KeyCode: ui.KeyB, Label: "Describe all active keybindings", Column: "Emacs", Exit: true, Action: "cmd:describe-bindings"},
 				{Key: "r", KeyCode: ui.KeyR, Label: "Open Marlin help", Column: "Emacs", Exit: true, Action: "buffer:*Help*"},
 				{Key: "?", KeyCode: ui.KeySlash, KeyMods: ui.Shift, Label: "Open Marlin help", Column: "Emacs", Exit: true, Action: "buffer:*Help*"},
 			},

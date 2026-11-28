@@ -49,19 +49,65 @@ func renderVertico(c *ui.Context, s *State, th theme.Theme, query string, items 
 	})
 }
 
-// FilterCandidates performs case-insensitive substring matching across name,
-// description, and Marginalia keybinding annotations.
+// FilterCandidates performs Emacs Orderless multi-token matching across name,
+// description, and Marginalia keybinding annotations:
+//   - Whitespace splits independent tokens that may appear in any order.
+//   - Tokens prefixed with "!" negate (exclude matching candidates).
+//   - Matches are ranked: exact/prefix Name matches first, then substring Name
+//     matches, then Description/Annotation-only matches (preserving source order
+//     within each tier).
 func FilterCandidates(all []Candidate, query string) []Candidate {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return all
 	}
-	var out []Candidate
+	tokens := strings.Fields(q)
+	if len(tokens) == 0 {
+		return all
+	}
+	var tier0, tier1, tier2 []Candidate
 	for _, it := range all {
-		if strings.Contains(strings.ToLower(it.Name+" "+it.Desc+" "+it.Annotation), q) {
-			out = append(out, it)
+		nameL := strings.ToLower(it.Name)
+		haystack := nameL + " " + strings.ToLower(it.Desc) + " " + strings.ToLower(it.Annotation)
+		matched := true
+		allInName := true
+		hasPrefix := false
+		for _, tok := range tokens {
+			if strings.HasPrefix(tok, "!") && len(tok) > 1 {
+				neg := tok[1:]
+				if strings.Contains(haystack, neg) {
+					matched = false
+					break
+				}
+				continue
+			}
+			if !strings.Contains(haystack, tok) {
+				matched = false
+				break
+			}
+			if strings.HasPrefix(nameL, tok) {
+				hasPrefix = true
+			}
+			if !strings.Contains(nameL, tok) {
+				allInName = false
+			}
+		}
+		if !matched {
+			continue
+		}
+		switch {
+		case nameL == q || (allInName && hasPrefix):
+			tier0 = append(tier0, it)
+		case allInName:
+			tier1 = append(tier1, it)
+		default:
+			tier2 = append(tier2, it)
 		}
 	}
+	out := make([]Candidate, 0, len(tier0)+len(tier1)+len(tier2))
+	out = append(out, tier0...)
+	out = append(out, tier1...)
+	out = append(out, tier2...)
 	return out
 }
 

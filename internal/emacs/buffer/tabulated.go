@@ -222,6 +222,10 @@ func renderMessages(c *ui.Context, th theme.Theme, bc *Context) {
 func renderHelp(c *ui.Context, th theme.Theme, bc *Context) {
 	bindings := [][2]string{
 		{"C-h m / SPC h m", "Describe active buffer's Major Mode, Minor Modes, Polymode & Keymap"},
+		{"C-h k / SPC h k", "Describe key or chord across active Emacs keymap precedence"},
+		{"C-h f / SPC h f", "Describe command documentation & all bound keybindings"},
+		{"C-h b / SPC h b", "Describe all active local & global keybindings"},
+		{"C-c t d/a/r/l · SPC t d/a/r/l", "Toggle dedicated / Aitia audit / read-only / LLM assist minor modes"},
 		{"C-x g / SPC g g", "Open *magit* AI-Native jj + Git + Lambda Aitia workbench"},
 		{"C-x M-g / SPC g d", "Open Magit dispatch transient (?)"},
 		{"C-c g / SPC g a", "Open 50/50 AI + Aitia Code Audit split"},
@@ -244,6 +248,25 @@ func renderHelp(c *ui.Context, th theme.Theme, bc *Context) {
 			ui.Column(c).Gap(10).AlignItems(ui.Stretch).Children(func() {
 				if bc != nil && bc.HelpIntrospection != nil {
 					hi := bc.HelpIntrospection
+					if hi.KeyDoc != nil {
+						kd := hi.KeyDoc
+						ui.Column(c.Key("help-key-doc")).Padding(10, 14).Gap(5).Radius(8).
+							Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.56, 0.86)).
+							BorderWidth(1).BorderColor(th.Accent).AlignItems(ui.Stretch).Children(func() {
+							ui.Text(c, fmt.Sprintf("%s · %s", kd.Heading, kd.Subject)).
+								Font(theme.FontMono).FontSize(13).FontWeight(700).TextColor(th.Accent)
+							ui.Text(c, fmt.Sprintf("Keymap Tier: [%s]  ·  Command: %s", kd.Tier, kd.Command)).
+								Font(theme.FontMono).FontSize(11.5).FontWeight(600).TextColor(th.Warning)
+							if kd.Description != "" {
+								ui.Text(c, kd.Description).
+									Font(theme.FontMono).FontSize(11.5).TextColor(th.Ink)
+							}
+							if len(kd.Aliases) > 0 {
+								ui.Text(c, "Bound Chords: "+strings.Join(kd.Aliases, "  ·  ")).
+									Font(theme.FontMono).FontSize(11).TextColor(th.Info)
+							}
+						})
+					}
 					ui.Column(c.Key("help-describe-mode")).Padding(10, 14).Gap(6).Radius(8).
 						Background(theme.GlassTone(c, th.SurfaceElevated, th, 0.48, 0.78)).
 						BorderWidth(1).BorderColor(th.BorderSubtle).AlignItems(ui.Stretch).Children(func() {
@@ -285,6 +308,18 @@ func renderHelp(c *ui.Context, th theme.Theme, bc *Context) {
 								{Label: lb[2], Color: th.Ink},
 							}, false, th)
 						}
+					}
+				}
+				if bc != nil && bc.HelpIntrospection != nil && len(bc.HelpIntrospection.GlobalBindings) > 0 {
+					theme.TabulatedHeader(c, []theme.TableColumn{
+						{Label: "LIVE HYDRA / GLOBAL CHORD (C-h b)", Width: 280},
+						{Label: "COMMAND"},
+					}, th)
+					for i, gb := range bc.HelpIntrospection.GlobalBindings {
+						theme.TabulatedRow(c, fmt.Sprintf("hgb-%d", i), []theme.TableColumn{
+							{Label: gb[0], Width: 280, Color: th.Info, Bold: true, Mono: true},
+							{Label: gb[1], Color: th.Ink},
+						}, false, th)
 					}
 				}
 				theme.TabulatedHeader(c, []theme.TableColumn{
