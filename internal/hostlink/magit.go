@@ -140,25 +140,46 @@ type MagitOpEntry struct {
 
 // FetchMagitSnapshot queries the authoritative Rust host over
 // ProjectionQueryService::QueryProjectGraph("magit:snapshot") and reconstructs
-// the typed MagitSnapshot.
+// the typed MagitSnapshot for the default workspace repository.
 func (l *Link) FetchMagitSnapshot(ctx context.Context) (MagitSnapshot, error) {
+	return l.FetchMagitSnapshotFor(ctx, "")
+}
+
+// FetchMagitSnapshotFor queries the authoritative Rust host for the live Git/jj
+// repository at workspaceRoot (or the host's default workspace root when empty).
+// Never fabricates demo data when disconnected or on RPC failure.
+func (l *Link) FetchMagitSnapshotFor(ctx context.Context, workspaceRoot string) (MagitSnapshot, error) {
 	if l == nil || l.Switcher == nil {
-		return DemoMagitSnapshot(), nil
+		return MagitSnapshot{}, fmt.Errorf("not connected to marlin-app-server — launch via `just dev-desktop` or connect a Rust host")
 	}
 	target := l.Switcher.CurrentTarget()
 	if target == nil || target.Projection() == nil {
-		return DemoMagitSnapshot(), nil
+		return MagitSnapshot{}, fmt.Errorf("no active Rust gRPC projection target — connect marlin-app-server")
+	}
+	q := "magit:snapshot"
+	if root := strings.TrimSpace(workspaceRoot); root != "" {
+		q = "magit:snapshot@" + root
 	}
 	qctx, cancel := context.WithTimeout(ctx, 14*time.Second)
 	defer cancel()
 
 	resp, err := target.Projection().QueryProjectGraph(qctx, &projectionv1.QueryProjectGraphRequest{
 		ProjectId:        "default",
-		Query:            "magit:snapshot",
+		Query:            q,
 		SecretVisibility: projectionv1.SecretVisibility_SECRET_VISIBILITY_UNSPECIFIED,
 	})
 	if err != nil {
 		return MagitSnapshot{}, fmt.Errorf("magit snapshot rpc: %w", err)
+	}
+	hasMagitMeta := false
+	for _, rec := range resp.GetRecords() {
+		if rec != nil && strings.HasPrefix(rec.GetKind(), "magit.") {
+			hasMagitMeta = true
+			break
+		}
+	}
+	if !hasMagitMeta {
+		return MagitSnapshot{}, fmt.Errorf("connected Rust host binary does not expose live `magit:snapshot` — rebuild `marlin-mygo-host` / `marlin-app-server`")
 	}
 	return DecodeMagitGraphRecords(resp.GetRecords()), nil
 }

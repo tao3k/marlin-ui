@@ -27,7 +27,7 @@ func (f *Frame) buildActionShortcutIndex(hydras map[string]declarativeHydraDef) 
 	for i := 1; i <= 9; i++ {
 		emacsByAct[fmt.Sprintf("cmd:win-%d", i)] = fmt.Sprintf("M-%d", i)
 	}
-	prefOrder := []string{"SPC", "SPC w", "SPC b", "SPC h", "SPC g", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x 4", "C-x r", "C-x t", "C-x w", "C-c", "C-c t", "C-h"}
+	prefOrder := []string{"SPC", "SPC f", "SPC p", "SPC w", "SPC b", "SPC h", "SPC g", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x 4", "C-x r", "C-x t", "C-x w", "C-x x", "C-c", "C-c p", "C-c t", "C-h"}
 	seen := make(map[string]bool, len(prefOrder))
 	visit := func(pref string, def declarativeHydraDef) {
 		for _, hd := range def.Heads {
@@ -159,10 +159,20 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 	builtinEmacs := []struct {
 		name, desc, act string
 	}{
+		{"find-file", "Open real file via Vertico directory browser (C-x C-f / SPC f f)", "cmd:find-file"},
+		{"project-find-file", "Fuzzy-find any real file in current Git/jj project (C-c p f / SPC p f)", "cmd:project-find-file"},
+		{"recentf-open-files", "Open recently visited real file (C-x C-r / SPC f r)", "cmd:recentf"},
 		{"describe-mode", "Describe active buffer Major/Minor/Polymode & local keymap", "cmd:describe-mode"},
 		{"describe-key", "Describe key or chord across active Emacs keymap precedence", "cmd:describe-key"},
 		{"describe-function", "Describe command documentation and all bound keybindings", "cmd:describe-function"},
 		{"describe-bindings", "List all active local and global keybindings in *Help*", "cmd:describe-bindings"},
+		{"view-lossage", "Show last 60 keystrokes and commands in *Help* (C-h l)", "cmd:view-lossage"},
+		{"embark-act", "Open contextual Embark actions for target at point (C-. / SPC .)", "cmd:embark-act"},
+		{"repeat-last-command", "Repeat the last executed command (C-c .)", "cmd:repeat-last"},
+		{"window-zoom-toggle", "Temporarily zoom / restore focused window (SPC w m / C-x w m)", "cmd:win-zoom-toggle"},
+		{"window-transpose-layout", "Flip split orientation Vertical <-> Horizontal (SPC w T / C-x w t)", "cmd:win-transpose"},
+		{"rename-buffer", "Rename active buffer across workspace and windows (C-x x r)", "cmd:rename-buffer"},
+		{"bury-buffer", "Bury current buffer to tail of workspace ring (SPC b z / C-c z)", "cmd:bury-buffer"},
 		{"ibuffer", "Open *Ibuffer* interactive buffer manager grouped by Major Mode", "cmd:ibuffer"},
 		{"kill-buffer", "Kill active buffer in the current workspace", "cmd:kill-buffer"},
 		{"previous-buffer", "Switch focused window to previous buffer in workspace", "cmd:prev-buffer"},

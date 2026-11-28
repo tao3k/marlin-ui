@@ -507,10 +507,20 @@ func (f *Frame) View(c *ui.Context) {
 				ThemeCandidates:         f.themeCandidates,
 				DescribeFuncCands:       f.describeFunctionCandidates,
 				RegisterJumpCands:       f.registerJumpCandidates,
+				EmbarkCands:             f.embarkCandidates,
+				EmbarkTargetLabel:       f.currentEmbarkTargetLabel(),
+				FindFileDir:             f.currentFindFileDirDisplay(),
+				FindFileCands:           f.findFileCandidates,
+				ProjectFileRoot:         f.currentProjectRootLabel(),
+				ProjectFileCands:        f.projectFileCandidates,
+				RecentFileCands:         f.recentFileCandidates,
+				OnFindFileUp:            f.FindFileUp,
+				OnFindFileJump:          f.FindFileJump,
 				OnSubmitPrompt:          f.submitPrompt,
 				OnCreateWorkspace:       f.CreateWorkspaceFromSpec,
 				OnDescribeKey:           f.DescribeKey,
 				OnSaveRegister:          func(name string) { f.SaveWindowRegister(name) },
+				OnRenameBuffer:          func(name string) { f.RenameActiveBuffer(name) },
 				MagitPromptLabel:        f.currentMagitPromptLabel(),
 				OnSubmitMagitPrompt: f.submitMagitPrompt,
 				OnHelmPreview:       f.OpenFilePreview,
@@ -623,6 +633,7 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 		Scope:              scope,
 		IsMinibufferActive: f.miniState.IsCompletionActive,
 		OnCancel: func(notice string) {
+			f.clearUniversalArg()
 			f.miniState.Close()
 			f.miniState.Echo(notice, 2*time.Second)
 		},
@@ -658,6 +669,9 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 			f.mu.Unlock()
 		},
 		OnFocusMinibuffer: f.miniState.RequestFocus,
+		OnEnterInsert:     f.EnterInsert,
+		OnEmbarkAct:       f.EmbarkAct,
+		OnUniversalArg:    func() { f.TriggerUniversalArg() },
 		OnHydraKey: func(ctx *ui.Context, keyScope ui.Element, prefix string) bool {
 			body := f.hydraBodyFor(f.loadSnapshot(), prefix)
 			head, ok := body.MatchKeyInScope(ctx, keyScope)

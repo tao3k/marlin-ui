@@ -113,3 +113,176 @@ func (m *Manager) ListWindowRegisters() []WindowRegister {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
+
+// ZoomWindowToggle implements Doom Emacs `doom/window-maximize-buffer`
+// (`SPC w m` / `C-x w m`): pressing once temporarily zooms the focused window
+// to fill the workspace while saving the exact split tree; pressing again
+// restores the saved split tree cleanly.
+func (m *Manager) ZoomWindowToggle() (zoomed bool, changed bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if ws.zoomSaved != nil {
+		recordWinnerSnapshot(ws)
+		ws.WindowTree = cloneWindowTree(ws.zoomSaved.tree)
+		ws.FocusedWindowID = ws.zoomSaved.focusedWindowID
+		ws.zoomSaved = nil
+		syncLegacySplitFields(ws)
+		return false, true, m.snapshotLocked()
+	}
+	if len(ws.Windows()) <= 1 {
+		return false, false, m.snapshotLocked()
+	}
+	recordWinnerSnapshot(ws)
+	ws.zoomSaved = &windowLayoutSnap{
+		tree:            cloneWindowTree(ws.WindowTree),
+		focusedWindowID: ws.FocusedWindowID,
+	}
+	focus := findWindowLeaf(ws.WindowTree, ws.FocusedWindowID)
+	buf := ws.FocusedBuffer()
+	ded := false
+	fid := ws.FocusedWindowID
+	if focus != nil {
+		buf = focus.Buffer
+		ded = focus.Dedicated
+		fid = focus.ID
+	}
+	ws.WindowTree = &WindowNode{ID: fid, Buffer: buf, Dedicated: ded}
+	ws.FocusedWindowID = fid
+	syncLegacySplitFields(ws)
+	return true, true, m.snapshotLocked()
+}
+
+// TransposeWindowLayout implements Emacs `transpose-frame` (`SPC w T` / `C-x w t`):
+// flips every internal split container in the active workspace's window tree
+// between Vertical (`left | right`) and Horizontal (`top / bottom`).
+func (m *Manager) TransposeWindowLayout() (transposed bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.Windows()) <= 1 {
+		return false, m.snapshotLocked()
+	}
+	recordWinnerSnapshot(ws)
+	ws.WindowTree = flipSplitDirections(ws.WindowTree)
+	syncLegacySplitFields(ws)
+	return true, m.snapshotLocked()
+}
+
+func flipSplitDirections(n *WindowNode) *WindowNode {
+	if n == nil {
+		return nil
+	}
+	cp := *n
+	if n.IsSplit() {
+		if cp.Direction == SplitVertical {
+			cp.Direction = SplitHorizontal
+		} else {
+			cp.Direction = SplitVertical
+		}
+		cp.First = flipSplitDirections(n.First)
+		cp.Second = flipSplitDirections(n.Second)
+	}
+	return &cp
+}
+
+// RenameBuffer renames oldID -> newID across the active workspace's buffer list
+// and every leaf in its recursive window tree (Emacs `rename-buffer` / `C-x x r`).
+func (m *Manager) RenameBuffer(oldID, newID buffer.ID) (ok bool, snap Snapshot) {
+	if oldID == "" || newID == "" || oldID == newID {
+		return false, m.Snapshot()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if containsBuf(ws.Buffers, newID) {
+		return false, m.snapshotLocked()
+	}
+	found := false
+	for i, b := range ws.Buffers {
+		if b == oldID {
+			ws.Buffers[i] = newID
+			found = true
+		}
+	}
+	if !found {
+		return false, m.snapshotLocked()
+	}
+	ws.WindowTree = renameWindowBuffer(ws.WindowTree, oldID, newID)
+	if ws.PopupBuffer == oldID {
+		ws.PopupBuffer = newID
+	}
+	if ws.LastPopup == oldID {
+		ws.LastPopup = newID
+	}
+	syncLegacySplitFields(ws)
+	return true, m.snapshotLocked()
+}
+
+func renameWindowBuffer(n *WindowNode, oldID, newID buffer.ID) *WindowNode {
+	if n == nil {
+		return nil
+	}
+	cp := *n
+	if n.IsLeaf() {
+		if cp.Buffer == oldID {
+			cp.Buffer = newID
+		}
+		return &cp
+	}
+	cp.First = renameWindowBuffer(n.First, oldID, newID)
+	cp.Second = renameWindowBuffer(n.Second, oldID, newID)
+	return &cp
+}
+
+// BuryBuffer implements Emacs `bury-buffer` (`SPC b z` / `C-c z`): moves the
+// focused buffer to the tail of the workspace's buffer list and switches the
+// focused window to the next buffer at the head of the ring.
+func (m *Manager) BuryBuffer() (nextBuf buffer.ID, ok bool, snap Snapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return "", false, Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if len(ws.Buffers) <= 1 {
+		return ws.FocusedBuffer(), false, m.snapshotLocked()
+	}
+	cur := ws.FocusedBuffer()
+	pos := -1
+	for i, b := range ws.Buffers {
+		if b == cur {
+			pos = i
+			break
+		}
+	}
+	if pos >= 0 {
+		ws.Buffers = append(ws.Buffers[:pos], ws.Buffers[pos+1:]...)
+		ws.Buffers = append(ws.Buffers, cur)
+	}
+	nextBuf = ws.Buffers[0]
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		cp.Buffer = nextBuf
+		return &cp
+	})
+	syncLegacySplitFields(ws)
+	return nextBuf, true, m.snapshotLocked()
+}

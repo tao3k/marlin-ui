@@ -80,6 +80,8 @@ dev-desktop *args:
     #!/usr/bin/env bash
     set -euo pipefail
     core="${CORE:-../..}"
+    core_abs="$(cd "$core" && pwd)"
+    export MARLIN_BRIDGE_WORKSPACE_ROOT="${MARLIN_BRIDGE_WORKSPACE_ROOT:-$core_abs}"
     tags="${TAGS:-marlin_full}"
     for envf in "$core/.env" "./.env"; do
         if [ -f "$envf" ]; then
@@ -90,13 +92,18 @@ dev-desktop *args:
         fi
     done
     bin=""
+    newest_mtime=0
     for cand in \
-        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-app-server" \
+        "$core/target/release/marlin-app-server" \
         "$core/target/debug/marlin-mygo-host" \
-        "$core/target/release/marlin-app-server"; do
+        "$core/.bin/marlin-app-server"; do
         if [ -x "$cand" ]; then
-            bin="$cand"
-            break
+            mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 1)
+            if [ "$mtime" -gt "$newest_mtime" ]; then
+                newest_mtime="$mtime"
+                bin="$cand"
+            fi
         fi
     done
     if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
@@ -129,14 +136,21 @@ dev-room *args:
             set +a
         fi
     done
+    core_abs="$(cd "$core" && pwd)"
+    export MARLIN_BRIDGE_WORKSPACE_ROOT="${MARLIN_BRIDGE_WORKSPACE_ROOT:-$core_abs}"
     app_bin=""
+    newest_mtime=0
     for cand in \
-        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-app-server" \
+        "$core/target/release/marlin-app-server" \
         "$core/target/debug/marlin-mygo-host" \
-        "$core/target/release/marlin-app-server"; do
+        "$core/.bin/marlin-app-server"; do
         if [ -x "$cand" ]; then
-            app_bin="$cand"
-            break
+            mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 1)
+            if [ "$mtime" -gt "$newest_mtime" ]; then
+                newest_mtime="$mtime"
+                app_bin="$cand"
+            fi
         fi
     done
     if [ -z "$app_bin" ]; then
@@ -251,14 +265,21 @@ dev-room-ios *args:
             set +a
         fi
     done
+    core_abs="$(cd "$core" && pwd)"
+    export MARLIN_BRIDGE_WORKSPACE_ROOT="${MARLIN_BRIDGE_WORKSPACE_ROOT:-$core_abs}"
     app_bin=""
+    newest_mtime=0
     for cand in \
-        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-app-server" \
+        "$core/target/release/marlin-app-server" \
         "$core/target/debug/marlin-mygo-host" \
-        "$core/target/release/marlin-app-server"; do
+        "$core/.bin/marlin-app-server"; do
         if [ -x "$cand" ]; then
-            app_bin="$cand"
-            break
+            mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 1)
+            if [ "$mtime" -gt "$newest_mtime" ]; then
+                newest_mtime="$mtime"
+                app_bin="$cand"
+            fi
         fi
     done
     if [ -z "$app_bin" ] || [ ! -x "$cove_bin" ]; then
@@ -360,6 +381,8 @@ dev-ios *args:
     #!/usr/bin/env bash
     set -euo pipefail
     core="${CORE:-../..}"
+    core_abs="$(cd "$core" && pwd)"
+    export MARLIN_BRIDGE_WORKSPACE_ROOT="${MARLIN_BRIDGE_WORKSPACE_ROOT:-$core_abs}"
     tags="${TAGS:-marlin_full}"
     for envf in "$core/.env" "./.env"; do
         if [ -f "$envf" ]; then
@@ -370,13 +393,18 @@ dev-ios *args:
         fi
     done
     bin=""
+    newest_mtime=0
     for cand in \
-        "$core/.bin/marlin-app-server" \
+        "$core/target/debug/marlin-app-server" \
+        "$core/target/release/marlin-app-server" \
         "$core/target/debug/marlin-mygo-host" \
-        "$core/target/release/marlin-app-server"; do
+        "$core/.bin/marlin-app-server"; do
         if [ -x "$cand" ]; then
-            bin="$cand"
-            break
+            mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 1)
+            if [ "$mtime" -gt "$newest_mtime" ]; then
+                newest_mtime="$mtime"
+                bin="$cand"
+            fi
         fi
     done
     if [ -z "${GOWORK:-}" ] && [ -f "../marlin-dev.work" ]; then
@@ -470,7 +498,8 @@ dev-ios-sim device="":
 
 # DEV: Run live cross-process hostlink E2E test against a sibling marlin-agent-core Rust binary.
 dev-test-rust core="../..":
-    @BIN="$(cd {{core}} && pwd)/target/debug/marlin-mygo-host"; \
+    @BIN="$(cd {{core}} && pwd)/target/debug/marlin-app-server"; \
+    if [ ! -x "$BIN" ]; then BIN="$(cd {{core}} && pwd)/target/debug/marlin-mygo-host"; fi; \
     if [ ! -x "$BIN" ]; then BIN="$(cd {{core}} && pwd)/target/release/marlin-app-server"; fi; \
     MARLIN_APP_SERVER_BIN="$BIN" go test -v -race -run "TestHostLinkLiveRustAppServerGRPCConnection" ./internal/hostlink
 

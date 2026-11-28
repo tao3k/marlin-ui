@@ -39,10 +39,20 @@ type RenderProps struct {
 	ThemeCandidates         func(query string) []Candidate
 	DescribeFuncCands       func(query string) []Candidate
 	RegisterJumpCands       func(query string) []Candidate
+	EmbarkCands             func(query string) []Candidate
+	EmbarkTargetLabel       string
+	FindFileDir             string
+	FindFileCands           func(query string) []Candidate
+	ProjectFileRoot         string
+	ProjectFileCands        func(query string) []Candidate
+	RecentFileCands         func(query string) []Candidate
+	OnFindFileUp            func()
+	OnFindFileJump          func(path string)
 	OnSubmitPrompt          func(prompt string)
 	OnCreateWorkspace       func(spec string)
 	OnDescribeKey           func(chord string)
 	OnSaveRegister          func(name string)
+	OnRenameBuffer          func(newName string)
 	MagitPromptLabel        string
 	OnSubmitMagitPrompt func(text string)
 	OnHelmPreview       func(title, path, snippet string, line int)
@@ -111,6 +121,26 @@ func Render(c *ui.Context, p RenderProps) {
 				items = p.RegisterJumpCands(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeEmbark:
+			if p.EmbarkCands != nil {
+				items = p.EmbarkCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeFindFile:
+			if p.FindFileCands != nil {
+				items = p.FindFileCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeProjectFindFile:
+			if p.ProjectFileCands != nil {
+				items = p.ProjectFileCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeRecentFiles:
+			if p.RecentFileCands != nil {
+				items = p.RecentFileCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
 		}
 
 		// 3. Echo Area when SPC Keypad/Hydra is active.
@@ -172,6 +202,35 @@ func Render(c *ui.Context, p RenderProps) {
 			placeholder = "Register name e.g. a, audit, magit (Enter to save)"
 		case ModeRegisterJump:
 			prompt = fmt.Sprintf("%d/%d Jump to register (C-x r j): ", clampSel(sel, len(items)), len(items))
+		case ModeEmbark:
+			tgt := strings.TrimSpace(p.EmbarkTargetLabel)
+			if tgt == "" {
+				tgt = "target"
+			}
+			prompt = fmt.Sprintf("%d/%d Embark [%s]: ", clampSel(sel, len(items)), len(items), tgt)
+		case ModeRenameBuffer:
+			prompt = "Rename buffer (C-x x r): "
+			placeholder = "New buffer name e.g. auth-refactor (Enter to rename)"
+		case ModeFindFile:
+			dir := strings.TrimSpace(p.FindFileDir)
+			if dir == "" {
+				dir = "."
+			}
+			if !strings.HasSuffix(dir, "/") {
+				dir += "/"
+			}
+			prompt = fmt.Sprintf("%d/%d Find file (%s): ", clampSel(sel, len(items)), len(items), dir)
+			placeholder = "Orderless filter · RET/TAB enter dir · Backspace on empty goes up · ~/ or / jumps"
+		case ModeProjectFindFile:
+			rootLbl := strings.TrimSpace(p.ProjectFileRoot)
+			if rootLbl == "" {
+				rootLbl = "project"
+			}
+			prompt = fmt.Sprintf("%d/%d Project (%s): ", clampSel(sel, len(items)), len(items), rootLbl)
+			placeholder = "Orderless search all real project files (e.g. magit rs !test)"
+		case ModeRecentFiles:
+			prompt = fmt.Sprintf("%d/%d Recent file (C-x C-r): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Filter recently opened files"
 		case ModeHelm:
 			prompt = "Helm ›"
 			placeholder = "Search workspace, @lang:rust, @sym:name, #local, !exclude, (dsl ...)"
@@ -226,7 +285,7 @@ func Render(c *ui.Context, p RenderProps) {
 			switch mode {
 			case ModeHelm:
 				promptEl.Width(64)
-			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump:
+			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump, ModeEmbark, ModeFindFile, ModeProjectFindFile, ModeRecentFiles:
 				promptEl.MinWidth(96)
 			}
 
@@ -236,10 +295,36 @@ func Render(c *ui.Context, p RenderProps) {
 				inp.Focus()
 			}
 			if inp.Changed() {
+				if mode == ModeFindFile && p.OnFindFileJump != nil {
+					if val == "~/" || val == "/" {
+						p.OnFindFileJump(val)
+						s.SetInput("")
+						val = ""
+					} else if strings.HasSuffix(val, "/") && len(val) > 1 {
+						p.OnFindFileJump(val)
+						s.SetInput("")
+						val = ""
+					}
+				}
 				s.SetInput(val)
 				if mode == ModeHelm && p.Helm != nil {
 					gen := p.Helm.SetQuery(val)
 					s.MarkHelmPending(gen)
+				}
+			}
+			if mode == ModeFindFile {
+				if val == "" && p.OnFindFileUp != nil && (c.Shortcut(0, ui.KeyBackspace) || c.Shortcut(ui.Ctrl, ui.KeyL)) {
+					p.OnFindFileUp()
+				} else if c.Shortcut(0, ui.KeyTab) && len(items) > 0 {
+					idx := sel
+					if idx < 0 || idx >= len(items) {
+						idx = 0
+					}
+					if items[idx].KeepOpen && items[idx].Run != nil {
+						items[idx].Run()
+						s.SetInput("")
+						s.RequestFocus()
+					}
 				}
 			}
 			if inp.Submitted() {
@@ -302,18 +387,34 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 		if trimmed != "" && p.OnSaveRegister != nil {
 			p.OnSaveRegister(trimmed)
 		}
+	case ModeRenameBuffer:
+		s.Close()
+		if trimmed != "" && p.OnRenameBuffer != nil {
+			p.OnRenameBuffer(trimmed)
+		}
 	default:
 		s.mu.Lock()
 		sel := s.selected
 		s.mu.Unlock()
-		s.Close()
 		if len(items) > 0 {
 			if sel < 0 || sel >= len(items) {
 				sel = 0
 			}
-			if items[sel].Run != nil {
-				items[sel].Run()
+			chosen := items[sel]
+			if chosen.KeepOpen {
+				if chosen.Run != nil {
+					chosen.Run()
+				}
+				s.SetInput("")
+				s.RequestFocus()
+			} else {
+				s.Close()
+				if chosen.Run != nil {
+					chosen.Run()
+				}
 			}
+		} else {
+			s.Close()
 		}
 	}
 	if p.OnInvalidate != nil {

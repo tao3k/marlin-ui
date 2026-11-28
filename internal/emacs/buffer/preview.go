@@ -86,8 +86,8 @@ func renderFilePreview(c *ui.Context, th theme.Theme, bc *Context) {
 		})
 
 		lines := strings.Split(fp.Content, "\n")
-		if len(lines) > 220 {
-			lines = lines[:220]
+		if len(lines) > 1200 {
+			lines = lines[:1200]
 		}
 
 		ui.Scroll(c.Key("preview-scroll")).Grow(1).Padding(10, 14).Children(func() {

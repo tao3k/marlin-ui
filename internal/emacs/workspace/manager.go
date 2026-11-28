@@ -84,6 +84,7 @@ type Perspective struct {
 	NextWindowSeq   int
 	winnerUndo      []windowLayoutSnap
 	winnerRedo      []windowLayoutSnap
+	zoomSaved       *windowLayoutSnap
 	Buffers         []buffer.ID
 	PopupBuffer     buffer.ID
 	PopupRule       *PopupRule

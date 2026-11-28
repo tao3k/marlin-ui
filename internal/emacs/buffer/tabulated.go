@@ -221,10 +221,21 @@ func renderMessages(c *ui.Context, th theme.Theme, bc *Context) {
 
 func renderHelp(c *ui.Context, th theme.Theme, bc *Context) {
 	bindings := [][2]string{
+		{"C-x C-f / SPC f f", "Find file (live Vertico directory browser · vertico-directory)"},
+		{"C-c p f / SPC p f", "Find file in current Git/jj project (Orderless fuzzy search)"},
+		{"C-x C-r / SPC f r", "Open recently visited file (recentf)"},
 		{"C-h m / SPC h m", "Describe active buffer's Major Mode, Minor Modes, Polymode & Keymap"},
 		{"C-h k / SPC h k", "Describe key or chord across active Emacs keymap precedence"},
 		{"C-h f / SPC h f", "Describe command documentation & all bound keybindings"},
 		{"C-h b / SPC h b", "Describe all active local & global keybindings"},
+		{"C-h l / SPC h l", "View lossage: chronological log of last 60 commands"},
+		{"C-. / SPC . / C-c e", "Embark contextual actions for target at point"},
+		{"C-u (Universal Prefix)", "Numeric prefix multiplier (4x / 16x / 64x) for repeatable commands"},
+		{"C-c . / SPC m .", "Repeat last executed command (honors C-u count)"},
+		{"C-x w m / SPC w m", "Zoom / restore focused window (doom/window-maximize-buffer)"},
+		{"C-x w t / SPC w T", "Transpose split orientation Vertical <-> Horizontal"},
+		{"C-x x r / SPC b R", "Rename active buffer across tabs, windows & session"},
+		{"C-c z / SPC b z", "Bury current buffer to tail of workspace ring"},
 		{"C-c t d/a/r/l · SPC t d/a/r/l", "Toggle dedicated / Aitia audit / read-only / LLM assist minor modes"},
 		{"C-x g / SPC g g", "Open *magit* AI-Native jj + Git + Lambda Aitia workbench"},
 		{"C-x M-g / SPC g d", "Open Magit dispatch transient (?)"},

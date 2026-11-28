@@ -4,7 +4,10 @@
 
 package minibuffer
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestFilterCandidatesOrderless(t *testing.T) {
 	items := []Candidate{
@@ -54,5 +57,59 @@ func TestHistoryRing(t *testing.T) {
 	v4, ok := s.StepHistory(1)
 	if !ok || v4 != "" {
 		t.Fatalf("expected M-n past end -> empty input, got %q (%v)", v4, ok)
+	}
+}
+
+func makeBenchProjectCandidates(n int) []Candidate {
+	items := make([]Candidate, n)
+	dirs := []string{
+		"crates/marlin-agent-app-server/src/ui_grpc/",
+		"crates/marlin-gerbil-scheme/src/",
+		"scheme/ui-meow/",
+		"scheme/ui-magit/",
+		"scheme/ui-modes/",
+		".data/marlin-ui/internal/emacs/frame/",
+		".data/marlin-ui/internal/emacs/minibuffer/",
+		".data/marlin-ui/internal/hostlink/",
+	}
+	exts := []string{".rs", ".ss", ".go", ".toml", ".md"}
+	for i := 0; i < n; i++ {
+		dir := dirs[i%len(dirs)]
+		ext := exts[i%len(exts)]
+		rel := fmt.Sprintf("%smodule_%04d_handler%s", dir, i, ext)
+		items[i] = Candidate{
+			ID:         "pf-" + rel,
+			Name:       rel,
+			Desc:       "/Users/dev/marlin-agent-core/" + rel,
+			Annotation: "4.2 KiB",
+		}
+	}
+	return items
+}
+
+func BenchmarkFilterCandidates_4000Files_SingleToken(b *testing.B) {
+	items := makeBenchProjectCandidates(4000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = FilterCandidates(items, "magit")
+	}
+}
+
+func BenchmarkFilterCandidates_4000Files_MultiTokenOrderless(b *testing.B) {
+	items := makeBenchProjectCandidates(4000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = FilterCandidates(items, "handler 0042 scheme !toml")
+	}
+}
+
+func BenchmarkFilterCandidates_10000Files_Orderless(b *testing.B) {
+	items := makeBenchProjectCandidates(10000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = FilterCandidates(items, "frame 0128 go")
 	}
 }

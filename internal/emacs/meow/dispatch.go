@@ -33,6 +33,9 @@ type Handlers struct {
 	OnStepHistory        func(delta int)
 	OnStepCursor         func(delta int)
 	OnFocusMinibuffer    func()
+	OnEnterInsert        func()
+	OnEmbarkAct          func()
+	OnUniversalArg       func()
 	// OnHydraKey dispatches a keypress to the active Hydra body; returns true if handled.
 	OnHydraKey func(c *ui.Context, scope ui.Element, prefix string) bool
 	// OnBufferKey dispatches major-mode single-key bindings (e.g. *magit* s/u/x/c/d/TAB/1-4/?/g/q)
@@ -85,6 +88,20 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 		s.ClearKeypad()
 		if h.OnOpenBufferSwitch != nil {
 			h.OnOpenBufferSwitch()
+		}
+		return
+	}
+	if modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyPeriod) {
+		s.ClearKeypad()
+		if h.OnEmbarkAct != nil {
+			h.OnEmbarkAct()
+		}
+		return
+	}
+	if modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyU) {
+		s.ClearKeypad()
+		if h.OnUniversalArg != nil {
+			h.OnUniversalArg()
 		}
 		return
 	}
@@ -244,6 +261,10 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 	}
 	switch {
 	case modalShortcut(c, h.Scope, 0, ui.KeyI), modalShortcut(c, h.Scope, 0, ui.KeyA):
+		if h.OnEnterInsert != nil {
+			h.OnEnterInsert()
+			return
+		}
 		s.EnterInsert()
 		if h.OnFocusMinibuffer != nil {
 			h.OnFocusMinibuffer()

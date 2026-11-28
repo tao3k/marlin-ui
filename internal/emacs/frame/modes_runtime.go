@@ -780,12 +780,32 @@ func (f *Frame) dispatchModeAction(act string) bool {
 	switch act {
 	case "cmd:describe-mode":
 		f.DescribeCurrentMode()
+	case "cmd:find-file":
+		f.OpenFindFile()
+	case "cmd:project-find-file":
+		f.OpenProjectFindFile()
+	case "cmd:recentf":
+		f.OpenRecentFiles()
 	case "cmd:describe-key":
 		f.OpenDescribeKey()
 	case "cmd:describe-function":
 		f.OpenDescribeFunction()
 	case "cmd:describe-bindings":
 		f.DescribeBindings()
+	case "cmd:view-lossage":
+		f.ViewLossage()
+	case "cmd:embark-act":
+		f.EmbarkAct()
+	case "cmd:repeat-last":
+		f.RepeatLastCommand()
+	case "cmd:win-zoom-toggle":
+		f.ZoomWindowToggle()
+	case "cmd:win-transpose":
+		f.TransposeWindowLayout()
+	case "cmd:rename-buffer":
+		f.OpenRenameBuffer()
+	case "cmd:bury-buffer":
+		f.BuryActiveBuffer()
 	case "cmd:toggle-dedicated-mode":
 		f.ToggleMinorModeOnActive("dedicated-window-mode")
 	case "cmd:toggle-aitia-mode":
@@ -821,9 +841,15 @@ func (f *Frame) dispatchModeAction(act string) bool {
 	case "cmd:kill-buffer":
 		f.KillActiveBuffer()
 	case "cmd:prev-buffer":
-		f.StepBuffer(-1)
+		n := f.consumeUniversalArg()
+		for i := 0; i < n; i++ {
+			f.StepBuffer(-1)
+		}
 	case "cmd:next-buffer":
-		f.StepBuffer(1)
+		n := f.consumeUniversalArg()
+		for i := 0; i < n; i++ {
+			f.StepBuffer(1)
+		}
 	case "cmd:span-copy-code":
 		f.mu.Lock()
 		code := f.activeSpanCode
@@ -854,6 +880,7 @@ func (f *Frame) dispatchModeAction(act string) bool {
 	default:
 		return false
 	}
+	f.RecordLossage(act)
 	return true
 }
 

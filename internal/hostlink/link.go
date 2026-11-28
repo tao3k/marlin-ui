@@ -238,6 +238,9 @@ func Connect(
 	} else if !cfg.Standalone {
 		if binPath, src := appconfig.DiscoverAppServerBinary(cfg.AppServerBin); binPath != "" {
 			var extraEnv []string
+			if wsRoot := DefaultWorkspaceRoot(); wsRoot != "" {
+				extraEnv = append(extraEnv, "MARLIN_BRIDGE_WORKSPACE_ROOT="+wsRoot)
+			}
 			if cfg.RealSession {
 				extraEnv = append(extraEnv, "MARLIN_BRIDGE_REAL_SESSION=1")
 			}

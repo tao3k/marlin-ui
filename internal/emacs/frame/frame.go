@@ -142,6 +142,9 @@ type Frame struct {
 	ibufferMarked      map[buffer.ID]bool
 	ibufferFilter      string
 	recentCommands     []string
+	lossage            []LossageEntry
+	lastAction         string
+	universalArg       int
 	chatSeq            int
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
@@ -176,8 +179,25 @@ type Frame struct {
 	magitAuditMap    map[string]string
 	magitPromptKind  string
 	magitPromptLabel string
-	magitRefreshLane *async.FencedLane[struct{}, hostlink.MagitSnapshot]
+	magitRefreshLane *async.FencedLane[string, magitRefreshResult]
 	magitExecLane    *async.FencedLane[string, string]
+
+	findFileDir       string
+	findFileParent    string
+	findFileHome      string
+	findFileEntries   []hostlink.FileEntry
+	findFileCandCache []minibuffer.Candidate
+	findFileLoading   bool
+	findFileErr       string
+	projFilesRoot     string
+	projFilesEntries  []hostlink.FileEntry
+	projFileCandCache []minibuffer.Candidate
+	projFilesLoading  bool
+	projFilesErr      string
+	recentFiles       []string
+	dirListLane      *async.FencedLane[string, dirLoadResult]
+	projFilesLane    *async.FencedLane[string, projectFilesResult]
+	fileReadLane     *async.FencedLane[string, fileReadResult]
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)
@@ -301,9 +321,9 @@ func (f *Frame) ApplyWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 func (f *Frame) rebuildEffectiveHydrasLocked() {
 	var eff map[string]declarativeHydraDef
 	if len(f.liveSchemeHydras) > 0 {
-		eff = mergeHydraOverlay(loadSchemeBaseKeymaps(), f.liveSchemeHydras)
+		eff = mergeHydraOverlay(nil, f.liveSchemeHydras)
 	} else {
-		eff = loadSchemeBaseKeymaps()
+		eff = loadStandaloneBootstrapKeymaps()
 	}
 	if len(f.desktopTOMLOverlay) > 0 {
 		eff = mergeHydraOverlay(eff, f.desktopTOMLOverlay)

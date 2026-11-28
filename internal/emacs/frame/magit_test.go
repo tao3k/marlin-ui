@@ -14,6 +14,7 @@ import (
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/minibuffer"
+	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
 func TestMagitDoomKeymapsAndTransients(t *testing.T) {
@@ -169,7 +170,10 @@ func TestMagitAuditProgressAndSplitAIAudit(t *testing.T) {
 		AppConfig: appconfig.Config{SessionID: "magit-audit"},
 	})
 
-	f.OpenMagit()
+	f.SelectBuffer(buffer.Magit)
+	// Explicitly feed a fixture snapshot in this offline unit test (production
+	// *magit* never fabricates demo data when disconnected from marlin-app-server).
+	f.commitMagitSnapshot(hostlink.DemoMagitSnapshot(), "")
 	if f.ActiveBuffer() != buffer.Magit {
 		t.Fatalf("expected active buffer *magit*, got %s", f.ActiveBuffer())
 	}

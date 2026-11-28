@@ -37,6 +37,11 @@ const (
 	ModeBufferOtherWindow
 	ModeRegisterSave
 	ModeRegisterJump
+	ModeEmbark
+	ModeRenameBuffer
+	ModeFindFile
+	ModeProjectFindFile
+	ModeRecentFiles
 )
 
 // Candidate represents one Vertico / Marginalia completion candidate.
@@ -45,6 +50,7 @@ type Candidate struct {
 	Name       string
 	Desc       string
 	Annotation string // optional Marginalia right-aligned shortcut or metadata badge
+	KeepOpen   bool   // when true (e.g. directory in find-file), keep Vertico open and clear input
 	Run        func()
 }
 

@@ -5,13 +5,17 @@
 package frame
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
 	"github.com/tao3k/marlin-ui/internal/emacs/meow"
 	"github.com/tao3k/marlin-ui/internal/emacs/modes"
+	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
 func TestWorkspaceIsolationMultiChatBuffersAndEmacsWindowClone(t *testing.T) {
@@ -99,7 +103,8 @@ func TestPolymodeSpanSwitchingInChatAndMagitBuffers(t *testing.T) {
 	}
 
 	// Navigating *magit* onto a hunk row automatically activates Magit-Status[Hunk·Aitia]!
-	f.OpenMagit()
+	f.SelectBuffer(buffer.Magit)
+	f.commitMagitSnapshot(hostlink.DemoMagitSnapshot(), "")
 	view := f.loadSnapshot().Magit
 	hunkIdx := -1
 	for i, row := range view.Rows {
@@ -170,6 +175,7 @@ func TestDisplayBufferAlistDescribeModePerBufferSessionsAndIbufferLifecycle(t *t
 func TestEmacsSelfDocMinorModeHooksOrderlessMxAndIbufferBatchKill(t *testing.T) {
 	f := New(Config{InitialThemeID: "doom-one"})
 	defer f.Close()
+	ApplyTestSchemeKeymap(f)
 
 	// 1. C-h k (describe-key) resolves local Magit bindings ahead of global bindings.
 	f.SelectBuffer(buffer.Magit)
@@ -322,5 +328,182 @@ func TestWindowRegistersOtherWindowReadOnlyGuardHistoryAndKeyboardIbuffer(t *tes
 	}
 	if !f.ibufferSelectAtCursor() {
 		t.Fatalf("expected RET (ibufferSelectAtCursor) to switch to cursor row")
+	}
+}
+
+func TestEmbarkLossageRepeatUniversalArgZoomTransposeRenameAndBury(t *testing.T) {
+	f := New(Config{InitialThemeID: "doom-one"})
+	defer f.Close()
+
+	// 1. Window Zoom Toggle (SPC w m / C-x w m) & Transpose Orientation (SPC w T / C-x w t).
+	f.SelectBuffer(buffer.Conversation)
+	f.SelectBufferOtherWindow(buffer.Magit)
+	if f.WorkspaceSnapshot().Active.WindowCount() != 2 {
+		t.Fatalf("expected 2 windows before zoom")
+	}
+	if !f.TransposeWindowLayout() {
+		t.Fatalf("expected TransposeWindowLayout to succeed on split")
+	}
+	if f.WorkspaceSnapshot().Active.SplitMode != "horizontal" {
+		t.Fatalf("expected vertical split transposed to horizontal, got %s", f.WorkspaceSnapshot().Active.SplitMode)
+	}
+	if !f.ZoomWindowToggle() {
+		t.Fatalf("expected ZoomWindowToggle (zoom in) to succeed")
+	}
+	if f.WorkspaceSnapshot().Active.WindowCount() != 1 {
+		t.Fatalf("expected 1 window while zoomed, got %d", f.WorkspaceSnapshot().Active.WindowCount())
+	}
+	if !f.ZoomWindowToggle() {
+		t.Fatalf("expected ZoomWindowToggle (restore) to succeed")
+	}
+	if f.WorkspaceSnapshot().Active.WindowCount() != 2 {
+		t.Fatalf("expected 2 windows restored after second ZoomWindowToggle, got %d", f.WorkspaceSnapshot().Active.WindowCount())
+	}
+
+	// 2. Live rename-buffer (C-x x r) preserves chat session binding & updates tabs/windows.
+	cOrig := f.NewChatBuffer("scratch-1")
+	origSess := f.ChatSessionFor(cOrig)
+	renamed, ok := f.RenameActiveBuffer("auth-refactor")
+	if !ok || renamed != buffer.ID("*chat:auth-refactor*") {
+		t.Fatalf("expected RenameActiveBuffer -> *chat:auth-refactor*, got %s (%v)", renamed, ok)
+	}
+	if gotSess := f.ChatSessionFor(renamed); gotSess != origSess {
+		t.Fatalf("expected renamed buffer to preserve session %q, got %q", origSess, gotSess)
+	}
+
+	// 3. bury-buffer (SPC b z / C-c z) rotates active buffer to tail of ring.
+	if !f.BuryActiveBuffer() {
+		t.Fatalf("expected BuryActiveBuffer to succeed with multiple buffers open")
+	}
+	bufs := f.WorkspaceSnapshot().Active.Buffers
+	if bufs[len(bufs)-1] != renamed {
+		t.Fatalf("expected buried buffer %s at tail of workspace buffers, got %v", renamed, bufs)
+	}
+
+	// 4. Embark contextual actions adapt to target at point (Magit vs Polymode span vs buffer).
+	f.SelectBuffer(buffer.Magit)
+	magitCands := f.embarkCandidates("")
+	if len(magitCands) == 0 || magitCands[0].ID != "emb-stage" {
+		t.Fatalf("expected Embark in *magit* to surface stage action first, got %+v", magitCands)
+	}
+	f.SelectBuffer(renamed)
+	f.HandlePolymodeSpanFocus("code-block", "rust", "fn main() {}")
+	spanCands := f.embarkCandidates("")
+	if len(spanCands) == 0 || spanCands[0].ID != "emb-copy" {
+		t.Fatalf("expected Embark on Polymode code span to surface copy action first, got %+v", spanCands)
+	}
+
+	// 5. view-lossage (C-h l), C-u universal-argument (4 -> 16), and repeat-last-command.
+	if n := f.TriggerUniversalArg(); n != 4 {
+		t.Fatalf("expected first C-u -> 4, got %d", n)
+	}
+	if n := f.TriggerUniversalArg(); n != 16 {
+		t.Fatalf("expected second C-u -> 16, got %d", n)
+	}
+	f.dispatchModeAction("cmd:next-buffer")
+	if f.UniversalArg() != 0 {
+		t.Fatalf("expected C-u consumed after repeatable command, got %d", f.UniversalArg())
+	}
+	if !f.RepeatLastCommand() {
+		t.Fatalf("expected RepeatLastCommand to repeat cmd:next-buffer")
+	}
+	f.ViewLossage()
+	if hd := f.currentHelpIntrospection(renamed); hd == nil || hd.KeyDoc == nil || hd.KeyDoc.Tier != "LOSSAGE" || len(hd.KeyDoc.Aliases) == 0 {
+		t.Fatalf("expected C-h l view-lossage to record and display lossage ring, got %+v", hd)
+	}
+}
+
+func TestVerticoFindFileProjectFindFileRecentfAndHonestLiveMagit(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir pkg: %v", err)
+	}
+	targetFile := filepath.Join(tmp, "pkg", "hello.go")
+	if err := os.WriteFile(targetFile, []byte("package pkg\n\nfunc Hello() string { return \"world\" }\n"), 0o644); err != nil {
+		t.Fatalf("write hello.go: %v", err)
+	}
+
+	f := New(Config{InitialThemeID: "doom-one"})
+	defer f.Close()
+
+	// 1. Honest Magit: when disconnected from marlin-app-server, NEVER fabricate DemoMode files!
+	f.SelectBuffer(buffer.Magit)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mv := f.loadSnapshot().Magit
+		if mv != nil && !mv.Loading && mv.Error != "" {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	mv := f.loadSnapshot().Magit
+	if mv == nil || mv.Snapshot.DemoMode {
+		t.Fatalf("expected *magit* to NEVER show fabricated DemoMode snapshot, got %+v", mv)
+	}
+	if mv.Error == "" {
+		t.Fatalf("expected honest offline connection error in *magit*, got empty error")
+	}
+
+	// 2. Vertico find-file (C-x C-f / SPC f f): real directory listing + directory drill-down + open file!
+	f.FindFileEnterDir(tmp)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(f.findFileCandidates("pkg")) > 0 {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	dirCands := f.findFileCandidates("pkg")
+	if len(dirCands) == 0 || !dirCands[0].KeepOpen || dirCands[0].Name != "pkg/" {
+		t.Fatalf("expected pkg/ directory candidate with KeepOpen=true, got %+v", dirCands)
+	}
+	// Descend into pkg/ (vertico-directory-enter) and open hello.go.
+	dirCands[0].Run()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(f.findFileCandidates("hello")) > 0 {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	fileCands := f.findFileCandidates("hello")
+	if len(fileCands) == 0 || fileCands[0].KeepOpen || fileCands[0].Name != "hello.go" {
+		t.Fatalf("expected hello.go file candidate, got %+v", fileCands)
+	}
+	fileCands[0].Run()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fp := f.currentFilePreview(); fp != nil && strings.Contains(fp.Content, "func Hello()") {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	fp := f.currentFilePreview()
+	if fp == nil || !strings.Contains(fp.Content, "func Hello()") {
+		t.Fatalf("expected opened real disk file content in *Preview*, got %+v", fp)
+	}
+
+	// 3. recentf (C-x C-r / SPC f r) recorded the opened real file!
+	recentCands := f.recentFileCandidates("hello")
+	if len(recentCands) == 0 || recentCands[0].Name != "hello.go" {
+		t.Fatalf("expected hello.go in recentf candidates, got %+v", recentCands)
+	}
+
+	// 4. project-find-file (C-c p f / SPC p f) indexes real repo files under workspace ProjectRoot!
+	f.CreateWorkspace("tmp-repo", tmp)
+	f.OpenProjectFindFile()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(f.projectFileCandidates("pkg hello")) > 0 {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	projCands := f.projectFileCandidates("pkg hello")
+	if len(projCands) == 0 || projCands[0].Name != "pkg/hello.go" {
+		t.Fatalf("expected Orderless project-find-file 'pkg hello' -> pkg/hello.go, got %+v", projCands)
 	}
 }

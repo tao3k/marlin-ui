@@ -72,7 +72,7 @@ func loadDesktopTOMLKeymaps() map[string]declarativeHydraDef {
 }
 
 func loadDefaultKeymaps() map[string]declarativeHydraDef {
-	return mergeHydraOverlay(loadSchemeBaseKeymaps(), loadDesktopTOMLKeymaps())
+	return mergeHydraOverlay(loadStandaloneBootstrapKeymaps(), loadDesktopTOMLKeymaps())
 }
 
 // projectLiveSchemeKeymaps converts live `marlin.ui.v1` Scheme keybindings and

@@ -21,6 +21,11 @@ import (
 	"github.com/tao3k/marlin-ui/internal/hostlink"
 )
 
+type magitRefreshResult struct {
+	snap   hostlink.MagitSnapshot
+	errMsg string
+}
+
 func (f *Frame) initMagitStateLocked() {
 	if f.magitVisLevel < 1 {
 		f.magitVisLevel = 3
@@ -31,21 +36,27 @@ func (f *Frame) initMagitStateLocked() {
 	if f.magitAuditMap == nil {
 		f.magitAuditMap = make(map[string]string)
 	}
-	if f.magitSnap.RepoName == "" {
-		f.magitSnap = hostlink.DemoMagitSnapshot()
+	if f.magitSnap.AitiaDecision == "" {
+		f.magitSnap.AitiaDecision = "OFFLINE"
 	}
 }
 
 func (f *Frame) initMagitLane() {
-	f.magitRefreshLane = async.NewFencedLane[struct{}, hostlink.MagitSnapshot](
-		func(ctx context.Context, _ struct{}) (hostlink.MagitSnapshot, error) {
+	f.magitRefreshLane = async.NewFencedLane[string, magitRefreshResult](
+		func(ctx context.Context, repoRoot string) (magitRefreshResult, error) {
 			if f.Link == nil {
-				return hostlink.DemoMagitSnapshot(), nil
+				return magitRefreshResult{
+					errMsg: "Not connected to marlin-app-server — launch via `just dev-desktop` or connect a Rust host",
+				}, nil
 			}
-			return f.Link.FetchMagitSnapshot(ctx)
+			snap, err := f.Link.FetchMagitSnapshotFor(ctx, repoRoot)
+			if err != nil {
+				return magitRefreshResult{errMsg: err.Error()}, nil
+			}
+			return magitRefreshResult{snap: snap}, nil
 		},
-		func(_ uint64, snap hostlink.MagitSnapshot) {
-			f.commitMagitSnapshot(snap, "")
+		func(_ uint64, res magitRefreshResult) {
+			f.commitMagitSnapshot(res.snap, res.errMsg)
 		},
 	)
 	f.magitExecLane = async.NewFencedLane[string, string](
@@ -129,21 +140,26 @@ func (f *Frame) OpenMagit() {
 }
 
 // RefreshMagitAsync schedules a coalesced, epoch-fenced off-lock refresh of
-// *magit* over ProjectionQueryService::QueryProjectGraph("magit:snapshot").
+// *magit* over ProjectionQueryService::QueryProjectGraph("magit:snapshot@<repo>")
+// for the active workspace's live Git/jj repository.
 func (f *Frame) RefreshMagitAsync() {
+	repoRoot := f.activeWorkspaceProjectRoot()
 	f.mu.Lock()
 	f.initMagitStateLocked()
 	f.magitLoading = true
 	f.magitErr = ""
+	if f.magitSnap.RepoRoot == "" {
+		f.magitSnap.RepoRoot = repoRoot
+	}
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
 	f.requestFrame()
 
 	if f.magitRefreshLane != nil {
-		f.magitRefreshLane.Submit(struct{}{})
+		f.magitRefreshLane.Submit(repoRoot)
 		return
 	}
-	f.commitMagitSnapshot(hostlink.DemoMagitSnapshot(), "")
+	f.commitMagitSnapshot(hostlink.MagitSnapshot{RepoRoot: repoRoot, AitiaDecision: "OFFLINE"}, "Not connected to marlin-app-server")
 }
 
 // dispatchMagitKey handles authentic Emacs Magit single-key commands in Normal

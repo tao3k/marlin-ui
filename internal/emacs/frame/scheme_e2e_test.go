@@ -314,6 +314,7 @@ func TestNativeEmacsKeybindingsWorkInInsertAndNormalModes(t *testing.T) {
 		OnQuit:    func() { quitCalled = true },
 	})
 	defer fr.Close()
+	frame.ApplyTestSchemeKeymap(fr)
 
 	// Switch to Insert Mode explicitly (verifying native Emacs bindings work in Insert mode!).
 	fr.EnterInsert()
@@ -392,9 +393,10 @@ func TestMarginaliaAnnotationsHydraCrossHintsAndCentaurBadges(t *testing.T) {
 	})
 	defer fr.Close()
 
-	// Stream a Scheme transient with an explicit Hint so Hydra renders it.
+	// Stream a Scheme transient + keymap with an explicit Hint so Hydra renders it.
 	fr.ApplyWorkbenchSnapshot(schema.UIWorkbenchSnapshot{
 		Generation: 12,
+		Keymap:     frame.SampleSchemeKeymapBindings(),
 		Transients: []schema.UITransient{
 			{
 				ID: "scheme-review",

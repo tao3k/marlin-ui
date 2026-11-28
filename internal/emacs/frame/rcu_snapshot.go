@@ -123,6 +123,7 @@ func (f *Frame) initAsyncRuntime() {
 		f.modesSyncLane.Submit(struct{}{})
 	}
 	f.initMagitLane()
+	f.initFileLanes()
 }
 
 func (f *Frame) captureSnapshotLocked() frameSnapshot {
@@ -298,6 +299,7 @@ func (f *Frame) commitGRPCWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 	if len(snap.Commands) > 0 {
 		f.schemeCmds = append([]schema.UICommandSpec(nil), snap.Commands...)
 	}
+	refreshModes := false
 	if proj, err := uiframework.ProjectWorkbench(uiframework.DefaultRegistry(), desktopTargetKind(), snap); err == nil {
 		if len(snap.Slots) > 0 {
 			f.assembledSurface = proj.Surface
@@ -311,6 +313,7 @@ func (f *Frame) commitGRPCWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 		if len(proj.Hydras) > 0 {
 			f.liveSchemeHydras = projectMappedHydras(proj.Hydras)
 			f.rebuildEffectiveHydrasLocked()
+			refreshModes = true
 		}
 		if len(proj.Windows) > 0 && f.wsMgr != nil {
 			specs := make([]workspace.SchemeWindowSpec, 0, len(proj.Windows))
@@ -336,6 +339,9 @@ func (f *Frame) commitGRPCWorkbenchSnapshot(snap schema.UIWorkbenchSnapshot) {
 	}
 	f.publishSnapshotLocked()
 	f.requestFrame()
+	if refreshModes && f.modesSyncLane != nil {
+		f.modesSyncLane.Submit(struct{}{})
+	}
 }
 
 // Close cancels and drains all background async lanes cleanly (quiescence barrier).
@@ -348,6 +354,15 @@ func (f *Frame) Close() {
 	}
 	if f.modesSyncLane != nil {
 		f.modesSyncLane.Close()
+	}
+	if f.dirListLane != nil {
+		f.dirListLane.Close()
+	}
+	if f.projFilesLane != nil {
+		f.projFilesLane.Close()
+	}
+	if f.fileReadLane != nil {
+		f.fileReadLane.Close()
 	}
 	f.closePackageStore()
 }

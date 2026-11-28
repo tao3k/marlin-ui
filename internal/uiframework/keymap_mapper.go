@@ -37,6 +37,8 @@ var schemePrefixMeta = map[string]struct {
 	title string
 }{
 	"SPC":     {id: "leader", label: "Leader", title: "Doom Leader / Hydra"},
+	"SPC f":   {id: "files", label: "+files", title: "+files (Vertico find-file · recentf)"},
+	"SPC p":   {id: "project", label: "+project", title: "+project (Projectile / Git worktree)"},
 	"SPC b":   {id: "buffers", label: "+buffers", title: "+buffers"},
 	"SPC g":   {id: "git-magit", label: "+git / Magit", title: "+git / Magit (Doom Emacs · jj + git + Aitia)"},
 	"SPC w":   {id: "windows", label: "+windows", title: "+windows (Doom / winum / winner-mode)"},
@@ -48,8 +50,10 @@ var schemePrefixMeta = map[string]struct {
 	"C-x 4":   {id: "emacs-ctl-x-4", label: "+other-window", title: "Emacs C-x 4 (other-window prefix)"},
 	"C-x r":   {id: "emacs-ctl-x-r", label: "+registers", title: "Emacs C-x r (window registers)"},
 	"C-x t":   {id: "emacs-ctl-x-t", label: "+tab-bar", title: "Emacs C-x t (+workspaces / tab-bar)"},
-	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state)"},
-	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit · toggles)"},
+	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state · zoom · transpose)"},
+	"C-x x":   {id: "emacs-ctl-x-x", label: "+buffer-ops", title: "Emacs 29+ C-x x (rename-buffer · buffer ops)"},
+	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit · toggles · project)"},
+	"C-c p":   {id: "emacs-ctl-c-p", label: "+project", title: "Emacs C-c p (Projectile / project-find-file)"},
 	"C-c t":   {id: "emacs-ctl-c-t", label: "+toggles", title: "Emacs C-c t (minor-mode toggles · task tabs)"},
 	"C-h":     {id: "emacs-ctl-h", label: "C-h", title: "Emacs C-h (help & self-documentation)"},
 	"SPC h":   {id: "help", label: "+help", title: "+help (Emacs C-h self-documentation)"},
@@ -67,6 +71,12 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 	switch cmd {
 	case "open-commands":
 		return "cmd:mx", "Execute command (M-x)", false
+	case "find-file":
+		return "cmd:find-file", "Find file (Vertico C-x C-f / SPC f f)", false
+	case "project-find-file":
+		return "cmd:project-find-file", "Find file in project (C-c p f / SPC p f)", false
+	case "recentf-open-files":
+		return "cmd:recentf", "Open recent file (C-x C-r / SPC f r)", false
 	case "switch-buffer":
 		return "cmd:switch-buffer", "Switch buffer (Vertico)", false
 	case "switch-to-buffer-other-window":
@@ -91,6 +101,20 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:describe-function", "Describe command or function (C-h f)", false
 	case "describe-bindings":
 		return "cmd:describe-bindings", "Describe all active keybindings (C-h b)", false
+	case "view-lossage":
+		return "cmd:view-lossage", "View recent keystrokes & command log (C-h l)", false
+	case "embark-act":
+		return "cmd:embark-act", "Embark contextual actions at point (C-. / SPC .)", false
+	case "repeat-last-command":
+		return "cmd:repeat-last", "Repeat last command (C-c .)", false
+	case "window-zoom-toggle":
+		return "cmd:win-zoom-toggle", "Zoom / restore focused window (SPC w m / C-x w m)", false
+	case "window-transpose-layout":
+		return "cmd:win-transpose", "Transpose split orientation V <-> H (SPC w T / C-x w t)", false
+	case "rename-buffer":
+		return "cmd:rename-buffer", "Rename active buffer (C-x x r / SPC b R)", false
+	case "bury-buffer":
+		return "cmd:bury-buffer", "Bury current buffer to end of ring (SPC b z / C-c z)", false
 	case "toggle-dedicated-window-mode":
 		return "cmd:toggle-dedicated-mode", "Toggle dedicated-window-mode", false
 	case "toggle-aitia-audit-mode":
@@ -339,11 +363,13 @@ func ProjectKeymapAndTransients(
 		leafKey := kb.Sequence[len(kb.Sequence)-1]
 		col := inferColumn(leafPref, leafKey, cmd)
 		isPref := strings.HasPrefix(action, "hydra:")
+		// Native Emacs C-x / C-c / C-h chords exit the prefix immediately (unlike repeatable SPC Hydra heads).
+		exitAfter := (!repeatable || strings.HasPrefix(leafPref, "C-")) && !isPref
 		upsertHead(leafPref, MappedHead{
 			Key:      leafKey,
 			Label:    label,
 			Column:   col,
-			Exit:     !repeatable && !isPref,
+			Exit:     exitAfter,
 			IsPrefix: isPref,
 			Action:   action,
 		})

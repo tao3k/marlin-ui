@@ -121,6 +121,7 @@ func TestDoomEmacsFrameHydraModelineAndGRPCProjection(t *testing.T) {
 	}
 
 	// 2. Pressing SPC pops up the multi-column Doom Leader Hydra Minibuffer drawer!
+	frame.ApplyTestSchemeKeymap(fr)
 	fr.OpenHydra("SPC")
 	tt.Frame()
 	if fr.KeypadPrefix() != "SPC" || !tt.HasText("Doom Leader / Hydra") || !tt.HasText("+buffers") || !tt.HasText("+themes & toggles") {
@@ -420,6 +421,7 @@ func TestDoomSplitsEscapeDismissPopupAndLiveModelSwitch(t *testing.T) {
 			savedPrefs = p
 		},
 	})
+	frame.ApplyTestSchemeKeymap(fr)
 	tt := ui.NewTester(fr.View, 1280, 900)
 	tt.Frame()
 

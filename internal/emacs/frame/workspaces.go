@@ -51,6 +51,9 @@ func (f *Frame) SelectBuffer(id buffer.ID) {
 		if wasWeb || wasMini {
 			f.refocusFrame.Store(true)
 		}
+		if id == buffer.Magit {
+			f.RefreshMagitAsync()
+		}
 		f.requestFrame()
 		return
 	}
@@ -58,6 +61,9 @@ func (f *Frame) SelectBuffer(id buffer.ID) {
 	f.activeBuffer = id
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
+	if id == buffer.Magit {
+		f.RefreshMagitAsync()
+	}
 	f.requestFrame()
 }
 
