@@ -33,14 +33,17 @@ type RenderProps struct {
 	GateTitle     string
 	GatePrompt  string
 
-	CommandCandidates   func(query string) []Candidate
-	BufferCandidates    func(query string) []Candidate
-	ThemeCandidates     func(query string) []Candidate
-	DescribeFuncCands   func(query string) []Candidate
-	OnSubmitPrompt      func(prompt string)
-	OnCreateWorkspace   func(spec string)
-	OnDescribeKey       func(chord string)
-	MagitPromptLabel    string
+	CommandCandidates       func(query string) []Candidate
+	BufferCandidates        func(query string) []Candidate
+	BufferOtherWinCands     func(query string) []Candidate
+	ThemeCandidates         func(query string) []Candidate
+	DescribeFuncCands       func(query string) []Candidate
+	RegisterJumpCands       func(query string) []Candidate
+	OnSubmitPrompt          func(prompt string)
+	OnCreateWorkspace       func(spec string)
+	OnDescribeKey           func(chord string)
+	OnSaveRegister          func(name string)
+	MagitPromptLabel        string
 	OnSubmitMagitPrompt func(text string)
 	OnHelmPreview       func(title, path, snippet string, line int)
 	OnHelmCite        func(ref string)
@@ -88,6 +91,11 @@ func Render(c *ui.Context, p RenderProps) {
 				items = p.BufferCandidates(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeBufferOtherWindow:
+			if p.BufferOtherWinCands != nil {
+				items = p.BufferOtherWinCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
 		case ModeThemeSwitch:
 			if p.ThemeCandidates != nil {
 				items = p.ThemeCandidates(val)
@@ -96,6 +104,11 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeDescribeFunc:
 			if p.DescribeFuncCands != nil {
 				items = p.DescribeFuncCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeRegisterJump:
+			if p.RegisterJumpCands != nil {
+				items = p.RegisterJumpCands(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
 		}
@@ -150,8 +163,15 @@ func Render(c *ui.Context, p RenderProps) {
 			prompt = fmt.Sprintf("%d/%d M-x: ", clampSel(sel, len(items)), len(items))
 		case ModeBufferSwitch:
 			prompt = fmt.Sprintf("%d/%d Switch to: ", clampSel(sel, len(items)), len(items))
+		case ModeBufferOtherWindow:
+			prompt = fmt.Sprintf("%d/%d Other window (C-x 4 b): ", clampSel(sel, len(items)), len(items))
 		case ModeThemeSwitch:
 			prompt = fmt.Sprintf("%d/%d Theme: ", clampSel(sel, len(items)), len(items))
+		case ModeRegisterSave:
+			prompt = "Save window register (C-x r w): "
+			placeholder = "Register name e.g. a, audit, magit (Enter to save)"
+		case ModeRegisterJump:
+			prompt = fmt.Sprintf("%d/%d Jump to register (C-x r j): ", clampSel(sel, len(items)), len(items))
 		case ModeHelm:
 			prompt = "Helm ›"
 			placeholder = "Search workspace, @lang:rust, @sym:name, #local, !exclude, (dsl ...)"
@@ -206,7 +226,7 @@ func Render(c *ui.Context, p RenderProps) {
 			switch mode {
 			case ModeHelm:
 				promptEl.Width(64)
-			case ModeCommand, ModeBufferSwitch, ModeThemeSwitch, ModeDescribeFunc:
+			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump:
 				promptEl.MinWidth(96)
 			}
 
@@ -235,6 +255,9 @@ func Render(c *ui.Context, p RenderProps) {
 
 func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 	trimmed := strings.TrimSpace(raw)
+	if trimmed != "" {
+		s.RecordHistory(mode, trimmed)
+	}
 	switch mode {
 	case ModePrompt:
 		if trimmed == "" {
@@ -273,6 +296,11 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 		s.Close()
 		if trimmed != "" && p.OnDescribeKey != nil {
 			p.OnDescribeKey(trimmed)
+		}
+	case ModeRegisterSave:
+		s.Close()
+		if trimmed != "" && p.OnSaveRegister != nil {
+			p.OnSaveRegister(trimmed)
 		}
 	default:
 		s.mu.Lock()

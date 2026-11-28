@@ -10,6 +10,7 @@ import (
 
 	"github.com/tao3k/marlin-ui/internal/appconfig"
 	"github.com/tao3k/marlin-ui/internal/emacs/buffer"
+	"github.com/tao3k/marlin-ui/internal/emacs/meow"
 	"github.com/tao3k/marlin-ui/internal/emacs/modes"
 )
 
@@ -243,5 +244,83 @@ func TestEmacsSelfDocMinorModeHooksOrderlessMxAndIbufferBatchKill(t *testing.T) 
 	}
 	if f.IbufferMarkedCount() != 0 {
 		t.Fatalf("expected marks cleared after KillMarkedIbuffer, got %d", f.IbufferMarkedCount())
+	}
+}
+
+func TestWindowRegistersOtherWindowReadOnlyGuardHistoryAndKeyboardIbuffer(t *testing.T) {
+	f := New(Config{InitialThemeID: "doom-one"})
+	defer f.Close()
+
+	// 1. C-x 4 b (switch-to-buffer-other-window) auto-splits single window without overwriting original.
+	f.SelectBuffer(buffer.Conversation)
+	f.SelectBufferOtherWindow(buffer.Magit)
+	ws := f.WorkspaceSnapshot().Active
+	if ws.WindowCount() != 2 {
+		t.Fatalf("expected C-x 4 b to create 2 windows, got %d", ws.WindowCount())
+	}
+	if ws.FocusedBuffer() != buffer.Magit {
+		t.Fatalf("expected C-x 4 b to focus *magit*, got %s", ws.FocusedBuffer())
+	}
+
+	// 2. C-x r w / C-x r j (Window Registers) save & restore split tree and record winner-mode undo.
+	if !f.SaveWindowRegister("audit") {
+		t.Fatalf("expected SaveWindowRegister('audit') to succeed")
+	}
+	f.DeleteOtherWindows()
+	if f.WorkspaceSnapshot().Active.WindowCount() != 1 {
+		t.Fatalf("expected 1 window after DeleteOtherWindows")
+	}
+	if !f.JumpWindowRegister("audit") {
+		t.Fatalf("expected JumpWindowRegister('audit') to succeed")
+	}
+	if f.WorkspaceSnapshot().Active.WindowCount() != 2 {
+		t.Fatalf("expected 2 windows restored by register 'audit', got %d", f.WorkspaceSnapshot().Active.WindowCount())
+	}
+	f.ListWindowRegisters()
+	if hd := f.currentHelpIntrospection(buffer.Magit); hd == nil || hd.KeyDoc == nil || hd.KeyDoc.Tier != "REGISTERS" {
+		t.Fatalf("expected C-x r l to populate REGISTERS card in *Help*, got %+v", hd)
+	}
+
+	// 3. C-x 4 0 (kill-buffer-and-window) kills active buffer AND closes its split window.
+	chatTmp := f.NewChatBuffer("ephemeral")
+	f.SelectBufferOtherWindow(chatTmp)
+	if !f.KillBufferAndWindow() {
+		t.Fatalf("expected KillBufferAndWindow to succeed")
+	}
+	if f.WorkspaceSnapshot().Active.WindowCount() != 1 {
+		t.Fatalf("expected KillBufferAndWindow to collapse 2 windows -> 1, got %d", f.WorkspaceSnapshot().Active.WindowCount())
+	}
+
+	// 4. read-only-mode blocks EnterInsert on chat buffers until disabled.
+	f.SelectBuffer(buffer.Conversation)
+	f.ToggleMinorModeOnActive("read-only-mode")
+	f.EnterInsert()
+	if f.KeyMode() != meow.ModeNormal {
+		t.Fatalf("expected read-only-mode to block EnterInsert on *conversation*, got %v", f.KeyMode())
+	}
+	f.ToggleMinorModeOnActive("read-only-mode")
+	f.EnterInsert()
+	if f.KeyMode() != meow.ModeInsert {
+		t.Fatalf("expected EnterInsert to succeed once read-only-mode is disabled, got %v", f.KeyMode())
+	}
+
+	// 5. M-x savehist MRU floats recently executed commands to top of Vertico.
+	f.recordRecentCommand("list-registers")
+	cands := f.commandCandidates("")
+	if len(cands) == 0 || cands[0].Name != "list-registers" {
+		t.Fatalf("expected MRU command 'list-registers' at index 0 of M-x, got %+v", cands[:min(3, len(cands))])
+	}
+
+	// 6. Keyboard-first *Ibuffer*: d marks cursor row & advances, u unmarks, RET selects.
+	_ = f.NewChatBuffer("kbd-ibuf")
+	f.OpenIbuffer()
+	if !f.ibufferMarkAtCursor(true) {
+		t.Fatalf("expected d (ibufferMarkAtCursor) to mark cursor row in *Ibuffer*")
+	}
+	if f.IbufferMarkedCount() != 1 {
+		t.Fatalf("expected 1 marked buffer after d, got %d", f.IbufferMarkedCount())
+	}
+	if !f.ibufferSelectAtCursor() {
+		t.Fatalf("expected RET (ibufferSelectAtCursor) to switch to cursor row")
 	}
 }

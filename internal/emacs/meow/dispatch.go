@@ -30,6 +30,7 @@ type Handlers struct {
 	OnOpenSettings       func()
 	OnSelectWindowNumber func(num int)
 	OnStepCandidate      func(delta int)
+	OnStepHistory        func(delta int)
 	OnStepCursor         func(delta int)
 	OnFocusMinibuffer    func()
 	// OnHydraKey dispatches a keypress to the active Hydra body; returns true if handled.
@@ -134,6 +135,18 @@ func Dispatch(c *ui.Context, s *State, h Handlers) {
 		if modalShortcut(c, h.Scope, ui.Ctrl, ui.KeyP) || c.Shortcut(0, ui.KeyUp) {
 			if h.OnStepCandidate != nil {
 				h.OnStepCandidate(-1)
+			}
+			return
+		}
+		if modalShortcut(c, h.Scope, ui.Alt, ui.KeyP) {
+			if h.OnStepHistory != nil {
+				h.OnStepHistory(-1)
+			}
+			return
+		}
+		if modalShortcut(c, h.Scope, ui.Alt, ui.KeyN) {
+			if h.OnStepHistory != nil {
+				h.OnStepHistory(1)
 			}
 			return
 		}

@@ -191,6 +191,7 @@ func (f *Frame) dispatchBufferModeKey(c *ui.Context, scope ui.Element) bool {
 	}{
 		{"q", 0, ui.KeyQ},
 		{"g", 0, ui.KeyG},
+		{"d", 0, ui.KeyD},
 		{"s", 0, ui.KeyS},
 		{"u", 0, ui.KeyU},
 		{"x", 0, ui.KeyX},
@@ -795,10 +796,28 @@ func (f *Frame) dispatchModeAction(act string) bool {
 		f.ToggleMinorModeOnActive("llm-inline-assist-mode")
 	case "cmd:ibuffer":
 		f.OpenIbuffer()
+	case "cmd:ibuffer-mark-cursor":
+		f.ibufferMarkAtCursor(true)
+	case "cmd:ibuffer-unmark-cursor":
+		f.ibufferMarkAtCursor(false)
+	case "cmd:table-select":
+		if !f.ibufferSelectAtCursor() {
+			return false
+		}
 	case "cmd:ibuffer-unmark-all":
 		f.UnmarkAllIbuffer()
 	case "cmd:ibuffer-kill-marked":
 		f.KillMarkedIbuffer()
+	case "cmd:register-save":
+		f.OpenRegisterSave()
+	case "cmd:register-jump":
+		f.OpenRegisterJump()
+	case "cmd:register-list":
+		f.ListWindowRegisters()
+	case "cmd:switch-buffer-other-window":
+		f.OpenBufferOtherWindowPrompt()
+	case "cmd:kill-buffer-and-window":
+		f.KillBufferAndWindow()
 	case "cmd:kill-buffer":
 		f.KillActiveBuffer()
 	case "cmd:prev-buffer":

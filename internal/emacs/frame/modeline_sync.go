@@ -199,7 +199,15 @@ func (f *Frame) probeTargets() {
 }
 
 func (f *Frame) submitPrompt(prompt string) {
-	f.SelectBuffer(buffer.Conversation)
+	target := f.ActiveBuffer()
+	if !buffer.IsChatBuffer(target) {
+		target = buffer.Conversation
+	}
+	if f.EffectiveModeStack(target).ReadOnly {
+		f.Echo("Buffer " + string(target) + " is read-only (toggle with SPC t r / C-c t r)")
+		return
+	}
+	f.SelectBuffer(target)
 	if f.Adaptive != nil && f.Adaptive.Desktop != nil && f.Adaptive.Desktop.OnSendPrompt != nil {
 		f.Adaptive.Desktop.OnSendPrompt(prompt)
 	}

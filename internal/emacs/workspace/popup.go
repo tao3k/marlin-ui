@@ -119,6 +119,63 @@ func (m *Manager) OpenBufferWithAction(buf buffer.ID, displayAction string) (ope
 	return false, m.snapshotLocked()
 }
 
+// OpenBufferOtherWindow implements Emacs `C-x 4 b` (`switch-to-buffer-other-window`):
+// if only one window exists, splits vertically so the new sibling window opens buf;
+// if multiple windows exist, picks the next undedicated sibling window (or splits
+// vertically if all siblings are dedicated) and displays buf there without
+// disturbing the original window.
+func (m *Manager) OpenBufferOtherWindow(buf buffer.ID) Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.activeIndexLocked()
+	if idx < 0 {
+		return Snapshot{}
+	}
+	ws := &m.workspaces[idx]
+	ensureWindowTree(ws)
+	if !containsBuf(ws.Buffers, buf) {
+		ws.Buffers = append(ws.Buffers, buf)
+	}
+	leaves := ws.Windows()
+	if len(leaves) > 1 {
+		curPos := 0
+		for i, lf := range leaves {
+			if lf.ID == ws.FocusedWindowID {
+				curPos = i
+				break
+			}
+		}
+		for step := 1; step < len(leaves); step++ {
+			cand := leaves[(curPos+step)%len(leaves)]
+			if !cand.Dedicated {
+				ws.WindowTree = mapWindowLeaf(ws.WindowTree, cand.ID, func(leaf *WindowNode) *WindowNode {
+					cp := *leaf
+					cp.Buffer = buf
+					return &cp
+				})
+				ws.FocusedWindowID = cand.ID
+				syncLegacySplitFields(ws)
+				return m.snapshotLocked()
+			}
+		}
+	}
+	recordWinnerSnapshot(ws)
+	ws.NextWindowSeq++
+	newID := fmt.Sprintf("w%d", ws.NextWindowSeq)
+	ws.WindowTree = mapWindowLeaf(ws.WindowTree, ws.FocusedWindowID, func(leaf *WindowNode) *WindowNode {
+		cp := *leaf
+		return &WindowNode{
+			Direction: SplitVertical,
+			Ratio:     0.50,
+			First:     &cp,
+			Second:    &WindowNode{ID: newID, Buffer: buf},
+		}
+	})
+	ws.FocusedWindowID = newID
+	syncLegacySplitFields(ws)
+	return m.snapshotLocked()
+}
+
 // KillBuffer removes buf from the active workspace's buffer list (Emacs C-x k / SPC b d)
 // and replaces any window showing it with the nearest remaining buffer, never killing
 // the last remaining buffer in the workspace.

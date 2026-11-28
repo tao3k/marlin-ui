@@ -27,7 +27,7 @@ func (f *Frame) buildActionShortcutIndex(hydras map[string]declarativeHydraDef) 
 	for i := 1; i <= 9; i++ {
 		emacsByAct[fmt.Sprintf("cmd:win-%d", i)] = fmt.Sprintf("M-%d", i)
 	}
-	prefOrder := []string{"SPC", "SPC w", "SPC b", "SPC h", "SPC g", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x t", "C-x w", "C-c", "C-c t", "C-h"}
+	prefOrder := []string{"SPC", "SPC w", "SPC b", "SPC h", "SPC g", "SPC TAB", "SPC t", "SPC m", "SPC q", "C-x", "C-x 4", "C-x r", "C-x t", "C-x w", "C-c", "C-c t", "C-h"}
 	seen := make(map[string]bool, len(prefOrder))
 	visit := func(pref string, def declarativeHydraDef) {
 		for _, hd := range def.Heads {
@@ -169,6 +169,11 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 		{"next-buffer", "Switch focused window to next buffer in workspace", "cmd:next-buffer"},
 		{"new-chat-buffer", "Create a new multi-instance LLM conversation (*chat:*)", "cmd:new-chat-buffer"},
 		{"clone-window", "Split window right viewing the same buffer (C-x 3)", "cmd:clone-window"},
+		{"switch-to-buffer-other-window", "Switch buffer in other window (C-x 4 b / SPC b B)", "cmd:switch-buffer-other-window"},
+		{"kill-buffer-and-window", "Kill active buffer and close its split window (C-x 4 0)", "cmd:kill-buffer-and-window"},
+		{"window-configuration-to-register", "Save current split layout to a named register (C-x r w)", "cmd:register-save"},
+		{"jump-to-register", "Restore a saved window configuration register (C-x r j)", "cmd:register-jump"},
+		{"list-registers", "List all saved Emacs window registers in *Help* (C-x r l)", "cmd:register-list"},
 	}
 	for _, bc := range builtinEmacs {
 		if _, dup := seen[bc.name]; dup {
@@ -232,7 +237,48 @@ func (f *Frame) commandCandidates(query string) []minibuffer.Candidate {
 			Run:        func() { f.dispatchWidgetAction(act) },
 		})
 	}
-	return minibuffer.FilterCandidates(all, query)
+	// Wrap candidate Run hooks to maintain Emacs savehist-style MRU history
+	// and float recently executed commands to the top of Vertico M-x.
+	f.mu.Lock()
+	recent := append([]string(nil), f.recentCommands...)
+	f.mu.Unlock()
+	recentRank := make(map[string]int, len(recent))
+	for i, name := range recent {
+		recentRank[name] = i + 1
+	}
+	var mru, rest []minibuffer.Candidate
+	for i := range all {
+		cand := all[i]
+		origRun := cand.Run
+		cmdName := cand.Name
+		cand.Run = func() {
+			f.recordRecentCommand(cmdName)
+			if origRun != nil {
+				origRun()
+			}
+		}
+		if recentRank[cand.Name] > 0 {
+			if cand.Annotation == "" {
+				cand.Annotation = "★ recent"
+			} else {
+				cand.Annotation = "★ " + cand.Annotation
+			}
+			mru = append(mru, cand)
+		} else {
+			rest = append(rest, cand)
+		}
+	}
+	if len(mru) > 1 {
+		for i := 1; i < len(mru); i++ {
+			for j := i; j > 0 && recentRank[mru[j].Name] < recentRank[mru[j-1].Name]; j-- {
+				mru[j], mru[j-1] = mru[j-1], mru[j]
+			}
+		}
+	}
+	ordered := make([]minibuffer.Candidate, 0, len(all))
+	ordered = append(ordered, mru...)
+	ordered = append(ordered, rest...)
+	return minibuffer.FilterCandidates(ordered, query)
 }
 
 // describeFunctionCandidates projects all M-x commands for Emacs `C-h f`

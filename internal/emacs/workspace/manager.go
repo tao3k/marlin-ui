@@ -106,6 +106,7 @@ type Manager struct {
 	activeID   string
 	workspaces []Perspective
 	rules      []PopupRule
+	registers  map[string]WindowRegister
 	nextSeq    int
 }
 

@@ -141,6 +141,7 @@ type Frame struct {
 	helpData           *buffer.HelpIntrospectionData
 	ibufferMarked      map[buffer.ID]bool
 	ibufferFilter      string
+	recentCommands     []string
 	chatSeq            int
 	customize      *buffer.CustomizeState
 	wsMgr          *workspace.Manager
@@ -606,8 +607,14 @@ func (f *Frame) OpenHydra(prefix string) {
 	f.requestFrame()
 }
 
-// EnterInsert transitions Meow to INSERT mode and focuses the Minibuffer prompt.
+// EnterInsert transitions Meow to INSERT mode and focuses the Minibuffer prompt,
+// enforcing Emacs `read-only-mode` when the active chat buffer is locked read-only.
 func (f *Frame) EnterInsert() {
+	active := f.ActiveBuffer()
+	if buffer.IsChatBuffer(active) && f.EffectiveModeStack(active).ReadOnly {
+		f.Echo("Buffer " + string(active) + " is read-only (toggle with SPC t r / C-c t r)")
+		return
+	}
 	f.meowState.EnterInsert()
 	f.miniState.RequestFocus()
 	f.requestFrame()

@@ -32,3 +32,27 @@ func TestFilterCandidatesOrderless(t *testing.T) {
 		t.Fatalf("expected 'kill' -> kill-buffer, got %+v", ranked)
 	}
 }
+
+func TestHistoryRing(t *testing.T) {
+	s := New()
+	s.RecordHistory(ModeCommand, "describe-mode")
+	s.RecordHistory(ModeCommand, "ibuffer")
+	s.Open(ModeCommand)
+
+	v1, ok := s.StepHistory(-1)
+	if !ok || v1 != "ibuffer" {
+		t.Fatalf("expected first M-p -> ibuffer, got %q (%v)", v1, ok)
+	}
+	v2, ok := s.StepHistory(-1)
+	if !ok || v2 != "describe-mode" {
+		t.Fatalf("expected second M-p -> describe-mode, got %q (%v)", v2, ok)
+	}
+	v3, ok := s.StepHistory(1)
+	if !ok || v3 != "ibuffer" {
+		t.Fatalf("expected M-n -> ibuffer, got %q (%v)", v3, ok)
+	}
+	v4, ok := s.StepHistory(1)
+	if !ok || v4 != "" {
+		t.Fatalf("expected M-n past end -> empty input, got %q (%v)", v4, ok)
+	}
+}

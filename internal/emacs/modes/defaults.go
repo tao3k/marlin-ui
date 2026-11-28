@@ -141,6 +141,8 @@ func DefaultRegistry() *Registry {
 			ModelineSegments:  []string{"key-mode", "buffer-name", "major-mode", "row-count", "activity", "gate-badge"},
 			LocalKeymap: []ModeBinding{
 				{Key: "RET", Command: "cmd:table-select", Label: "Open selected row", Exit: true},
+				{Key: "d", Command: "cmd:ibuffer-mark-cursor", Label: "Mark cursor buffer for delete"},
+				{Key: "u", Command: "cmd:ibuffer-unmark-cursor", Label: "Unmark cursor buffer"},
 				{Key: "U", Command: "cmd:ibuffer-unmark-all", Label: "Unmark all buffers", Exit: true},
 				{Key: "x", Command: "cmd:ibuffer-kill-marked", Label: "Kill marked buffers", Exit: true},
 			},

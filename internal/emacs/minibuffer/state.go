@@ -34,6 +34,9 @@ const (
 	ModeMagitPrompt
 	ModeDescribeKey
 	ModeDescribeFunc
+	ModeBufferOtherWindow
+	ModeRegisterSave
+	ModeRegisterJump
 )
 
 // Candidate represents one Vertico / Marginalia completion candidate.
@@ -77,6 +80,8 @@ type State struct {
 	echoUntil   time.Time
 	helmRowsBuf []search.VisibleRow
 	helmLatch   *theme.FrameLatch[helmVisualFrame]
+	history     map[Mode][]string
+	histIdx     int
 }
 
 // New initializes a clean Emacs Minibuffer in prompt mode.
@@ -86,6 +91,8 @@ func New() *State {
 		focusNext:   true,
 		helmRowsBuf: make([]search.VisibleRow, 0, 12),
 		helmLatch:   theme.NewFrameLatch[helmVisualFrame](theme.DefaultLatchGrace),
+		history:     make(map[Mode][]string, 8),
+		histIdx:     -1,
 	}
 }
 
@@ -107,6 +114,7 @@ func (s *State) Open(m Mode) {
 	s.mode = m
 	s.input = ""
 	s.selected = 0
+	s.histIdx = -1
 	s.focusNext = true
 	latch := s.helmLatch
 	s.mu.Unlock()
@@ -121,11 +129,70 @@ func (s *State) Close() {
 	s.mode = ModePrompt
 	s.input = ""
 	s.selected = 0
+	s.histIdx = -1
 	latch := s.helmLatch
 	s.mu.Unlock()
 	if latch != nil {
 		latch.Reset()
 	}
+}
+
+// RecordHistory appends a non-empty submitted entry into the per-mode Emacs
+// Minibuffer history ring (deduplicating consecutive identical entries).
+func (s *State) RecordHistory(m Mode, entry string) {
+	val := entry
+	if val == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.history == nil {
+		s.history = make(map[Mode][]string, 8)
+	}
+	ring := s.history[m]
+	if len(ring) > 0 && ring[len(ring)-1] == val {
+		return
+	}
+	ring = append(ring, val)
+	if len(ring) > 64 {
+		ring = ring[len(ring)-64:]
+	}
+	s.history[m] = ring
+	s.histIdx = -1
+}
+
+// StepHistory cycles the active Minibuffer input backward (delta < 0, M-p) or
+// forward (delta > 0, M-n) through the per-mode Emacs history ring.
+func (s *State) StepHistory(delta int) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ring := s.history[s.mode]
+	if len(ring) == 0 {
+		return "", false
+	}
+	if delta < 0 {
+		if s.histIdx < 0 {
+			s.histIdx = len(ring) - 1
+		} else if s.histIdx > 0 {
+			s.histIdx--
+		}
+		s.input = ring[s.histIdx]
+		s.selected = 0
+		return s.input, true
+	}
+	if s.histIdx < 0 {
+		return "", false
+	}
+	if s.histIdx < len(ring)-1 {
+		s.histIdx++
+		s.input = ring[s.histIdx]
+		s.selected = 0
+		return s.input, true
+	}
+	s.histIdx = -1
+	s.input = ""
+	s.selected = 0
+	return "", true
 }
 
 // MarkHelmPending records that a new Helm query generation was dispatched so

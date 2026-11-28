@@ -44,7 +44,9 @@ var schemePrefixMeta = map[string]struct {
 	"SPC t":   {id: "themes", label: "+themes", title: "+themes & toggles"},
 	"SPC m":   {id: "session", label: "+marlin", title: "+marlin session"},
 	"SPC q":   {id: "quit", label: "+quit", title: "+quit / session"},
-	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · Magit · tabs · zen)"},
+	"C-x":     {id: "emacs-ctl-x", label: "C-x", title: "Emacs C-x (windows · buffers · registers · Magit · tabs · zen)"},
+	"C-x 4":   {id: "emacs-ctl-x-4", label: "+other-window", title: "Emacs C-x 4 (other-window prefix)"},
+	"C-x r":   {id: "emacs-ctl-x-r", label: "+registers", title: "Emacs C-x r (window registers)"},
 	"C-x t":   {id: "emacs-ctl-x-t", label: "+tab-bar", title: "Emacs C-x t (+workspaces / tab-bar)"},
 	"C-x w":   {id: "emacs-ctl-x-w", label: "+window-state", title: "Emacs 30 C-x w (window-state)"},
 	"C-c":     {id: "emacs-ctl-c", label: "C-c", title: "Emacs C-c (winner-mode · Magit AI audit · toggles)"},
@@ -67,6 +69,16 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 		return "cmd:mx", "Execute command (M-x)", false
 	case "switch-buffer":
 		return "cmd:switch-buffer", "Switch buffer (Vertico)", false
+	case "switch-to-buffer-other-window":
+		return "cmd:switch-buffer-other-window", "Switch buffer in other window (C-x 4 b)", false
+	case "kill-buffer-and-window":
+		return "cmd:kill-buffer-and-window", "Kill buffer and close window (C-x 4 0)", false
+	case "window-configuration-to-register":
+		return "cmd:register-save", "Save window layout to register (C-x r w)", false
+	case "jump-to-register":
+		return "cmd:register-jump", "Jump to saved register layout (C-x r j)", false
+	case "list-registers":
+		return "cmd:register-list", "List saved window registers (C-x r l)", false
 	case "helm":
 		return "cmd:helm", "Helm live search", false
 	case "help":

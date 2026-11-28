@@ -85,6 +85,11 @@ func renderIbuffer(c *ui.Context, th theme.Theme, bc *Context) {
 		}, th)
 		ui.Scroll(c.Key("ibuffer-scroll")).Grow(1).Padding(6, 12).Children(func() {
 			ui.Column(c).Gap(8).AlignItems(ui.Stretch).Children(func() {
+				rowIdx := 0
+				cursorIdx := -1
+				if bc != nil {
+					cursorIdx = bc.TableCursor
+				}
 				for _, grp := range allGroupNames {
 					if activeFilter != "" && activeFilter != grp {
 						continue
@@ -96,6 +101,8 @@ func renderIbuffer(c *ui.Context, th theme.Theme, bc *Context) {
 					})
 					for _, item := range items {
 						it := item
+						atCursor := rowIdx == cursorIdx
+						rowIdx++
 						modeLbl := it.MajorMode
 						if it.InnerMode != "" {
 							modeLbl += "[" + it.InnerMode + "]"
@@ -125,11 +132,11 @@ func renderIbuffer(c *ui.Context, th theme.Theme, bc *Context) {
 							}
 							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 								if theme.TabulatedRow(c, "ibuf-btn-"+string(it.BufferID), []theme.TableColumn{
-									{Label: string(it.BufferID), Width: 230, Color: th.Info, Bold: it.Active, Mono: true},
+									{Label: string(it.BufferID), Width: 230, Color: th.Info, Bold: it.Active || atCursor, Mono: true},
 									{Label: modeLbl, Width: 200, Color: th.Accent, Mono: true},
 									{Label: wsLbl, Width: 150, Color: th.InkMuted, Mono: true},
 									{Label: flags, Color: th.InkMuted, Mono: true},
-								}, it.Active || it.Marked, th).Clicked() && bc != nil && bc.OnSelectBuffer != nil {
+								}, it.Active || it.Marked || atCursor, th).Clicked() && bc != nil && bc.OnSelectBuffer != nil {
 									bc.OnSelectBuffer(it.BufferID)
 								}
 							})

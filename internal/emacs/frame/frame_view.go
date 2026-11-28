@@ -501,14 +501,17 @@ func (f *Frame) View(c *ui.Context) {
 				RustConnected:     f.Link != nil && f.Link.Mode != hostlink.ModeStandalone,
 				GateTitle:         gateTitle,
 				GatePrompt:        gatePrompt,
-				CommandCandidates:   f.commandCandidates,
-				BufferCandidates:    f.bufferCandidates,
-				ThemeCandidates:     f.themeCandidates,
-				DescribeFuncCands:   f.describeFunctionCandidates,
-				OnSubmitPrompt:      f.submitPrompt,
-				OnCreateWorkspace:   f.CreateWorkspaceFromSpec,
-				OnDescribeKey:       f.DescribeKey,
-				MagitPromptLabel:    f.currentMagitPromptLabel(),
+				CommandCandidates:       f.commandCandidates,
+				BufferCandidates:        f.bufferCandidates,
+				BufferOtherWinCands:     f.bufferOtherWindowCandidates,
+				ThemeCandidates:         f.themeCandidates,
+				DescribeFuncCands:       f.describeFunctionCandidates,
+				RegisterJumpCands:       f.registerJumpCandidates,
+				OnSubmitPrompt:          f.submitPrompt,
+				OnCreateWorkspace:       f.CreateWorkspaceFromSpec,
+				OnDescribeKey:           f.DescribeKey,
+				OnSaveRegister:          func(name string) { f.SaveWindowRegister(name) },
+				MagitPromptLabel:        f.currentMagitPromptLabel(),
 				OnSubmitMagitPrompt: f.submitMagitPrompt,
 				OnHelmPreview:       f.OpenFilePreview,
 				OnHelmCite:        f.CiteInComposer,
@@ -639,6 +642,11 @@ func (f *Frame) dispatchKeys(c *ui.Context, scope ui.Element) {
 				return
 			}
 			f.miniState.StepSelection(delta)
+		},
+		OnStepHistory: func(delta int) {
+			if _, ok := f.miniState.StepHistory(delta); ok {
+				f.requestFrame()
+			}
 		},
 		OnStepCursor: func(delta int) {
 			f.mu.Lock()
