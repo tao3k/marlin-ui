@@ -50,6 +50,10 @@ type RenderProps struct {
 	OnProjectGrepQuery      func(query string)
 	ProjectSwitchCands      func(query string) []Candidate
 	ConsultLineCands        func(query string) []Candidate
+	ConsultImenuCands       func(query string) []Candidate
+	OnConsultImenuQuery     func(query string)
+	BookmarkJumpCands       func(query string) []Candidate
+	OnSetBookmark           func(name string)
 	OnFindFileUp            func()
 	OnFindFileJump          func(path string)
 	OnSubmitPrompt          func(prompt string)
@@ -160,6 +164,16 @@ func Render(c *ui.Context, p RenderProps) {
 				items = p.ConsultLineCands(val)
 			}
 			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeConsultImenu:
+			if p.ConsultImenuCands != nil {
+				items = p.ConsultImenuCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
+		case ModeBookmarkJump:
+			if p.BookmarkJumpCands != nil {
+				items = p.BookmarkJumpCands(val)
+			}
+			renderVertico(c, s, th, val, items, p.Glass)
 		}
 
 		// 3. Echo Area when SPC Keypad/Hydra is active.
@@ -263,6 +277,15 @@ func Render(c *ui.Context, p RenderProps) {
 		case ModeConsultLine:
 			prompt = fmt.Sprintf("%d/%d Line (SPC l): ", clampSel(sel, len(items)), len(items))
 			placeholder = "Orderless search lines in active buffer (RET jumps to line)"
+		case ModeConsultImenu:
+			prompt = fmt.Sprintf("%d/%d Imenu (SPC i): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Live Rust ASP AST symbols (fn, struct, def, heading — RET jumps)"
+		case ModeBookmarkSet:
+			prompt = "Set bookmark (C-x r m): "
+			placeholder = "Bookmark name e.g. magit-entry (Enter to save current file:line)"
+		case ModeBookmarkJump:
+			prompt = fmt.Sprintf("%d/%d Bookmark (C-x r b): ", clampSel(sel, len(items)), len(items))
+			placeholder = "Orderless filter saved Emacs bookmarks"
 		case ModeHelm:
 			prompt = "Helm ›"
 			placeholder = "Search workspace, @lang:rust, @sym:name, #local, !exclude, (dsl ...)"
@@ -317,7 +340,7 @@ func Render(c *ui.Context, p RenderProps) {
 			switch mode {
 			case ModeHelm:
 				promptEl.Width(64)
-			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump, ModeEmbark, ModeFindFile, ModeProjectFindFile, ModeRecentFiles, ModeProjectGrep, ModeProjectSwitch, ModeConsultLine:
+			case ModeCommand, ModeBufferSwitch, ModeBufferOtherWindow, ModeThemeSwitch, ModeDescribeFunc, ModeRegisterJump, ModeEmbark, ModeFindFile, ModeProjectFindFile, ModeRecentFiles, ModeProjectGrep, ModeProjectSwitch, ModeConsultLine, ModeConsultImenu, ModeBookmarkJump:
 				promptEl.MinWidth(96)
 			}
 
@@ -345,6 +368,9 @@ func Render(c *ui.Context, p RenderProps) {
 				}
 				if mode == ModeProjectGrep && p.OnProjectGrepQuery != nil {
 					p.OnProjectGrepQuery(val)
+				}
+				if mode == ModeConsultImenu && p.OnConsultImenuQuery != nil {
+					p.OnConsultImenuQuery(val)
 				}
 			}
 			if mode == ModeFindFile {
@@ -426,6 +452,11 @@ func submit(s *State, mode Mode, raw string, items []Candidate, p RenderProps) {
 		s.Close()
 		if trimmed != "" && p.OnRenameBuffer != nil {
 			p.OnRenameBuffer(trimmed)
+		}
+	case ModeBookmarkSet:
+		s.Close()
+		if trimmed != "" && p.OnSetBookmark != nil {
+			p.OnSetBookmark(trimmed)
 		}
 	default:
 		s.mu.Lock()

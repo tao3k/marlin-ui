@@ -370,6 +370,9 @@ func (f *Frame) Close() {
 	if f.projectsLane != nil {
 		f.projectsLane.Close()
 	}
+	if f.imenuLane != nil {
+		f.imenuLane.Close()
+	}
 	f.closePackageStore()
 }
 

@@ -790,6 +790,12 @@ func (f *Frame) dispatchModeAction(act string) bool {
 		f.OpenProjectGrep()
 	case "cmd:consult-line":
 		f.OpenConsultLine()
+	case "cmd:consult-imenu":
+		f.OpenConsultImenu()
+	case "cmd:bookmark-set":
+		f.OpenBookmarkSet()
+	case "cmd:bookmark-jump":
+		f.OpenBookmarkJump()
 	case "cmd:recentf":
 		f.OpenRecentFiles()
 	case "cmd:describe-key":

@@ -206,6 +206,11 @@ type Frame struct {
 	knownProjects     []hostlink.ProjectInfo
 	projectsLoading   bool
 	projectsLane      *async.FencedLane[string, projectsResult]
+	imenuHits         []hostlink.SymbolHit
+	imenuLoading      bool
+	imenuErr          string
+	imenuLane         *async.FencedLane[imenuReq, imenuResult]
+	bookmarks         []EmacsBookmark
 
 	onReloadThemeBundle func() appconfig.UIThemeBundle
 	onGlassChanged      func(enabled bool)

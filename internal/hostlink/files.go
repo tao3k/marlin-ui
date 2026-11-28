@@ -68,6 +68,16 @@ type ProjectInfo struct {
 	VCS  string
 }
 
+// SymbolHit describes one live ASP AST symbol (`consult-imenu`) projected by Rust.
+type SymbolHit struct {
+	Symbol   string
+	Kind     string
+	RelPath  string
+	Path     string
+	Line     int
+	Language string
+}
+
 var ignoredProjectDirs = map[string]bool{
 	".git":         true,
 	".jj":          true,
@@ -330,6 +340,69 @@ func decodeProjectInfoRecords(records []*projectionv1.GraphRecordView) ([]Projec
 		})
 	}
 	return out, len(out) > 0
+}
+
+// SearchProjectSymbols queries ASP's resident AST Symbol Index over HTTP/2 gRPC
+// (`fs:imenu[@root][?q=<sym>]`) for instant Doom Emacs `consult-imenu`.
+func (l *Link) SearchProjectSymbols(ctx context.Context, root, docPath, query string) ([]SymbolHit, error) {
+	if l != nil && l.Switcher != nil {
+		if target := l.Switcher.CurrentTarget(); target != nil && target.Projection() != nil {
+			q := "fs:imenu"
+			if r := strings.TrimSpace(root); r != "" {
+				q += "@" + r
+			}
+			var qParts []string
+			if d := strings.TrimSpace(docPath); d != "" {
+				qParts = append(qParts, "@doc:"+d)
+			}
+			if pat := strings.TrimSpace(query); pat != "" {
+				qParts = append(qParts, pat)
+			}
+			if len(qParts) > 0 {
+				q += "?q=" + strings.Join(qParts, " ")
+			}
+			qctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			resp, err := target.Projection().QueryProjectGraph(qctx, &projectionv1.QueryProjectGraphRequest{
+				ProjectId:        "default",
+				Query:            q,
+				SecretVisibility: projectionv1.SecretVisibility_SECRET_VISIBILITY_UNSPECIFIED,
+			})
+			cancel()
+			if err == nil {
+				if syms, ok := decodeSymbolHitRecords(resp.GetRecords()); ok {
+					return syms, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("connect Marlin Authority Host (Rust ASP) for live consult-imenu")
+}
+
+func decodeSymbolHitRecords(records []*projectionv1.GraphRecordView) ([]SymbolHit, bool) {
+	foundMeta := false
+	out := make([]SymbolHit, 0, len(records))
+	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
+		switch rec.GetKind() {
+		case "fs.imenu_meta":
+			foundMeta = true
+		case "fs.symbol_hit":
+			foundMeta = true
+			f := rec.GetFacets()
+			ln, _ := strconv.Atoi(f["line"])
+			out = append(out, SymbolHit{
+				Symbol:   f["symbol"],
+				Kind:     f["sym_kind"],
+				RelPath:  f["rel_path"],
+				Path:     f["path"],
+				Line:     ln,
+				Language: f["language"],
+			})
+		}
+	}
+	return out, foundMeta
 }
 
 func decodeDirListingRecords(records []*projectionv1.GraphRecordView) (DirListing, bool) {

@@ -533,4 +533,11 @@ func TestVerticoFindFileProjectFindFileRecentfAndHonestLiveMagit(t *testing.T) {
 	if got := f.activeWorkspaceProjectRoot(); got != altRepo {
 		t.Fatalf("expected SwitchActiveProjectRoot -> %q, got %q", altRepo, got)
 	}
+
+	// 8. Emacs bookmarks (C-x r m / C-x r b) save and jump to file:line anchors.
+	f.SaveBookmark("hello-fn")
+	bmCands := f.bookmarkJumpCandidates("hello")
+	if len(bmCands) == 0 || bmCands[0].Name != "hello-fn" || bmCands[0].Annotation != "bookmark · L3" {
+		t.Fatalf("expected saved bookmark hello-fn at L3, got %+v", bmCands)
+	}
 }

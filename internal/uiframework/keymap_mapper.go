@@ -78,9 +78,15 @@ func ResolveSchemeAction(commandName string) (action string, defaultLabel string
 	case "project-switch-project":
 		return "cmd:project-switch", "Switch active Git/jj project (C-c p p / SPC p p)", false
 	case "consult-ripgrep":
-		return "cmd:consult-ripgrep", "Live project grep (SPC / · C-c /)", false
+		return "cmd:consult-ripgrep", "Live project grep (ASP Trigram + Tantivy BM25)", false
 	case "consult-line":
 		return "cmd:consult-line", "Search lines in active buffer (SPC l · C-c l)", false
+	case "consult-imenu":
+		return "cmd:consult-imenu", "Jump to symbol via ASP AST Imenu (SPC i · C-c i)", false
+	case "bookmark-set":
+		return "cmd:bookmark-set", "Set Emacs bookmark at current location (C-x r m)", false
+	case "bookmark-jump":
+		return "cmd:bookmark-jump", "Jump to Emacs bookmark (C-x r b · SPC RET)", false
 	case "recentf-open-files":
 		return "cmd:recentf", "Open recent file (C-x C-r / SPC f r)", false
 	case "switch-buffer":

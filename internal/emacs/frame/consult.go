@@ -32,6 +32,26 @@ type projectsResult struct {
 	errMsg   string
 }
 
+type imenuReq struct {
+	root    string
+	docPath string
+	query   string
+}
+
+type imenuResult struct {
+	query  string
+	hits   []hostlink.SymbolHit
+	errMsg string
+}
+
+// EmacsBookmark records a saved file:line anchor (`C-x r m` / `C-x r b`).
+type EmacsBookmark struct {
+	Name    string
+	Path    string
+	RelPath string
+	Line    int
+}
+
 func (f *Frame) initConsultLanes() {
 	f.grepLane = async.NewFencedLane[grepReq, grepResult](
 		func(ctx context.Context, req grepReq) (grepResult, error) {
@@ -73,10 +93,30 @@ func (f *Frame) initConsultLanes() {
 			f.requestFrame()
 		},
 	)
+	f.imenuLane = async.NewFencedLane[imenuReq, imenuResult](
+		func(ctx context.Context, req imenuReq) (imenuResult, error) {
+			syms, err := f.Link.SearchProjectSymbols(ctx, req.root, req.docPath, req.query)
+			if err != nil {
+				return imenuResult{query: req.query, errMsg: err.Error()}, nil
+			}
+			return imenuResult{query: req.query, hits: syms}, nil
+		},
+		func(_ uint64, res imenuResult) {
+			f.mu.Lock()
+			f.imenuLoading = false
+			f.imenuErr = res.errMsg
+			if res.errMsg == "" {
+				f.imenuHits = res.hits
+			}
+			f.publishSnapshotLocked()
+			f.mu.Unlock()
+			f.requestFrame()
+		},
+	)
 }
 
 // OpenProjectGrep opens Doom Emacs `consult-ripgrep` (`SPC /` / `C-c /`),
-// executing live ripgrep queries natively on the Rust host over HTTP/2 gRPC.
+// executing live queries against ASP's resident Trigram + Tantivy BM25 engine.
 func (f *Frame) OpenProjectGrep() {
 	f.mu.Lock()
 	f.grepLoading = false
@@ -87,7 +127,7 @@ func (f *Frame) OpenProjectGrep() {
 	f.OpenMinibuffer(minibuffer.ModeProjectGrep)
 }
 
-// SetProjectGrepQuery submits an incremental live ripgrep query to the Rust host.
+// SetProjectGrepQuery submits an incremental live query to the Rust ASP+Tantivy host.
 func (f *Frame) SetProjectGrepQuery(query string) {
 	trimmed := strings.TrimSpace(query)
 	if len(trimmed) < 2 {
@@ -125,7 +165,7 @@ func (f *Frame) projectGrepCandidates(query string) []minibuffer.Candidate {
 	if len(trimmed) < 2 {
 		return []minibuffer.Candidate{{
 			ID:   "grep-hint",
-			Name: "Type at least 2 characters to ripgrep project...",
+			Name: "Type at least 2 characters (ASP Trigram + Tantivy BM25)...",
 			Desc: f.activeWorkspaceProjectRoot(),
 		}}
 	}
@@ -145,7 +185,7 @@ func (f *Frame) projectGrepCandidates(query string) []minibuffer.Candidate {
 	if loading && len(hits) == 0 {
 		return []minibuffer.Candidate{{
 			ID:   "grep-loading",
-			Name: "Searching project via Rust rg...",
+			Name: "Searching project via ASP Trigram + Tantivy...",
 			Desc: trimmed,
 		}}
 	}
@@ -182,7 +222,7 @@ func (f *Frame) OpenProjectSwitch() {
 }
 
 // SwitchActiveProjectRoot rebinds the active workspace to targetRoot, immediately
-// updating find-file, project-find-file, consult-ripgrep, and live *magit*.
+// updating find-file, project-find-file, consult-ripgrep, consult-imenu, and live *magit*.
 func (f *Frame) SwitchActiveProjectRoot(targetRoot string) {
 	clean := strings.TrimSpace(targetRoot)
 	if clean == "" {
@@ -199,6 +239,7 @@ func (f *Frame) SwitchActiveProjectRoot(targetRoot string) {
 	f.projFilesEntries = nil
 	f.projFileCandCache = nil
 	f.grepHits = nil
+	f.imenuHits = nil
 	f.publishSnapshotLocked()
 	f.mu.Unlock()
 	f.RefreshMagitAsync()
@@ -298,6 +339,147 @@ func (f *Frame) consultLineCandidates(query string) []minibuffer.Candidate {
 				f.SelectBuffer(buffer.Preview)
 				f.Echo(fmt.Sprintf("Jumped to %s:%d", fp.Path, ln))
 			},
+		})
+	}
+	return minibuffer.FilterCandidates(all, query)
+}
+
+// OpenConsultImenu opens Doom Emacs `consult-imenu` (`SPC i` / `C-c i`) backed
+// by ASP's resident AST Symbol Index over HTTP/2 gRPC (`fs:imenu`).
+func (f *Frame) OpenConsultImenu() {
+	root := f.activeWorkspaceProjectRoot()
+	docPath := ""
+	f.mu.Lock()
+	if f.activeBuffer == buffer.Preview && f.filePreview != nil {
+		docPath = f.filePreview.Path
+	}
+	f.imenuLoading = true
+	f.imenuErr = ""
+	f.imenuHits = nil
+	f.mu.Unlock()
+	if f.imenuLane != nil {
+		f.imenuLane.Submit(imenuReq{root: root, docPath: docPath, query: ""})
+	}
+	f.OpenMinibuffer(minibuffer.ModeConsultImenu)
+}
+
+// SetConsultImenuQuery queries ASP's AST Symbol Index incrementally as the user types.
+func (f *Frame) SetConsultImenuQuery(query string) {
+	root := f.activeWorkspaceProjectRoot()
+	docPath := ""
+	trimmed := strings.TrimSpace(query)
+	f.mu.Lock()
+	if trimmed == "" && f.activeBuffer == buffer.Preview && f.filePreview != nil {
+		docPath = f.filePreview.Path
+	}
+	f.imenuLoading = true
+	f.imenuErr = ""
+	f.mu.Unlock()
+	if f.imenuLane != nil {
+		f.imenuLane.Submit(imenuReq{root: root, docPath: docPath, query: trimmed})
+	}
+}
+
+func (f *Frame) consultImenuCandidates(query string) []minibuffer.Candidate {
+	f.mu.Lock()
+	hits := append([]hostlink.SymbolHit(nil), f.imenuHits...)
+	loading := f.imenuLoading
+	errMsg := f.imenuErr
+	f.mu.Unlock()
+
+	if errMsg != "" && len(hits) == 0 {
+		return []minibuffer.Candidate{{
+			ID:   "imenu-err",
+			Name: "consult-imenu unavailable",
+			Desc: errMsg,
+		}}
+	}
+	if loading && len(hits) == 0 {
+		return []minibuffer.Candidate{{
+			ID:   "imenu-loading",
+			Name: "Querying ASP AST Symbol Index...",
+			Desc: query,
+		}}
+	}
+	all := make([]minibuffer.Candidate, 0, len(hits))
+	for i, s := range hits {
+		sym := s
+		all = append(all, minibuffer.Candidate{
+			ID:         fmt.Sprintf("imenu-%d-%s:%d", i, sym.RelPath, sym.Line),
+			Name:       sym.Symbol,
+			Desc:       fmt.Sprintf("%s:%d", sym.RelPath, sym.Line),
+			Annotation: fmt.Sprintf("%s · L%d", sym.Kind, sym.Line),
+			Run:        func() { f.OpenDiskFileAtLine(sym.Path, sym.Line) },
+		})
+	}
+	return minibuffer.FilterCandidates(all, query)
+}
+
+// OpenBookmarkSet opens `bookmark-set` (`C-x r m` / `SPC b M`) to bookmark the
+// active file:line location.
+func (f *Frame) OpenBookmarkSet() {
+	f.OpenMinibuffer(minibuffer.ModeBookmarkSet)
+}
+
+// SaveBookmark records or overwrites an Emacs bookmark at the active file:line.
+func (f *Frame) SaveBookmark(name string) {
+	clean := strings.TrimSpace(name)
+	if clean == "" {
+		return
+	}
+	f.mu.Lock()
+	path := f.activeWorkspaceProjectRoot()
+	rel := path
+	line := 1
+	if f.filePreview != nil && strings.TrimSpace(f.filePreview.Path) != "" {
+		rel = f.filePreview.Path
+		path = f.filePreview.Path
+		if !strings.HasPrefix(path, "/") {
+			path = strings.TrimRight(f.activeWorkspaceProjectRoot(), "/") + "/" + path
+		}
+		if f.filePreview.Line > 0 {
+			line = f.filePreview.Line
+		}
+	}
+	next := make([]EmacsBookmark, 0, len(f.bookmarks)+1)
+	next = append(next, EmacsBookmark{Name: clean, Path: path, RelPath: rel, Line: line})
+	for _, old := range f.bookmarks {
+		if old.Name != clean {
+			next = append(next, old)
+		}
+	}
+	f.bookmarks = next
+	f.publishSnapshotLocked()
+	f.mu.Unlock()
+	f.Echo(fmt.Sprintf("Bookmark '%s' saved -> %s:%d", clean, rel, line))
+}
+
+// OpenBookmarkJump opens `bookmark-jump` (`C-x r b` / `SPC b m` / `SPC RET`).
+func (f *Frame) OpenBookmarkJump() {
+	f.OpenMinibuffer(minibuffer.ModeBookmarkJump)
+}
+
+func (f *Frame) bookmarkJumpCandidates(query string) []minibuffer.Candidate {
+	f.mu.Lock()
+	bms := append([]EmacsBookmark(nil), f.bookmarks...)
+	f.mu.Unlock()
+	if len(bms) == 0 {
+		return []minibuffer.Candidate{{
+			ID:   "bm-empty",
+			Name: "No bookmarks yet — press C-x r m / SPC b M to set one",
+			Desc: "Emacs bookmark ring is empty",
+			Run:  f.OpenBookmarkSet,
+		}}
+	}
+	all := make([]minibuffer.Candidate, 0, len(bms))
+	for _, b := range bms {
+		bm := b
+		all = append(all, minibuffer.Candidate{
+			ID:         "bm-" + bm.Name,
+			Name:       bm.Name,
+			Desc:       fmt.Sprintf("%s:%d", bm.RelPath, bm.Line),
+			Annotation: fmt.Sprintf("bookmark · L%d", bm.Line),
+			Run:        func() { f.OpenDiskFileAtLine(bm.Path, bm.Line) },
 		})
 	}
 	return minibuffer.FilterCandidates(all, query)

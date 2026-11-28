@@ -58,6 +58,16 @@ type ProjectInfo struct {
 	VCS  string
 }
 
+// SymbolHit describes one live ASP AST symbol (`consult-imenu`) projected by Rust.
+type SymbolHit struct {
+	Symbol   string
+	Kind     string
+	RelPath  string
+	Path     string
+	Line     int
+	Language string
+}
+
 // DefaultWorkspaceRoot returns the browser WASM default virtual root.
 func DefaultWorkspaceRoot() string { return "/" }
 
@@ -79,4 +89,8 @@ func (l *Link) SearchProjectGrep(_ context.Context, _, _ string) ([]GrepHit, err
 
 func (l *Link) ListKnownProjects(_ context.Context, _ string) ([]ProjectInfo, error) {
 	return nil, fmt.Errorf("connect a remote Marlin host to list projects in WebAssembly")
+}
+
+func (l *Link) SearchProjectSymbols(_ context.Context, _, _, _ string) ([]SymbolHit, error) {
+	return nil, fmt.Errorf("connect a remote Marlin host for consult-imenu in WebAssembly")
 }

@@ -45,6 +45,9 @@ const (
 	ModeProjectGrep
 	ModeProjectSwitch
 	ModeConsultLine
+	ModeConsultImenu
+	ModeBookmarkSet
+	ModeBookmarkJump
 )
 
 // Candidate represents one Vertico / Marginalia completion candidate.
